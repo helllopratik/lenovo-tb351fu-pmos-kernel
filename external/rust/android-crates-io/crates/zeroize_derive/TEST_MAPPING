@@ -1,0 +1,21 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/zeroize"
+    },
+    {
+      "path": "external/uwb/src"
+    },
+    {
+      "path": "system/keymint/derive"
+    },
+    {
+      "path": "system/keymint/hal"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "zeroize_derive_test_src_lib"
+    }
+  ]
+}

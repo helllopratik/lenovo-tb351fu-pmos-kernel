@@ -1,0 +1,17 @@
+name: "arc-swap"
+description: "Atomically swappable Arc"
+third_party {
+  version: "1.7.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/arc-swap"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/arc-swap/arc-swap-1.7.1.crate"
+    version: "1.7.1"
+  }
+}

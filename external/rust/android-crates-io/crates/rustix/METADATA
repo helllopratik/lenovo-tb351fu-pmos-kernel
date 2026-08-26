@@ -1,0 +1,17 @@
+name: "rustix"
+description: "Safe Rust bindings to POSIX/Unix/Linux/Winsock-like syscalls"
+third_party {
+  version: "0.38.31"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 3
+    day: 13
+  }
+  homepage: "https://crates.io/crates/rustix"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/rustix/rustix-0.38.31.crate"
+    version: "0.38.31"
+  }
+}

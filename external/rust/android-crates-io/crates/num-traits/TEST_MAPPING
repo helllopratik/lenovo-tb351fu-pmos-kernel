@@ -1,0 +1,65 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/gdbstub_arch"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/num-bigint"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/num-integer"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "external/uwb/src"
+    },
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/avmd"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/apkverify"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "num-traits_test_src_lib"
+    },
+    {
+      "name": "num-traits_test_tests_cast"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "num-traits_test_src_lib"
+    },
+    {
+      "name": "num-traits_test_tests_cast"
+    }
+  ]
+}

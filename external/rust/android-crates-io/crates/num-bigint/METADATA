@@ -1,0 +1,17 @@
+name: "num-bigint"
+description: "Big integer implementation for Rust"
+third_party {
+  version: "0.4.6"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 22
+  }
+  homepage: "https://crates.io/crates/num-bigint"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/num-bigint/num-bigint-0.4.6.crate"
+    version: "0.4.6"
+  }
+}

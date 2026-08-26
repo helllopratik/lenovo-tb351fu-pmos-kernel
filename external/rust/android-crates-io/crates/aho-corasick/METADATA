@@ -1,0 +1,17 @@
+name: "aho-corasick"
+description: "Fast multiple substring searching."
+third_party {
+  version: "0.7.20"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2022
+    month: 12
+    day: 5
+  }
+  homepage: "https://crates.io/crates/aho-corasick"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/aho-corasick/aho-corasick-0.7.20.crate"
+    version: "0.7.20"
+  }
+}

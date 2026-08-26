@@ -1,0 +1,17 @@
+name: "cargo_toml"
+description: "`Cargo.toml` struct definitions for parsing with Serde"
+third_party {
+  version: "0.22.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 29
+  }
+  homepage: "https://crates.io/crates/cargo_toml"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/cargo_toml/cargo_toml-0.22.1.crate"
+    version: "0.22.1"
+  }
+}

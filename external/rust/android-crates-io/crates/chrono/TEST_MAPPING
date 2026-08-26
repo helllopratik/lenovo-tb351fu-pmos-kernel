@@ -1,0 +1,27 @@
+{
+  "imports": [
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "chrono_test_src_lib"
+    },
+    {
+      "name": "chrono_test_tests_dateutils"
+    },
+    {
+      "name": "chrono_test_tests_wasm"
+    },
+    {
+      "name": "chrono_test_tests_win_bindings"
+    }
+  ]
+}

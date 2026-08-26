@@ -1,0 +1,13 @@
+{
+  "postsubmit": [
+    {
+      "name": "dasp_sample_test_src_lib"
+    },
+    {
+      "name": "dasp_sample_test_tests_conv"
+    },
+    {
+      "name": "dasp_sample_test_tests_types"
+    }
+  ]
+}

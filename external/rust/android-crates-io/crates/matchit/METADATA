@@ -1,0 +1,17 @@
+name: "matchit"
+description: "A high performance, zero-copy URL router."
+third_party {
+  version: "0.7.3"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 6
+    day: 3
+  }
+  homepage: "https://crates.io/crates/matchit"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/matchit/matchit-0.7.3.crate"
+    version: "0.7.3"
+  }
+}

@@ -1,0 +1,17 @@
+name: "h2"
+description: "An HTTP/2 client and server"
+third_party {
+  version: "0.4.4"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 6
+    day: 3
+  }
+  homepage: "https://crates.io/crates/h2"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/h2/h2-0.4.4.crate"
+    version: "0.4.4"
+  }
+}

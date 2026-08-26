@@ -1,0 +1,17 @@
+name: "crossbeam-epoch"
+description: "Epoch-based garbage collection"
+third_party {
+  version: "0.9.18"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 1
+  }
+  homepage: "https://crates.io/crates/crossbeam-epoch"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/crossbeam-epoch/crossbeam-epoch-0.9.18.crate"
+    version: "0.9.18"
+  }
+}

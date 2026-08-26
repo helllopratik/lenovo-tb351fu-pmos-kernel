@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "ident_case_test_src_lib"
+    }
+  ]
+}

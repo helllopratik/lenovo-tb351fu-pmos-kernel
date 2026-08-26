@@ -1,0 +1,37 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/avmd"
+    },
+    {
+      "path": "packages/modules/Virtualization/encryptedstore"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/vm"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    },
+    {
+      "path": "system/security/diced"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ]
+}

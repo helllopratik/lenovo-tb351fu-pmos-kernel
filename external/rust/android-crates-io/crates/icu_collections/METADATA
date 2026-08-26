@@ -1,0 +1,17 @@
+name: "icu_collections"
+description: "Collection of API for use in ICU libraries."
+third_party {
+  version: "2.0.0-beta2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 26
+  }
+  homepage: "https://crates.io/crates/icu_collections"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/icu_collections/icu_collections-2.0.0-beta2.crate"
+    version: "2.0.0-beta2"
+  }
+}

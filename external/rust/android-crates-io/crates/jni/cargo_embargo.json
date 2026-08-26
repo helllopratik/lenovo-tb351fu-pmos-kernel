@@ -1,0 +1,14 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.uwb",
+    "com.android.virt"
+  ],
+  "min_sdk_version": "29",
+  "tests": true,
+  "package": {
+    "jni": {
+      "patch": "patches/Android.bp.diff"
+    }
+  }
+}

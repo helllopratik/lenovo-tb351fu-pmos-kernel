@@ -1,0 +1,17 @@
+name: "predicates-tree"
+description: "Render boolean-valued predicate functions results as a tree."
+third_party {
+  version: "1.0.11"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 14
+  }
+  homepage: "https://crates.io/crates/predicates-tree"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/predicates-tree/predicates-tree-1.0.11.crate"
+    version: "1.0.11"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "shlex_test_src_lib"
+    }
+  ]
+}

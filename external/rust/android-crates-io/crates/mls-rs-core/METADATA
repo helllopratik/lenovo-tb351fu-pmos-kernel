@@ -1,0 +1,17 @@
+name: "mls-rs-core"
+description: "Core components and traits for mls-rs"
+third_party {
+  version: "0.18.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 6
+  }
+  homepage: "https://crates.io/crates/mls-rs-core"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/mls-rs-core/mls-rs-core-0.18.1.crate"
+    version: "0.18.1"
+  }
+}

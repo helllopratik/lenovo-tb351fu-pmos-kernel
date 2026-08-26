@@ -1,0 +1,17 @@
+name: "libfuzzer-sys"
+description: "A wrapper around LLVM\'s libFuzzer runtime."
+third_party {
+  version: "0.4.8"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/libfuzzer-sys"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/libfuzzer-sys/libfuzzer-sys-0.4.8.crate"
+    version: "0.4.8"
+  }
+}

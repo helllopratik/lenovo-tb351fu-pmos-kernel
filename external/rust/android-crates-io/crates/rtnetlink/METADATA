@@ -1,0 +1,17 @@
+name: "rtnetlink"
+description: "manipulate linux networking resources via netlink"
+third_party {
+  version: "0.16.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 15
+  }
+  homepage: "https://crates.io/crates/rtnetlink"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/rtnetlink/rtnetlink-0.16.0.crate"
+    version: "0.16.0"
+  }
+}

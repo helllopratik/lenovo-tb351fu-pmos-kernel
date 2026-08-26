@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "debug_tree_test_src_lib"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+name: "spidev"
+description: "Provides access to the Linux spidev interface.  This interface allows for configuration of the spidev device, half-duplex SPI access, and full-duplex SPI access."
+third_party {
+  version: "0.7.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 14
+  }
+  homepage: "https://crates.io/crates/spidev"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/spidev/spidev-0.7.0.crate"
+    version: "0.7.0"
+  }
+}

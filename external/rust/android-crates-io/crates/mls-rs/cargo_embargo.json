@@ -1,0 +1,19 @@
+{
+  "extra_cfg": [
+    "mls_build_async"
+  ],
+  "features": [
+    "std",
+    "rayon",
+    "state_update",
+    "private_message",
+    "custom_proposal",
+    "out_of_order",
+    "psk",
+    "prior_epoch",
+    "by_ref_proposal",
+    "tree_index",
+    "fast_serialize"
+  ],
+  "min_sdk_version": "29"
+}

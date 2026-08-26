@@ -1,0 +1,19 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/async-stream"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/bitflags"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/crossbeam-epoch"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/crossbeam-utils"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/slab"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "package": {
+    "userfaultfd-sys": {
+      "add_toplevel_block": "cargo2android_consts.bp.fragment",
+      "copy_out": true,
+      "patch": "patches/Android.bp.patch"
+    }
+  },
+  "min_sdk_version": "29"
+}

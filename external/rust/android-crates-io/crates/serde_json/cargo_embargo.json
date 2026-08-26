@@ -1,0 +1,26 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.uprobestats",
+    "com.android.virt"
+  ],
+  "min_sdk_version": "29",
+  "variants": [
+    {},
+    {
+      "features": [
+        "default",
+        "std",
+        "arbitrary_precision"
+      ],
+      "module_name_overrides": {
+      "libserde_json": "libserde_json_arbitrary_precision"
+      },
+      "package": {
+        "serdejson": {
+          "host_supported": true
+        }
+      }
+    }
+  ]
+}

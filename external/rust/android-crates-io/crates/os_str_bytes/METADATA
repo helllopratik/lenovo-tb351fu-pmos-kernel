@@ -1,0 +1,17 @@
+name: "os_str_bytes"
+description: "Convert between byte sequences and platform-native strings"
+third_party {
+  version: "6.6.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/os_str_bytes"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/os_str_bytes/os_str_bytes-6.6.1.crate"
+    version: "6.6.1"
+  }
+}

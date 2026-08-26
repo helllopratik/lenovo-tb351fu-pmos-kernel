@@ -1,0 +1,17 @@
+name: "libz-sys"
+description: "Low-level bindings to the system libz library (also known as zlib)."
+third_party {
+  version: "1.1.22"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 19
+  }
+  homepage: "https://crates.io/crates/libz-sys"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/libz-sys/libz-sys-1.1.22.crate"
+    version: "1.1.22"
+  }
+}

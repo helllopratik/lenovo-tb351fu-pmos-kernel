@@ -1,0 +1,8 @@
+{
+  "min_sdk_version": "29",
+  "package": {
+    "anstyle": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

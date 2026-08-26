@@ -1,0 +1,53 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/crossbeam-deque"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/crossbeam-epoch"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/hashbrown"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/vulkano"
+    },
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/capabilities"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/devicemapper"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "scopeguard_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "scopeguard_test_src_lib"
+    }
+  ]
+}

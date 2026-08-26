@@ -1,0 +1,9 @@
+{
+  "module_name_overrides": {
+    "external_rust_crates_zerocopy-derive_license": "external_rust_crates_zerocopy-derive-0.7.35_license",
+    "libzerocopy_derive": "libzerocopy_derive-0.7.35"
+  },
+  "run_cargo": false,
+  "min_sdk_version": "29",
+  "generate_rulesmk": false
+}

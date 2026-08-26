@@ -1,0 +1,17 @@
+name: "criterion"
+description: "Statistics-driven micro-benchmarking library"
+third_party {
+  version: "0.4.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 2
+    day: 15
+  }
+  homepage: "https://crates.io/crates/criterion"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/criterion/criterion-0.4.0.crate"
+    version: "0.4.0"
+  }
+}

@@ -1,0 +1,32 @@
+// @generated
+
+pub mod android_interface;
+pub mod background;
+pub mod blend;
+pub mod color;
+pub mod component;
+pub mod design_compose_definition;
+pub mod figma_doc;
+pub mod filter;
+pub mod font;
+pub mod frame_extras;
+pub mod geometry;
+pub mod grid;
+pub mod jni_layout;
+pub mod layout_style;
+pub mod matrix_transform;
+pub mod meter_data;
+pub mod node_style;
+pub mod path;
+pub mod pointer;
+pub mod positioning;
+pub mod reaction;
+pub mod shader;
+pub mod shadow;
+pub mod text;
+pub mod text_style;
+pub mod transition;
+pub mod variable;
+pub mod view;
+pub mod view_shape;
+pub mod view_style;

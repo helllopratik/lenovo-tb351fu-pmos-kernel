@@ -1,0 +1,19 @@
+{
+  "features": [
+    "alloc",
+    "std"
+  ],
+  "product_available": false,
+  "run_cargo": false,
+  "tests": true,
+  "vendor_available": false,
+  "package": {
+    "webpki": {
+      "license_text": [
+        "LICENSE",
+        "third-party/chromium/LICENSE"
+      ]
+    }
+  },
+  "min_sdk_version": "29"
+}

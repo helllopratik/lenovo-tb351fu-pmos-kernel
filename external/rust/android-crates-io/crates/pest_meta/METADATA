@@ -1,0 +1,17 @@
+name: "pest_meta"
+description: "pest meta language parser and validator"
+third_party {
+  version: "2.7.15"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 14
+  }
+  homepage: "https://crates.io/crates/pest_meta"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/pest_meta/pest_meta-2.7.15.crate"
+    version: "2.7.15"
+  }
+}

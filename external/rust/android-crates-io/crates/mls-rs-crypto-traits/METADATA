@@ -1,0 +1,17 @@
+name: "mls-rs-crypto-traits"
+description: "Crypto traits required to create a CryptoProvider for mls-rs"
+third_party {
+  version: "0.10.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 4
+    day: 25
+  }
+  homepage: "https://crates.io/crates/mls-rs-crypto-traits"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/mls-rs-crypto-traits/mls-rs-crypto-traits-0.10.0.crate"
+    version: "0.10.0"
+  }
+}

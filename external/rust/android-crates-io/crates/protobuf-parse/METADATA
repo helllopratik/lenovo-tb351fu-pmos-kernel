@@ -1,0 +1,17 @@
+name: "protobuf-parse"
+description: "Parse `.proto` files.  Files are parsed into a `protobuf::descriptor::FileDescriptorSet` object using either: * pure rust parser (no dependencies) * `protoc` binary (more reliable and compatible with Google\'s implementation)"
+third_party {
+  version: "3.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 2
+    day: 27
+  }
+  homepage: "https://crates.io/crates/protobuf-parse"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/protobuf-parse/protobuf-parse-3.2.0.crate"
+    version: "3.2.0"
+  }
+}

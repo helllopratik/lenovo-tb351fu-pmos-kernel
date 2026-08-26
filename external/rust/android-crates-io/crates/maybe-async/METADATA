@@ -1,0 +1,17 @@
+name: "maybe-async"
+description: "A procedure macro to unify SYNC and ASYNC implementation"
+third_party {
+  version: "0.2.10"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 22
+  }
+  homepage: "https://crates.io/crates/maybe-async"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/maybe-async/maybe-async-0.2.10.crate"
+    version: "0.2.10"
+  }
+}

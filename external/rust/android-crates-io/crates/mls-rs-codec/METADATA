@@ -1,0 +1,17 @@
+name: "mls-rs-codec"
+description: "TLS codec and MLS specific encoding used by mls-rs"
+third_party {
+  version: "0.6.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 10
+  }
+  homepage: "https://crates.io/crates/mls-rs-codec"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/mls-rs-codec/mls-rs-codec-0.6.0.crate"
+    version: "0.6.0"
+  }
+}

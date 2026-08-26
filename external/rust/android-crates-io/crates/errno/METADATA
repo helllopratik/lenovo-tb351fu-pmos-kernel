@@ -1,0 +1,17 @@
+name: "errno"
+description: "Cross-platform interface to the `errno` variable."
+third_party {
+  version: "0.3.10"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/errno"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/errno/errno-0.3.10.crate"
+    version: "0.3.10"
+  }
+}

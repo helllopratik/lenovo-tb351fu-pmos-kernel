@@ -1,0 +1,14 @@
+{
+  "tests": true,
+  "variants": [
+    {},
+    {
+      "features": [],
+      "module_name_overrides": {
+        "libcov_mark": "libcov_mark_disabled",
+        "cov-mark_test_tests_smoke": "cov-mark_disabled_test_tests_smoke"
+      }
+    }
+  ],
+  "min_sdk_version": "29"
+}

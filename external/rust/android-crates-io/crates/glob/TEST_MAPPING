@@ -1,0 +1,19 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/vm"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "ramdisk_available": true,
+  "recovery_available": true,
+  "vendor_ramdisk_available": true,
+  "native_bridge_supported": true,
+  "package": {
+    "icu_properties_data": {
+      "add_module_block": "icu_properties_data.bp.fragment"
+    }
+  },
+  "min_sdk_version": "29"
+}

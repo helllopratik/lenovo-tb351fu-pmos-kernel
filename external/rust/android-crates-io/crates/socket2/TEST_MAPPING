@@ -1,0 +1,28 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/async-stream"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-util"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio-test"
+    },
+    {
+      "path": "external/uwb/src"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ]
+}

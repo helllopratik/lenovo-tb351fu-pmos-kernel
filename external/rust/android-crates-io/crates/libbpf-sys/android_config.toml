@@ -1,0 +1,6 @@
+# We use the versions of these libraries in external/ instead.
+deletions = [
+  "elfutils",
+  "zlib",
+  "libbpf"
+]

@@ -1,0 +1,19 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/ash"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/vulkano"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ]
+}

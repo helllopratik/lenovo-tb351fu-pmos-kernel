@@ -1,0 +1,17 @@
+name: "netlink-sys"
+description: "netlink sockets, with optional integration with tokio"
+third_party {
+  version: "0.8.7"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 15
+  }
+  homepage: "https://crates.io/crates/netlink-sys"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/netlink-sys/netlink-sys-0.8.7.crate"
+    version: "0.8.7"
+  }
+}

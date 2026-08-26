@@ -1,0 +1,17 @@
+name: "config"
+description: "Layered configuration system for Rust applications."
+third_party {
+  version: "0.13.4"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 1
+    day: 31
+  }
+  homepage: "https://crates.io/crates/config"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/config/config-0.13.4.crate"
+    version: "0.13.4"
+  }
+}

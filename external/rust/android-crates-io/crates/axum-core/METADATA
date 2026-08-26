@@ -1,0 +1,17 @@
+name: "axum-core"
+description: "Core types and traits for axum"
+third_party {
+  version: "0.3.4"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 5
+    day: 27
+  }
+  homepage: "https://crates.io/crates/axum-core"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/axum-core/axum-core-0.3.4.crate"
+    version: "0.3.4"
+  }
+}

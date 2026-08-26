@@ -1,0 +1,16 @@
+{
+  "features": [
+    "std",
+    "string",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions"
+  ],
+  "min_sdk_version": "29",
+  "package": {
+    "clap_builder": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

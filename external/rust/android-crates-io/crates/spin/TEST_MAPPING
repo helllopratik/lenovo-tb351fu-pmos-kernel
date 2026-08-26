@@ -1,0 +1,26 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/ring"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/webpki"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "spin_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "spin_test_src_lib"
+    }
+  ]
+}

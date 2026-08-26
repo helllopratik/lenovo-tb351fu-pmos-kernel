@@ -1,0 +1,7 @@
+{
+  "extra_cfg": [
+    "mls_build_async"
+  ],
+  "run_cargo": false,
+  "min_sdk_version": "29"
+}

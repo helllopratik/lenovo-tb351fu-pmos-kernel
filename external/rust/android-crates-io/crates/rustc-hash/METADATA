@@ -1,0 +1,17 @@
+name: "rustc-hash"
+description: "A speedy, non-cryptographic hashing algorithm used by rustc"
+third_party {
+  version: "2.1.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 6
+  }
+  homepage: "https://crates.io/crates/rustc-hash"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/rustc-hash/rustc-hash-2.1.1.crate"
+    version: "2.1.1"
+  }
+}

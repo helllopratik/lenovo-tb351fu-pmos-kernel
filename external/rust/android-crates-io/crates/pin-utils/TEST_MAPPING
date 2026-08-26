@@ -1,0 +1,86 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/anyhow"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/async-stream"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-channel"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-executor"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-test"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-util"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio-test"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    },
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/encryptedstore"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/capabilities"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/devicemapper"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/vm"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    },
+    {
+      "path": "system/security/diced"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    },
+    {
+      "path": "system/security/keystore2/src/crypto"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "pin-utils_test_tests_projection"
+    },
+    {
+      "name": "pin-utils_test_tests_stack_pin"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "pin-utils_test_tests_projection"
+    },
+    {
+      "name": "pin-utils_test_tests_stack_pin"
+    }
+  ]
+}

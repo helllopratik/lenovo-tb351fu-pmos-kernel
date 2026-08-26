@@ -1,0 +1,31 @@
+{
+  "imports": [
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "system/security/diced"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "unicode-width_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "unicode-width_test_src_lib"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "unicode-width_test_tests_tests"
+    }
+  ]
+}

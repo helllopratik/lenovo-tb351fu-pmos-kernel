@@ -1,0 +1,31 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-normalization"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/url"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "tinyvec_test_tests_arrayvec"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "tinyvec_test_tests_arrayvec"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "tinyvec_test_tests_tinyvec"
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+================================================================================
+NOVATEK NT36523N TOUCH + DISPLAY REFERENCE (condensed)
+Lenovo Tab Plus (TB351FU) / MT8781 / GKI 6.12 / postmarketOS on SLOT B
+================================================================================
+
+OBJECTIVE (SOLVED)
+------------------
+- Touch: NT36523N works under pmOS; it fully self-recovers if the MTK SPI
+  controller ever hangs. Confirmed: touch streaming, spi_errors=0.
+- Display: 1200x2000 panel, currently CPU-rendered (no GPU yet).
+
+DISPLAY / GPU STATUS
+--------------------
+- Panel: DSI 1200x2000. phoc.ini (/etc/phosh/phoc.ini) scale set to 1
+  (was 2; 4x less CPU render work). All [output:DSI-1]/[Unknown-1]/
+  [Virtual-1] have rotate=180 scale=1.
+- NO GPU acceleration: only /dev/dri/card0 (simple-framebuffer), no renderD128.
+  /etc/environment forces LIBGL_ALWAYS_SOFTWARE=1 -> llvmpipe (CPU) renders.
+- Mali-G57 node mali@13000000 (compatible "mediatek,mali","arm,mali-valhall"),
+  interrupts GPU/MMU/JOB/EVENT/PWR, operating-points-v2 present, IDENTICAL in
+  Android (live FDT) and pmOS DTs.
+- WHY panfrost does NOT bind (deferred bring-up, NOT a config flip):
+    * mali node has NO `clocks`, NO `power-domains` in the DT (Android drives
+      the GPU via proprietary MTK modules reading hardcoded registers:
+      mali_kbase_mt6789, mtk_gpufreq_mt6789, ged, mtk_gpu_hal).
+    * 13000000.mali is blocked waiting on its `ged` supplier (MTK-only
+      "mediatek,ged" node; no mainline driver) -> probe never completes.
+    * Mainline has NO MT6789 power-domain (scpsys) driver
+      (drivers/pmdomain/mediatek/mtk-pm-domains.c supports MT6779 only).
+    * CONFIG_DRM_PANFROST=y and CONFIG_DRM_SCHED=y are already set in
+      out/.config and compiled into the Image. Panfrost is in
+      /sys/bus/platform/drivers/ but not bound.
+- To make GPU work later: add MT6789 scpsys to mtk-pm-domains.c + wire
+  `clocks`/`power-domains` into mali node + remove ged-supply blocker. Risky.
+
+TOUCH - CONFIRMED WORKING FIX
+-----------------------------
+Root cause of the whole drama: NT36523N host SPI is MSB-first. A prior bad
+`SPI_LSB_FIRST` line in nt36xxx.c made spi-mt65xx clear TXMSBF/RXMSBF, so every
+byte was bit-reversed on the wire -> firmware download corrupted, chip never
+ran an app. READ path tolerated it (short reads); the 31KB+ DMA download did not.
+
+Final driver state (nt36xxx.c / nt36xxx_fw_update.c):
+1) SPI mode = SPI_MODE_0 (MSB-first; TXMSBF=1/RXMSBF=1 like Android).
+   CS timing cs_setuptime=0, cs_holdtime=20 -> CFG0=0x00130000 == Android.
+   (register ground truth: cmd=0x00033c10 cfg1=0x006d0000 cfg2=0x00090009.)
+2) Firmware download = mandatory Android-mirror flow:
+   probe GPIOF_OUT_INIT_LOW -> nvt_eng_reset() -> RST high -> msleep(10) ->
+   nvt_ts_check_chip_ver_trim_loop() (boots MCU), then at +7s:
+   bootloader_reset -> msleep(200) -> set_bld_hw_crc -> [spi_dma_setup] ->
+   tx_auto_copy_mode -> write_firmware -> wait_auto_copy -> fw_crc_enable ->
+   boot_ready -> check_fw_reset_state.
+   Accept success ONLY when nvt_get_fw_info()==0 && fw_ver==0x19 && PID==0x6073.
+   NEVER skip based on fw_ver>=0x10 (0x60/0x20 are bootloader garbage, not app).
+3) Continuous-scan kick: nvt_force_continuous_scan() is MANDATORY after the
+   boot download (and after every recovery). Without it the chip sits at
+   reset=0xA3 (RESET_STATE_NORMAL_RUN) but produces NO touch data.
+4) SELF-RECOVERY WATCHDOG (nvt_ts_thread_func): if status_mask==0 && frames
+   frozen for 2 diag ticks (~20s), it runs a FULL HW+SPI recovery:
+   nvt_hw_reset_pulse() (GPIO reset, clears a hung MTK SPI controller) ->
+   nvt_bootloader_reset() -> nvt_update_firmware() -> msleep(20) ->
+   nvt_force_continuous_scan(). This is the only thing that recovers a hung
+   SPI bus (a plain re-download alone can't, it uses the dead bus).
+
+TOUCH KEY FACTS / REGISTERS
+---------------------------
+- chip NT36523N BOE, PID 0x6073, ver 0x19 (bar 0xE6), 32x50, SPI spi2.0
+  SPI_MODE_0 MSB-first, 8b/w, 9.6 MHz (spi-max-frequency=0x927c00).
+- trim id (table #3): 0x3F004 = 17 20 00 23 65 03; EVENT_BUF_ADDR 0x0002FD00.
+- Eval: EVENT_BUF+0x60 reads 0x1A as reset-complete (NOT proof app committed).
+- Engines: ENG_RST 0x7FFF80 (0x5A); SWRST_SIF 0x3F0FE.
+- fw bin: NOVATEK_TS_FW_BOE.bin (196608 B), ver byte at 0x2F000 = 19 E6,
+  md5 f0031d77a3196b4cf37c495c4388559a. sha256=a4784d489df631d0, BYTE-FOR-BYTE
+  identical to Android's firmware (stock backup in fw_backup_archive/).
+- SPI DMA: SPI_DMA_VAL 0x3F7D0, TX_AUTO_COPY_EN 0x3F7E8, SPI_DMA_TX_INFO 0x3F7F1.
+- spi-mt65xx notes: large DMA burst chunks capped (MTK_SPI_DMA_MAX_CHUNK=4096)
+  and every DMA burst rounded down to multiple of 1024 with the <1KB leftover
+  drained as its own packet (fixes read/write remainder tail loss).
+- Android touch driver is a DIFFERENT file (prebuilt tp_nt36xxx.ko), not the
+  in-tree nt36xxx.c. In-tree edits are what actually ship here (verified).
+
+SUCCESS SIGNATURE (all true)
+----------------------------
+- /proc/nvt_diag: touch_frames rising, spi_errors=0, last_ms_ago~0
+- /proc/nvt_fw_version == 0x19; dmesg FWU ver=0x19 pid=0x6073
+- /dev/input/eventN from NVT; touch responds; no "SPI transfer timed out"
+
+BUILD & FLASH (Slot B ONLY; never adb reboot bootloader)
+--------------------------------------------------------
+bash build_and_flash_pmos.sh
+- makes Image, lz4, boot/init_boot/vbmeta; dd's to boot_b, init_boot_b,
+  vbmeta_b, vbmeta_system_b, vbmeta_vendor_b; md5 verifies. Device must be on
+  slot A (Android) for adb. Android slot A also re-flashes chip to stock.
+
+DEVICE ACCESS
+-------------
+- pmOS slot B: ssh user@172.16.42.1 (pw 147147). Host: bring up fresh
+  enx<mac> iface, sudo ip addr add 172.16.42.2/24 dev <iface>; ip link up.
+- Android slot A: adb (adb root does NOT escalate; use `su`/Magisk).
+- On-device truth: /proc/nvt_diag, /proc/nvt_fw_version, /dev/input,
+  dmesg | grep -i nvt, tail /nvt_crash.log.
+
+KNOWN NUISANCES
+---------------
+- Wrong date/time: hardware RTC is stale (frozen Aug 15 2026) and pmOS has no
+  outbound NTP; systemd-timesyncd left ENABLED so it will sync if network works.
+  Time fix deliberately deferred.
+- /nvt_crash.log on device may be stale (old format); trust dmesg for current boot.
+================================================================================

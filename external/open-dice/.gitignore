@@ -1,0 +1,6 @@
+.clangd
+.cache
+compile_commands.json
+out
+build_overrides/pigweed_environment.gni
+environment

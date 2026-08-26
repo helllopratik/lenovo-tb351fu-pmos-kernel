@@ -1,0 +1,13 @@
+{
+  "run_cargo": false,
+  "tests": true,
+  "package": {
+    "mockall_derive": {
+      "device_supported": false,
+      "dep_blocklist": [
+        "libpretty_assertions"
+      ]
+    }
+  },
+  "min_sdk_version": "29"
+}

@@ -1,0 +1,17 @@
+name: "zeroize_derive"
+description: "Custom derive support for zeroize"
+third_party {
+  version: "1.4.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 11
+    day: 17
+  }
+  homepage: "https://crates.io/crates/zeroize_derive"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/zeroize_derive/zeroize_derive-1.4.2.crate"
+    version: "1.4.2"
+  }
+}

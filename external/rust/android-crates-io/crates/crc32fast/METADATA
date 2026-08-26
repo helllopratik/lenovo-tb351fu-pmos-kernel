@@ -1,0 +1,17 @@
+name: "crc32fast"
+description: "Fast, SIMD-accelerated CRC32 (IEEE) checksum computation"
+third_party {
+  version: "1.4.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 10
+    day: 3
+  }
+  homepage: "https://crates.io/crates/crc32fast"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/crc32fast/crc32fast-1.4.2.crate"
+    version: "1.4.2"
+  }
+}

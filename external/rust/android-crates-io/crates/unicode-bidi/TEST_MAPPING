@@ -1,0 +1,23 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/url"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "unicode-bidi_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "unicode-bidi_test_src_lib"
+    }
+  ]
+}

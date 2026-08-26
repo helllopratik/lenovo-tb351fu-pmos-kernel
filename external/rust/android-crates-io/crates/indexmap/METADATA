@@ -1,0 +1,17 @@
+name: "indexmap"
+description: "A hash table with consistent order and fast iteration."
+third_party {
+  version: "1.9.3"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/indexmap"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/indexmap/indexmap-1.9.3.crate"
+    version: "1.9.3"
+  }
+}

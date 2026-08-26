@@ -1,0 +1,17 @@
+name: "async-task"
+description: "Task abstraction for building executors"
+third_party {
+  version: "4.7.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 10
+    day: 3
+  }
+  homepage: "https://crates.io/crates/async-task"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/async-task/async-task-4.7.1.crate"
+    version: "4.7.1"
+  }
+}

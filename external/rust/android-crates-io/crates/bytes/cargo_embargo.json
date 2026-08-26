@@ -1,0 +1,18 @@
+{
+  "run_cargo": false,
+  "apex_available": [
+    "//apex_available:platform",
+    "//apex_available:anyapex"
+  ],
+  "features": [
+    "default",
+    "serde"
+  ],
+  "min_sdk_version": "29",
+  "tests": true,
+  "package": {
+    "bytes": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

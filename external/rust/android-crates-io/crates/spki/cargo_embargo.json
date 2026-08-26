@@ -1,0 +1,50 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.virt"
+  ],
+  "features": [
+    "alloc"
+  ],
+  "module_visibility": {
+    "libspki": [
+      "//external/rust/android-crates-io/crates/pkcs1:__subpackages__",
+      "//external/rust/android-crates-io/crates/pkcs8:__subpackages__",
+      "//external/rust/android-crates-io/crates/x509-cert:__subpackages__",
+      "//packages/modules/Virtualization:__subpackages__",
+      "//system/keymint:__subpackages__",
+      "//system/security/keystore2/tests:__subpackages__",
+      "//system/security/keystore2/test_utils:__subpackages__"
+    ],
+    "libspki_nostd": [
+      "//external/rust/android-crates-io/crates/pkcs1:__subpackages__",
+      "//external/rust/android-crates-io/crates/pkcs8:__subpackages__",
+      "//external/rust/android-crates-io/crates/x509-cert:__subpackages__",
+      "//packages/modules/Virtualization:__subpackages__",
+      "//system/keymint:__subpackages__"
+    ]
+  },
+  "run_cargo": false,
+  "variants": [
+    {},
+    {
+      "module_name_overrides": {
+        "libder": "libder_nostd",
+        "libspki": "libspki_nostd"
+      },
+      "package": {
+        "spki": {
+          "alloc": true,
+          "force_rlib": true,
+          "host_supported": false,
+          "no_std": true
+        }
+      }
+    },
+    {
+      "generate_androidbp": false,
+      "generate_rulesmk": true
+    }
+  ],
+  "min_sdk_version": "29"
+}

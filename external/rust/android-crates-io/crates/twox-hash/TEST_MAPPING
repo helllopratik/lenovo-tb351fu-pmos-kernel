@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "twox-hash_test_src_lib"
+    }
+  ]
+}

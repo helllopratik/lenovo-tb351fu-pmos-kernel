@@ -1,0 +1,12 @@
+{
+  "variants": [
+    {
+      "features": [
+	"default",
+	"serde"
+      ]
+    }
+  ],
+  "run_cargo": false,
+  "min_sdk_version": "29"
+}

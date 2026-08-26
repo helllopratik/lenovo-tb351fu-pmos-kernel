@@ -1,0 +1,47 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/hashbrown"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "crossbeam-deque_test_tests_fifo"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_injector"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_lifo"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_steal"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "crossbeam-deque_test_tests_fifo"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_injector"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_lifo"
+    },
+    {
+      "name": "crossbeam-deque_test_tests_steal"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "features": [
+    "regex",
+    "color"
+  ],
+  "run_cargo": false,
+  "tests": true,
+  "min_sdk_version": "29"
+}

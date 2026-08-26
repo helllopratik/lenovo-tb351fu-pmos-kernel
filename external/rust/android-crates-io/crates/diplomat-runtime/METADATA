@@ -1,0 +1,17 @@
+name: "diplomat-runtime"
+description: "Common runtime utilities used by diplomat codegen"
+third_party {
+  version: "0.10.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 26
+  }
+  homepage: "https://crates.io/crates/diplomat-runtime"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/diplomat-runtime/diplomat-runtime-0.10.0.crate"
+    version: "0.10.0"
+  }
+}

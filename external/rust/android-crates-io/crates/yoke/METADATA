@@ -1,0 +1,17 @@
+name: "yoke"
+description: "Abstraction allowing borrowed data to be carried along with the backing data it borrows from"
+third_party {
+  version: "0.7.5"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 24
+  }
+  homepage: "https://crates.io/crates/yoke"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/yoke/yoke-0.7.5.crate"
+    version: "0.7.5"
+  }
+}

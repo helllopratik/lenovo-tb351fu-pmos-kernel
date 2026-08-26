@@ -1,0 +1,50 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/crates/clap/2.33.3"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/once_cell"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/regex"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "system/keymint/hal"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "aho-corasick_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "aho-corasick_test_src_lib"
+    }
+  ]
+}

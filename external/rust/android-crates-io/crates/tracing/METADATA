@@ -1,0 +1,17 @@
+name: "tracing"
+description: "Application-level tracing for Rust."
+third_party {
+  version: "0.1.41"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 15
+  }
+  homepage: "https://crates.io/crates/tracing"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/tracing/tracing-0.1.41.crate"
+    version: "0.1.41"
+  }
+}

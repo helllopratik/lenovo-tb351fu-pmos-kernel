@@ -1,0 +1,17 @@
+name: "yoke-derive"
+description: "Custom derive for the yoke crate"
+third_party {
+  version: "0.7.5"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 24
+  }
+  homepage: "https://crates.io/crates/yoke-derive"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/yoke-derive/yoke-derive-0.7.5.crate"
+    version: "0.7.5"
+  }
+}

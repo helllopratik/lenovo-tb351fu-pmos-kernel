@@ -1,0 +1,36 @@
+{
+  "run_cargo": false,
+  "package": {
+    "uuid": {
+      "dep_blocklist": [
+        "libtrybuild"
+      ]
+    }
+  },
+  "variants": [
+    {
+      "tests": true,
+      "features": [
+        "serde",
+        "std",
+        "v1",
+        "v4"
+      ]
+    },
+    {
+      "features": [],
+      "module_name_overrides": {
+        "libuuid": "libuuid_nostd"
+      },
+      "package": {
+        "uuid": {
+          "force_rlib": true,
+          "host_supported": false,
+          "no_std": true
+        }
+      },
+      "generate_rulesmk": true
+    }
+  ],
+  "min_sdk_version": "29"
+}

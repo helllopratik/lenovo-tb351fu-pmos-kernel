@@ -1,0 +1,17 @@
+name: "fallible-iterator"
+description: "Fallible iterator traits"
+third_party {
+  version: "0.3.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 11
+    day: 12
+  }
+  homepage: "https://crates.io/crates/fallible-iterator"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/fallible-iterator/fallible-iterator-0.3.0.crate"
+    version: "0.3.0"
+  }
+}

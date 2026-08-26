@@ -1,0 +1,10 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.uprobestats",
+    "com.android.virt",
+    "com.sdv.*"
+  ],
+  "tests": true,
+  "min_sdk_version": "29"
+}

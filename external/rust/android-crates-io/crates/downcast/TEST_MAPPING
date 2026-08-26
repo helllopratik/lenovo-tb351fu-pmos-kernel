@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "downcast_test_tests_tests"
+    }
+  ]
+}

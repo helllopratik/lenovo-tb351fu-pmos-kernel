@@ -1,0 +1,17 @@
+name: "jni"
+description: "Rust bindings to the JNI"
+third_party {
+  version: "0.20.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 1
+    day: 19
+  }
+  homepage: "https://crates.io/crates/jni"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/jni/jni-0.20.0.crate"
+    version: "0.20.0"
+  }
+}

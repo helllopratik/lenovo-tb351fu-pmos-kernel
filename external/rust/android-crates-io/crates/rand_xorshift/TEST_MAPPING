@@ -1,0 +1,17 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/ryu"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "rand_xorshift_test_tests_mod"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "rand_xorshift_test_tests_mod"
+    }
+  ]
+}

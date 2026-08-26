@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "drm-fourcc_test_src_lib"
+    }
+  ]
+}

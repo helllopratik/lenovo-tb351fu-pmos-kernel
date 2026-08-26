@@ -1,0 +1,28 @@
+{
+  "imports": [
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "argh_test_src_lib"
+    },
+    {
+      "name": "argh_test_tests_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "argh_test_src_lib"
+    },
+    {
+      "name": "argh_test_tests_lib"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "argh_test_tests_args_info_tests"
+    }
+  ]
+}

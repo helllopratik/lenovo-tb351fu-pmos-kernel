@@ -1,0 +1,17 @@
+name: "diplomat_core"
+description: "Shared utilities between Diplomat macros and code generation"
+third_party {
+  version: "0.10.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 26
+  }
+  homepage: "https://crates.io/crates/diplomat_core"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/diplomat_core/diplomat_core-0.10.0.crate"
+    version: "0.10.0"
+  }
+}

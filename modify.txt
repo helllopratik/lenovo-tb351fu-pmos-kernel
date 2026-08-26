@@ -1,0 +1,35 @@
+================================================================================
+POSTMARKETOS TB351FU (LENOVO TAB PLUS) - RECENT GUI & TOUCH FIXES
+================================================================================
+
+1. LATEST KERNEL & DISPLAY RESOLUTIONS:
+--------------------------------------------------------------------------------
+A. Full-Scanline Contiguous Damage Blitting (simpledrm.c):
+   - In simpledrm_primary_plane_helper_atomic_update(), damage clips are expanded
+     horizontally to full scanline width (`dst_clip.x1 = 0; dst_clip.x2 = fb->width`).
+   - Ensures drm_fb_memcpy performs a single contiguous 4800-byte memcpy per row,
+     eliminating sub-rectangle coordinate boundary displacement and transient black spots.
+   - Replicates the edge pixel into the 64-byte scanline padding, eliminating the 16-pixel
+     black strip at the bottom of the screen.
+
+B. Authoritative Touch Event Processing (nt36xxx.c):
+   - Routed the 60 Hz polling loop in nvt_ts_thread_func() directly to nvt_ts_work_func(),
+     using the complete vendor multi-touch and pen protocol parser.
+
+C. Clean Integer Display Scaling (phoc.ini):
+   - Set `scale = 2` (clean integer factor: 600x1000 viewport) and `rotate = 180` in phoc.ini,
+     eliminating fractional scaling rounding artifacts in the display corners.
+
+D. Automatic Seat Daemon Startup (phosh-session):
+   - Auto-starts `seatd` daemon if not active and enforces socket permissions
+     (`chmod 666 /run/seatd.sock /dev/dri/* /dev/input/*`).
+
+--------------------------------------------------------------------------------
+2. PARTITIONS FLASHED & VERIFIED EXCLUSIVELY ON SLOT B (NO REBOOT):
+--------------------------------------------------------------------------------
+- boot_b (/dev/block/sdc50):      82a184e75bcdddd2a8829c1fcbbf498d (VERIFIED MATCH)
+- init_boot_b (/dev/block/sdc52):  0c7900b77fb5f21021206a04e81f15d0 (VERIFIED MATCH)
+- vbmeta_b (/dev/block/sdc10):     6ea439342135d88ca71423e359b707a7 (VERIFIED MATCH)
+- Device State: In Slot A (Untouched).
+
+================================================================================

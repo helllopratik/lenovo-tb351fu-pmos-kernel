@@ -1,0 +1,17 @@
+name: "chrono"
+description: "Date and time library for Rust"
+third_party {
+  version: "0.4.39"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/chrono"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/chrono/chrono-0.4.39.crate"
+    version: "0.4.39"
+  }
+}

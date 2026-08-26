@@ -1,0 +1,30 @@
+{
+  "imports": [
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/encryptedstore"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/devicemapper"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "uuid_test_src_lib"
+    }
+  ]
+}

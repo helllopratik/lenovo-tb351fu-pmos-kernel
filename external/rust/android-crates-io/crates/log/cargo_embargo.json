@@ -1,0 +1,72 @@
+{
+  "run_cargo": false,
+  "min_sdk_version": "29",
+  "variants": [
+    {
+      "features": [
+        "std"
+      ],
+      "module_name_overrides": {
+        "liblog": "liblog_rust"
+      },
+      "package": {
+        "log": {
+          "add_module_block": "android_impl.bp.fragment"
+        }
+      }
+    },
+    {
+      "features": [
+        "std",
+        "max_level_info",
+        "release_max_level_info"
+      ],
+      "module_name_overrides": {
+        "liblog": "liblog_rust_max_level_info"
+      },
+      "package": {
+        "log": {
+          "add_module_block": "android_impl.bp.fragment"
+        }
+      }
+    },
+    {
+      "features": [
+        "std",
+        "max_level_off",
+        "release_max_level_off"
+      ],
+      "module_name_overrides": {
+        "liblog": "liblog_rust_max_level_off"
+      },
+      "package": {
+        "log": {
+          "add_module_block": "android_impl.bp.fragment"
+        }
+      }
+    },
+    {
+      "module_name_overrides": {
+        "liblog": "liblog_rust_nostd"
+      },
+      "package": {
+        "log": {
+          "force_rlib": true,
+          "host_supported": false,
+          "no_std": true
+        }
+      }
+    },
+    {
+      "generate_androidbp": false,
+      "generate_rulesmk": true,
+      "features": [
+      ],
+      "package": {
+        "log": {
+          "no_std": true
+        }
+      }
+    }
+  ]
+}

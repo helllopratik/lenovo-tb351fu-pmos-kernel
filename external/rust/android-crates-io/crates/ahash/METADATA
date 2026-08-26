@@ -1,0 +1,17 @@
+name: "ahash"
+description: "A non-cryptographic hash function using AES-NI for high performance"
+third_party {
+  version: "0.8.11"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 4
+    day: 16
+  }
+  homepage: "https://crates.io/crates/ahash"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/ahash/ahash-0.8.11.crate"
+    version: "0.8.11"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "run_cargo": false,
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.virt"
+  ],
+  "tests": true,
+  "min_sdk_version": "29"
+}

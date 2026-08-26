@@ -1,0 +1,16 @@
+{
+  "run_cargo": false,
+  "package": {
+    "acpi": {
+      "no_std": true,
+      "rulesmk_patch": "patches/rules.mk.diff"
+    }
+  },
+  "variants": [
+    {
+      "generate_androidbp": false,
+      "generate_rulesmk": true
+    }
+  ],
+  "min_sdk_version": "29"
+}

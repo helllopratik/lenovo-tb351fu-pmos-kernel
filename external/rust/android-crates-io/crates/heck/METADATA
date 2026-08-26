@@ -1,0 +1,17 @@
+name: "heck"
+description: "heck is a case conversion library."
+third_party {
+  version: "0.5.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 19
+  }
+  homepage: "https://crates.io/crates/heck"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/heck/heck-0.5.0.crate"
+    version: "0.5.0"
+  }
+}

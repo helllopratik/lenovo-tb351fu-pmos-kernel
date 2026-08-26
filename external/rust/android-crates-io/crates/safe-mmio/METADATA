@@ -1,0 +1,17 @@
+name: "safe-mmio"
+description: "Types for safe MMIO device access, especially in systems with an MMU."
+third_party {
+  version: "0.2.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 24
+  }
+  homepage: "https://crates.io/crates/safe-mmio"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/safe-mmio/safe-mmio-0.2.1.crate"
+    version: "0.2.1"
+  }
+}

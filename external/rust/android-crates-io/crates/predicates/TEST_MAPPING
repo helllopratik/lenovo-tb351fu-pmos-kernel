@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "predicates_test_src_lib"
+    }
+  ]
+}

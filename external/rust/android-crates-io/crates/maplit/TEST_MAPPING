@@ -1,0 +1,10 @@
+{
+  "postsubmit": [
+    {
+      "name": "maplit_test_src_lib"
+    },
+    {
+      "name": "maplit_test_tests_tests"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+name: "weak-table"
+description: "Weak hash maps and sets"
+third_party {
+  version: "0.3.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2022
+    month: 3
+    day: 1
+  }
+  homepage: "https://crates.io/crates/weak-table"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/weak-table/weak-table-0.3.2.crate"
+    version: "0.3.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "features": [
+    "bytes"
+  ],
+  "min_sdk_version": "29",
+  "package": {
+    "protobuf": {
+      "copy_out": true,
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

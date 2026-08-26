@@ -1,0 +1,17 @@
+name: "tinyjson"
+description: "Tiny simple JSON parser/generator"
+third_party {
+  version: "2.5.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/tinyjson"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/tinyjson/tinyjson-2.5.1.crate"
+    version: "2.5.1"
+  }
+}

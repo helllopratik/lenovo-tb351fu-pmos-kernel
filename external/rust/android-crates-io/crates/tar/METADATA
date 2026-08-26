@@ -1,0 +1,17 @@
+name: "tar"
+description: "A Rust implementation of a TAR file reader and writer. This library does not currently handle compression, but it is abstract over all I/O readers and writers. Additionally, great lengths are taken to ensure that the entire contents are never required to be entirely resident in memory all at once."
+third_party {
+  version: "0.4.44"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 7
+  }
+  homepage: "https://crates.io/crates/tar"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/tar/tar-0.4.44.crate"
+    version: "0.4.44"
+  }
+}
