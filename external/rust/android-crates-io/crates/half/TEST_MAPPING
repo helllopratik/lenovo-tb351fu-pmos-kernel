@@ -1,0 +1,49 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/ciborium-ll"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/coset"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/serde_cbor"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/vulkano"
+    },
+    {
+      "path": "packages/modules/Virtualization/avmd"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "system/keymint/derive"
+    },
+    {
+      "path": "system/keymint/hal"
+    },
+    {
+      "path": "system/security/diced"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ]
+}

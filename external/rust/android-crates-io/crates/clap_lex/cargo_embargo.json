@@ -1,0 +1,13 @@
+{
+  "apex_available": [
+    "//apex_available:anyapex",
+    "//apex_available:platform"
+  ],
+  "min_sdk_version": "29",
+  "tests": true,
+  "package": {
+    "clap_lex": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

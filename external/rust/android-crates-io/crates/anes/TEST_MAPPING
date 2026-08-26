@@ -1,0 +1,10 @@
+{
+  "postsubmit": [
+    {
+      "name": "anes_test_src_lib"
+    },
+    {
+      "name": "anes_test_tests_tests"
+    }
+  ]
+}

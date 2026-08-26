@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "try-lock_test_src_lib"
+    }
+  ]
+}

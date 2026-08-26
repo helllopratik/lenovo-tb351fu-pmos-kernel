@@ -1,0 +1,17 @@
+name: "is-terminal"
+description: "Test whether a given stream is a terminal"
+third_party {
+  version: "0.4.16"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 14
+  }
+  homepage: "https://crates.io/crates/is-terminal"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/is-terminal/is-terminal-0.4.16.crate"
+    version: "0.4.16"
+  }
+}

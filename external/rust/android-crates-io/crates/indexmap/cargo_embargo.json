@@ -1,0 +1,9 @@
+{
+  "features": [
+    "serde-1"
+  ],
+  "module_name_overrides": {
+    "libhashbrown": "libhashbrown-0.12.3"
+  },
+  "min_sdk_version": "29"
+}

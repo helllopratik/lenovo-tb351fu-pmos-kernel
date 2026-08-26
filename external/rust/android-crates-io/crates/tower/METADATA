@@ -1,0 +1,17 @@
+name: "tower"
+description: "Tower is a library of modular and reusable components for building robust clients and servers."
+third_party {
+  version: "0.4.13"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 5
+    day: 27
+  }
+  homepage: "https://crates.io/crates/tower"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/tower/tower-0.4.13.crate"
+    version: "0.4.13"
+  }
+}

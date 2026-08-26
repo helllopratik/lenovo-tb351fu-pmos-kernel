@@ -1,0 +1,15 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "octets_test_src_lib"
+    }
+  ]
+}

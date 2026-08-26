@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "utf-8_test_tests_unit"
+    }
+  ]
+}

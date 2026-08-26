@@ -1,0 +1,17 @@
+name: "ciborium-ll"
+description: "Low-level CBOR codec primitives"
+third_party {
+  version: "0.2.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 1
+    day: 24
+  }
+  homepage: "https://crates.io/crates/ciborium-ll"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/ciborium-ll/ciborium-ll-0.2.2.crate"
+    version: "0.2.2"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.virt"
+  ],
+  "tests": true,
+  "variants": [
+    {},
+    {
+      "features": [],
+      "package": {
+        "cfg-if": {
+          "no_std": true
+        }
+      },
+      "generate_androidbp": false,
+      "generate_rulesmk": true,
+      "tests": false
+    }
+  ],
+  "min_sdk_version": "29"
+}

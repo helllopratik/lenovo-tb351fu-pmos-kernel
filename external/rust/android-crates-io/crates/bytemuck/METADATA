@@ -1,0 +1,17 @@
+name: "bytemuck"
+description: "A crate for mucking around with piles of bytes."
+third_party {
+  version: "1.22.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 6
+  }
+  homepage: "https://crates.io/crates/bytemuck"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/bytemuck/bytemuck-1.22.0.crate"
+    version: "1.22.0"
+  }
+}

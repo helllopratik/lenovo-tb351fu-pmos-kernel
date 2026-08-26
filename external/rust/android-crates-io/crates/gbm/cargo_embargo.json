@@ -1,0 +1,18 @@
+{
+  "package": {
+    "gbm": {
+      "license_text": [
+        "LICENSE"
+      ]
+    }
+  },
+  "run_cargo": false,
+  "module_name_overrides": {
+    "libdrm": "libdrm_rust",
+    "libgbm": "libgbm_rust"
+  },
+  "features": [
+    "drm-support"
+  ],
+  "min_sdk_version": "29"
+}

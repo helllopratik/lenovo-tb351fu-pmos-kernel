@@ -1,0 +1,17 @@
+name: "pest"
+description: "The Elegant Parser"
+third_party {
+  version: "2.8.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 25
+  }
+  homepage: "https://crates.io/crates/pest"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/pest/pest-2.8.0.crate"
+    version: "2.8.0"
+  }
+}

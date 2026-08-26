@@ -1,0 +1,17 @@
+name: "buddy_system_allocator"
+description: "A bare metal allocator that uses buddy system."
+third_party {
+  version: "0.11.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 10
+    day: 3
+  }
+  homepage: "https://crates.io/crates/buddy_system_allocator"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/buddy_system_allocator/buddy_system_allocator-0.11.0.crate"
+    version: "0.11.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.uwb",
+    "com.android.virt"
+  ],
+  "min_sdk_version": "29",
+  "run_cargo": false,
+  "tests": true,
+  "package": {
+    "cesu8": {
+      "license_text": ["LICENSE-APACHE", "COPYRIGHT-RUST.txt"]
+    }
+  }
+}

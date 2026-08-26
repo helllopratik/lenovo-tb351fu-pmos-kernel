@@ -1,0 +1,13 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/coset"
+    },
+    {
+      "path": "system/keymint/derive"
+    },
+    {
+      "path": "system/keymint/hal"
+    }
+  ]
+}

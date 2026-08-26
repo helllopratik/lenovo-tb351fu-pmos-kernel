@@ -1,0 +1,17 @@
+name: "tokio-io-timeout"
+description: "Tokio wrappers which apply timeouts to IO operations"
+third_party {
+  version: "1.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 6
+    day: 3
+  }
+  homepage: "https://crates.io/crates/tokio-io-timeout"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/tokio-io-timeout/tokio-io-timeout-1.2.0.crate"
+    version: "1.2.0"
+  }
+}

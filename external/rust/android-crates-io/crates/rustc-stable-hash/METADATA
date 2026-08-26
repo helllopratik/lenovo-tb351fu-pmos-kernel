@@ -1,0 +1,17 @@
+name: "rustc-stable-hash"
+description: "A stable hashing algorithm used by rustc"
+third_party {
+  version: "0.1.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 19
+  }
+  homepage: "https://crates.io/crates/rustc-stable-hash"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/rustc-stable-hash/rustc-stable-hash-0.1.2.crate"
+    version: "0.1.2"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/async-stream"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-util"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio-test"
+    },
+    {
+      "path": "external/uwb/src"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "mio_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "mio_test_src_lib"
+    }
+  ]
+}

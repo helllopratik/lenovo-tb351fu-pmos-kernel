@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "tower-layer_test_src_lib"
+    }
+  ]
+}

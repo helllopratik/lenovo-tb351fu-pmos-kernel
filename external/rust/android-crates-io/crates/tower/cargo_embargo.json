@@ -1,0 +1,26 @@
+{
+  "features":[
+    "__common",
+    "balance",
+    "buffer",
+    "discover",
+    "futures-core",
+    "futures-util",
+    "indexmap",
+    "limit",
+    "load",
+    "make",
+    "pin-project",
+    "pin-project-lite",
+    "rand",
+    "ready-cache",
+    "slab",
+    "timeout",
+    "tokio",
+    "tokio-util",
+    "tracing",
+    "util"
+  ],
+  "run_cargo":false,
+  "min_sdk_version": "29"
+}

@@ -1,0 +1,17 @@
+name: "libsqlite3-sys"
+description: "Native bindings to the libsqlite3 library"
+third_party {
+  version: "0.30.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 27
+  }
+  homepage: "https://crates.io/crates/libsqlite3-sys"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.30.1.crate"
+    version: "0.30.1"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "min_sdk_version": "29",
+  "package": {
+    "libsqlite3-sys": {
+      "add_toplevel_block": "bindgen_modules.bp.fragment",
+      "patch": "patches/Android.bp.patch"
+    }
+  },
+  "product_available": true,
+  "run_cargo": false,
+  "tests": true,
+  "vendor_available": true
+}

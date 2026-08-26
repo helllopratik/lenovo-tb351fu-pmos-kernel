@@ -1,0 +1,5 @@
+# Bug component: 688011
+include platform/prebuilts/rust:main:/OWNERS
+dpursell@google.com
+dimorinny@google.com
+zyecheng@google.com

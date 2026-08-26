@@ -1,0 +1,17 @@
+name: "mls-rs"
+description: "An implementation of Messaging Layer Security (RFC 9420)"
+third_party {
+  version: "0.39.4"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 21
+  }
+  homepage: "https://crates.io/crates/mls-rs"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/mls-rs/mls-rs-0.39.4.crate"
+    version: "0.39.4"
+  }
+}

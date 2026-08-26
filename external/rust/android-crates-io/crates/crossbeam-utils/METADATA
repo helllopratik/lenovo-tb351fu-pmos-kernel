@@ -1,0 +1,17 @@
+name: "crossbeam-utils"
+description: "Utilities for concurrent programming"
+third_party {
+  version: "0.8.21"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/crossbeam-utils"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.21.crate"
+    version: "0.8.21"
+  }
+}

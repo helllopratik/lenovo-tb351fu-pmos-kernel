@@ -1,0 +1,19 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-normalization"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/url"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ]
+}

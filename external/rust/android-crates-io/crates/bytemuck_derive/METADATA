@@ -1,0 +1,17 @@
+name: "bytemuck_derive"
+description: "derive proc-macros for `bytemuck`"
+third_party {
+  version: "1.8.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 14
+  }
+  homepage: "https://crates.io/crates/bytemuck_derive"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/bytemuck_derive/bytemuck_derive-1.8.1.crate"
+    version: "1.8.1"
+  }
+}

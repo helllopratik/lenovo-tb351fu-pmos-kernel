@@ -1,0 +1,17 @@
+name: "protobuf-json-mapping"
+description: "JSON mapping for Protocol Buffers messages."
+third_party {
+  version: "3.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 3
+    day: 22
+  }
+  homepage: "https://crates.io/crates/protobuf-json-mapping"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/protobuf-json-mapping/protobuf-json-mapping-3.2.0.crate"
+    version: "3.2.0"
+  }
+}

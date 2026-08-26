@@ -1,0 +1,17 @@
+name: "clap_lex"
+description: "Minimal, flexible command line parser"
+third_party {
+  version: "0.3.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 3
+    day: 2
+  }
+  homepage: "https://crates.io/crates/clap_lex"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/clap_lex/clap_lex-0.3.2.crate"
+    version: "0.3.2"
+  }
+}

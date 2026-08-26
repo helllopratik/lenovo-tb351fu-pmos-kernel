@@ -1,0 +1,17 @@
+name: "crossbeam-channel"
+description: "Multi-producer multi-consumer channels for message passing"
+third_party {
+  version: "0.5.14"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 19
+  }
+  homepage: "https://crates.io/crates/crossbeam-channel"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/crossbeam-channel/crossbeam-channel-0.5.14.crate"
+    version: "0.5.14"
+  }
+}

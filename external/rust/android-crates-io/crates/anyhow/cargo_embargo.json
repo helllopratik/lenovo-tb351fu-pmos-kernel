@@ -1,0 +1,25 @@
+{
+  "tests": true,
+  "min_sdk_version": "29",
+  "package": {
+    "anyhow": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment",
+      "dep_blocklist": [
+        "libbacktrace_rust",
+        "librustversion",
+        "libsyn",
+        "libtrybuild"
+      ]
+    }
+  },
+  "cfg_blocklist": [
+    "backtrace"
+  ],
+  "module_blocklist": [
+    "anyhow_test_tests_compiletest",
+    "anyhow_test_tests_test_backtrace",
+    "anyhow_test_tests_test_ensure",
+    "anyhow_test_tests_test_ffi"
+  ],
+  "run_cargo": false
+}

@@ -1,0 +1,14 @@
+rust_library_host {
+    name: "libbindgen_cli",
+    host_cross_supported: false,
+    crate_name: "bindgen_cli",
+    srcs: ["options.rs"],
+    edition: "2018",
+    rustlibs: [
+        "libbindgen",
+        "libclap",
+        "libclap_complete",
+        "libenv_logger",
+    ],
+    compile_multilib: "first",
+}

@@ -1,0 +1,27 @@
+{
+  "apex_available": ["//apex_available:anyapex", "//apex_available:platform"],
+  "min_sdk_version": "29",
+  "package": {
+    "thiserror": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  },
+  "run_cargo": false,
+  "variants": [
+    {},
+    {
+      "features": [],
+      "generate_rulesmk": true,
+      "module_name_overrides": {
+        "libthiserror": "libthiserror_nostd"
+      },
+      "package": {
+        "thiserror": {
+          "force_rlib": true,
+          "host_supported": false,
+          "no_std": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+name: "spin"
+description: "Spin-based synchronization primitives"
+third_party {
+  version: "0.9.8"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 5
+  }
+  homepage: "https://crates.io/crates/spin"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/spin/spin-0.9.8.crate"
+    version: "0.9.8"
+  }
+}

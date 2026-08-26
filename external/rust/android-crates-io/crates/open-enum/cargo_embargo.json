@@ -1,0 +1,10 @@
+{
+  "run_cargo": false,
+  "module_blocklist": [
+    "test_lints"
+  ],
+  "features": [
+    "std"
+  ],
+  "min_sdk_version": "29"
+}

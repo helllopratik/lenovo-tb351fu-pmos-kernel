@@ -1,0 +1,17 @@
+name: "petgraph"
+description: "Graph data structure library. Provides graph types and graph algorithms."
+third_party {
+  version: "0.6.5"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 8
+    day: 9
+  }
+  homepage: "https://crates.io/crates/petgraph"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/petgraph/petgraph-0.6.5.crate"
+    version: "0.6.5"
+  }
+}

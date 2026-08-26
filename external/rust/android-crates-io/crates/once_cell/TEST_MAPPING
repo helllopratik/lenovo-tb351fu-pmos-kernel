@@ -1,0 +1,104 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/android_logger"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/argh"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/hashbrown"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/hashlink"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/ring"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/thread_local"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/webpki"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    },
+    {
+      "path": "packages/modules/Virtualization/apkdmverity"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/avmd"
+    },
+    {
+      "path": "packages/modules/Virtualization/encryptedstore"
+    },
+    {
+      "path": "packages/modules/Virtualization/libs/apkverify"
+    },
+    {
+      "path": "packages/modules/Virtualization/microdroid_manager"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/vm"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    },
+    {
+      "path": "system/logging/rust"
+    },
+    {
+      "path": "system/security/diced"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    },
+    {
+      "path": "system/security/keystore2/selinux"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "once_cell_test_src_lib"
+    },
+    {
+      "name": "once_cell_test_tests_it_main"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "once_cell_test_src_lib"
+    },
+    {
+      "name": "once_cell_test_tests_it_main"
+    }
+  ]
+}

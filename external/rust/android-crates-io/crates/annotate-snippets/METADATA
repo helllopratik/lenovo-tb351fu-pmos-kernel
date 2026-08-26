@@ -1,0 +1,17 @@
+name: "annotate-snippets"
+description: "Library for building code annotations"
+third_party {
+  version: "0.9.2"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 11
+    day: 24
+  }
+  homepage: "https://crates.io/crates/annotate-snippets"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/annotate-snippets/annotate-snippets-0.9.2.crate"
+    version: "0.9.2"
+  }
+}

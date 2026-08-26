@@ -1,0 +1,17 @@
+name: "serde_spanned"
+description: "Serde-compatible spanned Value"
+third_party {
+  version: "0.6.8"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/serde_spanned"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/serde_spanned/serde_spanned-0.6.8.crate"
+    version: "0.6.8"
+  }
+}

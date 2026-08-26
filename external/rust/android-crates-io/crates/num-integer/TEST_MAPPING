@@ -1,0 +1,38 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/num-bigint"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "num-integer_test_src_lib"
+    },
+    {
+      "name": "num-integer_test_tests_average"
+    },
+    {
+      "name": "num-integer_test_tests_roots"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "num-integer_test_src_lib"
+    },
+    {
+      "name": "num-integer_test_tests_average"
+    },
+    {
+      "name": "num-integer_test_tests_roots"
+    }
+  ]
+}

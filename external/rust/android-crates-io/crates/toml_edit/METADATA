@@ -1,0 +1,17 @@
+name: "toml_edit"
+description: "Yet another format-preserving TOML parser."
+third_party {
+  version: "0.22.20"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 14
+  }
+  homepage: "https://crates.io/crates/toml_edit"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/toml_edit/toml_edit-0.22.20.crate"
+    version: "0.22.20"
+  }
+}

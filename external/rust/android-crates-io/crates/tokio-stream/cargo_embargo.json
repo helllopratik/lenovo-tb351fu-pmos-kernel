@@ -1,0 +1,16 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.bt",
+    "com.sdv.*"
+  ],
+  "features": [
+    "fs",
+    "io-util",
+    "net",
+    "sync",
+    "time"
+  ],
+  "min_sdk_version": "29",
+  "run_cargo": false
+}

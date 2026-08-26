@@ -1,0 +1,12 @@
+{
+  "package": {
+    "getrandom": {
+      "license_text": ["LICENSE"]
+    }
+  },
+  "features": [
+    "std"
+  ],
+  "tests": true,
+  "min_sdk_version": "29"
+}

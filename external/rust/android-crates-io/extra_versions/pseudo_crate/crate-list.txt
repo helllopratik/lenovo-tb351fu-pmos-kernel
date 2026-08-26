@@ -1,0 +1,11 @@
+bitflags
+clap
+clap_lex
+hashbrown
+http
+jni
+protobuf
+protobuf-codegen
+vm-memory
+zerocopy
+zerocopy-derive

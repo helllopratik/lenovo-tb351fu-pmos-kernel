@@ -1,0 +1,12 @@
+{
+  "apex_available": [
+    "//apex_available:anyapex",
+    "//apex_available:platform"
+  ],
+  "module_name_overrides": {
+    "external_rust_crates_clap_lex_license": "external_rust_crates_clap_lex-0.3.2_license",
+    "libclap_lex": "libclap_lex-0.3.2"
+  },
+  "min_sdk_version": "29",
+  "tests": true
+}

@@ -1,0 +1,17 @@
+name: "paste"
+description: "Macros for all your token pasting needs"
+third_party {
+  version: "1.0.15"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/paste"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/paste/paste-1.0.15.crate"
+    version: "1.0.15"
+  }
+}

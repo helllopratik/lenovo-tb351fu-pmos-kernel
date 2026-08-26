@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "fixedbitset_test_tests_tests"
+    }
+  ]
+}

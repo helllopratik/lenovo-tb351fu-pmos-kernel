@@ -1,0 +1,17 @@
+name: "http-body"
+description: "Trait representing an asynchronous, streaming, HTTP request or response body."
+third_party {
+  version: "0.4.6"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 5
+    day: 27
+  }
+  homepage: "https://crates.io/crates/http-body"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/http-body/http-body-0.4.6.crate"
+    version: "0.4.6"
+  }
+}

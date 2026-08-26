@@ -1,0 +1,11 @@
+{
+  "apex_available": [
+    "//apex_available:platform",
+    "com.android.uwb"
+  ],
+  "module_name_overrides": {
+    "libjni": "libjni_legacy",
+    "external_rust_crates_jni_license": "external_rust_crates_jni-0.20.0_license"
+  },
+  "min_sdk_version": "29"
+}

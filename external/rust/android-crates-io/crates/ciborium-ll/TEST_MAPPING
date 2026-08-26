@@ -1,0 +1,23 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/coset"
+    },
+    {
+      "path": "system/keymint/derive"
+    },
+    {
+      "path": "system/keymint/hal"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "ciborium-ll_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "ciborium-ll_test_src_lib"
+    }
+  ]
+}

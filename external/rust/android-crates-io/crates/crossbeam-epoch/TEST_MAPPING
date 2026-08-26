@@ -1,0 +1,32 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/crossbeam-deque"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/hashbrown"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "crossbeam-epoch_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "crossbeam-epoch_test_src_lib"
+    }
+  ]
+}

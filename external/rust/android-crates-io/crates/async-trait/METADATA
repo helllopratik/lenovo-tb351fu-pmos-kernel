@@ -1,0 +1,17 @@
+name: "async-trait"
+description: "Type erasure for async trait methods"
+third_party {
+  version: "0.1.88"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 19
+  }
+  homepage: "https://crates.io/crates/async-trait"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/async-trait/async-trait-0.1.88.crate"
+    version: "0.1.88"
+  }
+}

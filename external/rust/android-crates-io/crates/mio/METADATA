@@ -1,0 +1,17 @@
+name: "mio"
+description: "Lightweight non-blocking I/O."
+third_party {
+  version: "1.0.3"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 4
+  }
+  homepage: "https://crates.io/crates/mio"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/mio/mio-1.0.3.crate"
+    version: "1.0.3"
+  }
+}

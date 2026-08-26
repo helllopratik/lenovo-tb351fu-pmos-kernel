@@ -1,0 +1,17 @@
+name: "zerocopy-derive"
+description: "Custom derive for traits from the zerocopy crate"
+third_party {
+  version: "0.7.35"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 9
+    day: 5
+  }
+  homepage: "https://crates.io/crates/zerocopy-derive"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/zerocopy-derive/zerocopy-derive-0.7.35.crate"
+    version: "0.7.35"
+  }
+}

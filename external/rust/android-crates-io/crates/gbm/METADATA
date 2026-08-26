@@ -1,0 +1,17 @@
+name: "gbm"
+description: "libgbm bindings for rust"
+third_party {
+  version: "0.15.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 10
+    day: 3
+  }
+  homepage: "https://crates.io/crates/gbm"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/gbm/gbm-0.15.0.crate"
+    version: "0.15.0"
+  }
+}

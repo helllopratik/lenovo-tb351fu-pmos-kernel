@@ -1,0 +1,17 @@
+name: "oorandom"
+description: "A tiny, robust PRNG implementation."
+third_party {
+  version: "11.1.5"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 3
+    day: 13
+  }
+  homepage: "https://crates.io/crates/oorandom"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/oorandom/oorandom-11.1.5.crate"
+    version: "11.1.5"
+  }
+}

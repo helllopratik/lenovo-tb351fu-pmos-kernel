@@ -1,0 +1,17 @@
+name: "zeroize"
+description: "Securely clear secrets from memory with a simple trait built on stable Rust primitives which guarantee memory is zeroed using an operation will not be \'optimized away\' by the compiler. Uses a portable pure Rust implementation that works everywhere, even WASM!"
+third_party {
+  version: "1.8.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/zeroize"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/zeroize/zeroize-1.8.1.crate"
+    version: "1.8.1"
+  }
+}

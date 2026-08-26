@@ -1,0 +1,17 @@
+name: "slotmap"
+description: "Slotmap data structure"
+third_party {
+  version: "1.0.7"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 11
+  }
+  homepage: "https://crates.io/crates/slotmap"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/slotmap/slotmap-1.0.7.crate"
+    version: "1.0.7"
+  }
+}

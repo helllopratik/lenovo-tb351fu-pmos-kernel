@@ -1,0 +1,17 @@
+name: "uefi-macros"
+description: "Procedural macros for the `uefi` crate."
+third_party {
+  version: "0.17.0"
+  license_type: RECIPROCAL
+  last_upgrade_date {
+    year: 2024
+    month: 11
+    day: 5
+  }
+  homepage: "https://crates.io/crates/uefi-macros"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/uefi-macros/uefi-macros-0.17.0.crate"
+    version: "0.17.0"
+  }
+}

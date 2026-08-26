@@ -1,0 +1,17 @@
+name: "signal-hook"
+description: "Unix signal handling"
+third_party {
+  version: "0.3.17"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 15
+  }
+  homepage: "https://crates.io/crates/signal-hook"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/signal-hook/signal-hook-0.3.17.crate"
+    version: "0.3.17"
+  }
+}

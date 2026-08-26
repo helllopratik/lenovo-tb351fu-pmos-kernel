@@ -1,0 +1,17 @@
+{
+  "run_cargo": false,
+  "package": {
+    "libbpf-rs": {
+      "host_supported": false,
+      "patch": "patches/Android.bp.patch"
+    }
+  },
+  "module_visibility": {
+    "liblibbpf_rs": [
+      "//system/bpf/loader"
+    ]
+  },
+  "product_available": false,
+  "vendor_available": false,
+  "min_sdk_version": "29"
+}

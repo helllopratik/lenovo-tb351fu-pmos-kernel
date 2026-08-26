@@ -1,0 +1,7 @@
+{
+  "module_name_overrides": {
+    "libhttp": "libhttp-0.2.12"
+  },
+  "min_sdk_version": "29",
+  "run_cargo": false
+}

@@ -1,0 +1,17 @@
+name: "netlink-packet-route"
+description: "netlink packet types"
+third_party {
+  version: "0.22.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 15
+  }
+  homepage: "https://crates.io/crates/netlink-packet-route"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/netlink-packet-route/netlink-packet-route-0.22.0.crate"
+    version: "0.22.0"
+  }
+}

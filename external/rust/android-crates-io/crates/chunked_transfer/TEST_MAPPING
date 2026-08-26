@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "chunked_transfer_test_src_lib"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/async-stream"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "tokio-test_test_tests_block_on"
+    },
+    {
+      "name": "tokio-test_test_tests_io"
+    },
+    {
+      "name": "tokio-test_test_tests_macros"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "tokio-test_test_tests_block_on"
+    },
+    {
+      "name": "tokio-test_test_tests_io"
+    },
+    {
+      "name": "tokio-test_test_tests_macros"
+    }
+  ]
+}

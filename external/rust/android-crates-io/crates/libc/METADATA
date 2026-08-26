@@ -1,0 +1,17 @@
+name: "libc"
+description: "Raw FFI bindings to platform libraries like libc."
+third_party {
+  version: "0.2.168"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 8
+  }
+  homepage: "https://crates.io/crates/libc"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/libc/libc-0.2.168.crate"
+    version: "0.2.168"
+  }
+}

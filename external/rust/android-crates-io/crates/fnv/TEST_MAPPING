@@ -1,0 +1,23 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/hashbrown"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/vulkano"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "fnv_test_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "fnv_test_lib"
+    }
+  ]
+}

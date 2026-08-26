@@ -1,0 +1,17 @@
+name: "merge_derive"
+description: "Derive macro for the merge::Merge trait"
+third_party {
+  version: "0.1.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2022
+    month: 11
+    day: 28
+  }
+  homepage: "https://crates.io/crates/merge_derive"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/merge_derive/merge_derive-0.1.0.crate"
+    version: "0.1.0"
+  }
+}

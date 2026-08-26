@@ -1,0 +1,18 @@
+{
+  "features": [
+    "compiled_data",
+    "properties"
+  ],
+  "package": {
+    "icu_capi": {
+      "exported_c_header_dir": [
+        "bindings/cpp"
+      ]
+    }
+  },
+  "ramdisk_available": true,
+  "recovery_available": true,
+  "vendor_ramdisk_available": true,
+  "native_bridge_supported": true,
+  "min_sdk_version": "29"
+}

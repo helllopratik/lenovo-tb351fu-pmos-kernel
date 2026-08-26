@@ -1,0 +1,17 @@
+name: "slab"
+description: "Pre-allocated storage for a uniform data type"
+third_party {
+  version: "0.4.9"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 5
+  }
+  homepage: "https://crates.io/crates/slab"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/slab/slab-0.4.9.crate"
+    version: "0.4.9"
+  }
+}

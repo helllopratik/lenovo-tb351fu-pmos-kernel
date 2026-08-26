@@ -1,0 +1,13 @@
+{
+  "run_cargo": false,
+  "apex_available": [
+    "//apex_available:platform",
+    "//apex_available:anyapex"
+  ],
+  "min_sdk_version": "29",
+  "package": {
+    "memchr": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  }
+}

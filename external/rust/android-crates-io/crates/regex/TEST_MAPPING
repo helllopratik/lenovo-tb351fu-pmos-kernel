@@ -1,0 +1,101 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/base64"
+    },
+    {
+      "path": "external/rust/crates/clap/2.33.3"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/libsqlite3-sys"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/once_cell"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinytemplate"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tinyvec"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/unicode-xid"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "system/keymint/hal"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "regex_test_src_lib"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack_utf8bytes"
+    },
+    {
+      "name": "regex_test_tests_test_crates_regex"
+    },
+    {
+      "name": "regex_test_tests_test_default"
+    },
+    {
+      "name": "regex_test_tests_test_default_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_nfa"
+    },
+    {
+      "name": "regex_test_tests_test_nfa_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_nfa_utf8bytes"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "regex_test_src_lib"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_backtrack_utf8bytes"
+    },
+    {
+      "name": "regex_test_tests_test_crates_regex"
+    },
+    {
+      "name": "regex_test_tests_test_default"
+    },
+    {
+      "name": "regex_test_tests_test_default_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_nfa"
+    },
+    {
+      "name": "regex_test_tests_test_nfa_bytes"
+    },
+    {
+      "name": "regex_test_tests_test_nfa_utf8bytes"
+    }
+  ]
+}

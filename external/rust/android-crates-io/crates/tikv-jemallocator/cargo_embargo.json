@@ -1,0 +1,15 @@
+{
+  "package": {
+    "tikv-jemallocator": {
+      "device_supported": false
+    }
+  },
+  "module_visibility": {
+    "libtikv_jemallocator": [
+      "//external/n2:__subpackages__"
+    ]
+  },
+  "run_cargo": false,
+  "tests": false,
+  "min_sdk_version": "29"
+}

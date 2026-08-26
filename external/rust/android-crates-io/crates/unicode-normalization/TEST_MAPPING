@@ -1,0 +1,23 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/quiche"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/url"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "unicode-normalization_test_src_lib"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "unicode-normalization_test_src_lib"
+    }
+  ]
+}

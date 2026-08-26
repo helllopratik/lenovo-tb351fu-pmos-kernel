@@ -1,0 +1,17 @@
+name: "http"
+description: "A set of types for representing HTTP requests and responses."
+third_party {
+  version: "0.2.12"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 2
+    day: 4
+  }
+  homepage: "https://crates.io/crates/http"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/http/http-0.2.12.crate"
+    version: "0.2.12"
+  }
+}

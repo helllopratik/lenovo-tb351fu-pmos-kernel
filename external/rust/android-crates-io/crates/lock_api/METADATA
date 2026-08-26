@@ -1,0 +1,17 @@
+name: "lock_api"
+description: "Wrappers to create fully-featured Mutex and RwLock types. Compatible with no_std."
+third_party {
+  version: "0.4.12"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 21
+  }
+  homepage: "https://crates.io/crates/lock_api"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/lock_api/lock_api-0.4.12.crate"
+    version: "0.4.12"
+  }
+}

@@ -1,0 +1,17 @@
+name: "synstructure"
+description: "Helper methods and macros for custom derives"
+third_party {
+  version: "0.13.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 20
+  }
+  homepage: "https://crates.io/crates/synstructure"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/synstructure/synstructure-0.13.1.crate"
+    version: "0.13.1"
+  }
+}

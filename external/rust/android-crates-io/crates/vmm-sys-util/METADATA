@@ -1,0 +1,17 @@
+name: "vmm-sys-util"
+description: "A system utility set"
+third_party {
+  version: "0.12.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 6
+  }
+  homepage: "https://crates.io/crates/vmm-sys-util"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/vmm-sys-util/vmm-sys-util-0.12.1.crate"
+    version: "0.12.1"
+  }
+}

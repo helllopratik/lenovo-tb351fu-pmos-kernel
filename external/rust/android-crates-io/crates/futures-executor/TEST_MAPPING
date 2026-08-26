@@ -1,0 +1,50 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/anyhow"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-channel"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/futures-test"
+    },
+    {
+      "path": "external/rust/android-crates-io/crates/tokio"
+    },
+    {
+      "path": "packages/modules/DnsResolver"
+    },
+    {
+      "path": "packages/modules/Virtualization/authfs"
+    },
+    {
+      "path": "packages/modules/Virtualization/virtualizationmanager"
+    },
+    {
+      "path": "packages/modules/Virtualization/zipfuse"
+    },
+    {
+      "path": "system/security/keystore2"
+    },
+    {
+      "path": "system/security/keystore2/legacykeystore"
+    }
+  ],
+  "presubmit": [
+    {
+      "name": "futures-executor_test_src_lib"
+    },
+    {
+      "name": "futures-executor_test_tests_local_pool"
+    }
+  ],
+  "presubmit-rust": [
+    {
+      "name": "futures-executor_test_src_lib"
+    },
+    {
+      "name": "futures-executor_test_tests_local_pool"
+    }
+  ]
+}

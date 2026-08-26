@@ -1,0 +1,17 @@
+name: "spdx"
+description: "Helper crate for SPDX expressions"
+third_party {
+  version: "0.10.8"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 23
+  }
+  homepage: "https://crates.io/crates/spdx"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/spdx/spdx-0.10.8.crate"
+    version: "0.10.8"
+  }
+}

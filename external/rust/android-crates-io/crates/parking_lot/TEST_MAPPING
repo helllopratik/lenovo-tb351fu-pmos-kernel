@@ -1,0 +1,18 @@
+{
+  "imports": [
+    {
+      "path": "external/rust/android-crates-io/crates/vulkano"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "parking_lot_test_src_lib"
+    },
+    {
+      "name": "parking_lot_test_tests_issue_203"
+    },
+    {
+      "name": "parking_lot_test_tests_issue_392"
+    }
+  ]
+}

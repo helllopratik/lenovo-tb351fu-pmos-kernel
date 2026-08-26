@@ -1,0 +1,17 @@
+name: "anes"
+description: "ANSI Escape Sequences provider & parser"
+third_party {
+  version: "0.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 12
+    day: 13
+  }
+  homepage: "https://crates.io/crates/anes"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/anes/anes-0.2.0.crate"
+    version: "0.2.0"
+  }
+}

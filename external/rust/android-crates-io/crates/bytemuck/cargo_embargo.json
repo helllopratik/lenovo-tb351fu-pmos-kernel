@@ -1,0 +1,37 @@
+{
+  "features": [
+    "derive",
+    "extern_crate_alloc"
+  ],
+  "min_sdk_version": "29",
+  "package": {
+    "bytemuck": {
+      "add_module_block": "cargo_embargo_target_windows_enabled.bp.fragment"
+    }
+  },
+  "variants": [
+    {
+      "features": [
+        "extern_crate_std",
+        "derive",
+        "extern_crate_alloc",
+        "min_const_generics"
+      ],
+      "tests": true,
+      "min_sdk_version": "34"
+    },
+    {
+      "module_name_overrides": {
+        "libbytemuck": "libbytemuck_nostd"
+      },
+      "package": {
+        "bytemuck": {
+          "force_rlib": true,
+          "host_supported": false,
+          "alloc": true,
+          "no_std": true
+        }
+      }
+    }
+  ]
+}

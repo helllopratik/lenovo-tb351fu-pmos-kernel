@@ -1,0 +1,17 @@
+name: "ptr_meta"
+description: "A radioactive stabilization of the ptr_meta rfc"
+third_party {
+  version: "0.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 11
+    day: 5
+  }
+  homepage: "https://crates.io/crates/ptr_meta"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/ptr_meta/ptr_meta-0.2.0.crate"
+    version: "0.2.0"
+  }
+}

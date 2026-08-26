@@ -1,0 +1,17 @@
+name: "libtest-mimic"
+description: "Write your own test harness that looks and behaves like the built-in test harness used by `rustc --test`"
+third_party {
+  version: "0.6.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 12
+    day: 21
+  }
+  homepage: "https://crates.io/crates/libtest-mimic"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/libtest-mimic/libtest-mimic-0.6.1.crate"
+    version: "0.6.1"
+  }
+}

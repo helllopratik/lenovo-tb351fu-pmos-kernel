@@ -1,0 +1,9 @@
+{
+  "package": {
+    "safe-mmio": { "force_rlib": true, "host_supported": false, "no_std": true }
+  },
+  "module_name_overrides": { "libzerocopy": "libzerocopy_nostd" },
+  "run_cargo": false,
+  "min_sdk_version": "29",
+  "tests": true
+}

@@ -1,0 +1,17 @@
+name: "ash"
+description: "Vulkan bindings for Rust"
+third_party {
+  version: "0.37.3+1.3.251"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2023
+    month: 8
+    day: 2
+  }
+  homepage: "https://crates.io/crates/ash"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/ash/ash-0.37.3+1.3.251.crate"
+    version: "0.37.3+1.3.251"
+  }
+}

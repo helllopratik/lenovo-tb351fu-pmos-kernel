@@ -1,0 +1,7 @@
+{
+  "tests": true,
+  "module_blocklist": [
+    "hash_file"
+  ],
+  "min_sdk_version": "29"
+}

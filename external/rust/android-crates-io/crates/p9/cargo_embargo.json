@@ -1,0 +1,11 @@
+{
+  "run_cargo": false,
+  "min_sdk_version": "29",
+  "tests": true,
+  "package": {
+    "p9": {
+      "patch": "patches/Android.bp.patch",
+      "host_first_multilib": true
+    }
+  }
+}

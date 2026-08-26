@@ -1,0 +1,17 @@
+name: "ippusb"
+description: "HTTP proxy for IPP-over-USB devices"
+third_party {
+  version: "0.3.1"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 4
+    day: 3
+  }
+  homepage: "https://crates.io/crates/ippusb"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/ippusb/ippusb-0.3.1.crate"
+    version: "0.3.1"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "package": {
+    "glam": {
+      "device_supported": false,
+      "license_text": [
+        "LICENSE"
+      ]
+    }
+  },
+  "run_cargo": false,
+  "min_sdk_version": "29"
+}

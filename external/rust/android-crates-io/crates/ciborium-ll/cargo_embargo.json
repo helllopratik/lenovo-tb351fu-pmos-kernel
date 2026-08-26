@@ -1,0 +1,28 @@
+{
+  "run_cargo": false,
+  "variants": [
+    {
+      "tests": true
+    },
+    {
+      "module_name_overrides": {
+        "libciborium_io": "libciborium_io_nostd",
+        "libciborium_ll": "libciborium_ll_nostd",
+        "libhalf": "libhalf_nostd"
+      },
+      "package": {
+        "ciborium-ll": {
+          "alloc": true,
+          "force_rlib": true,
+          "host_supported": false,
+          "no_std": true
+        }
+      }
+    },
+    {
+      "generate_androidbp": false,
+      "generate_rulesmk": true
+    }
+  ],
+  "min_sdk_version": "29"
+}

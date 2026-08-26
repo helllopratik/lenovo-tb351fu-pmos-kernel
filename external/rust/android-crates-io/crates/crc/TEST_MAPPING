@@ -1,0 +1,10 @@
+{
+  "postsubmit": [
+    {
+      "name": "crc_test_src_lib"
+    },
+    {
+      "name": "crc_test_tests_crc"
+    }
+  ]
+}

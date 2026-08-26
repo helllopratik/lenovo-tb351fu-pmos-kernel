@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "termtree_test_src_lib"
+    }
+  ]
+}

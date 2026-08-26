@@ -1,0 +1,8 @@
+{
+  "min_sdk_version": "29",
+  "package": {
+    "dc_bundle": {
+      "copy_out": true
+    }
+  }
+}

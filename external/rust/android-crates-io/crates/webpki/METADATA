@@ -1,0 +1,17 @@
+name: "webpki"
+description: "Web PKI X.509 Certificate Verification."
+third_party {
+  version: "0.22.4"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2024
+    month: 2
+    day: 6
+  }
+  homepage: "https://crates.io/crates/webpki"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/webpki/webpki-0.22.4.crate"
+    version: "0.22.4"
+  }
+}

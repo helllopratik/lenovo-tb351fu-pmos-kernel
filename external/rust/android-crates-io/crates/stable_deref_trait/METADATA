@@ -1,0 +1,17 @@
+name: "stable_deref_trait"
+description: "An unsafe marker trait for types like Box and Rc that dereference to a stable address even when moved, and hence can be used with libraries such as owning_ref and rental."
+third_party {
+  version: "1.2.0"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2025
+    month: 1
+    day: 24
+  }
+  homepage: "https://crates.io/crates/stable_deref_trait"
+  identifier {
+    type: "Archive"
+    value: "https://static.crates.io/crates/stable_deref_trait/stable_deref_trait-1.2.0.crate"
+    version: "1.2.0"
+  }
+}

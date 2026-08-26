@@ -1,0 +1,7 @@
+{
+  "postsubmit": [
+    {
+      "name": "memmap2_test_src_lib"
+    }
+  ]
+}

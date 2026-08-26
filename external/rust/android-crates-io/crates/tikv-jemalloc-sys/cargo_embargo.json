@@ -1,0 +1,14 @@
+{
+  "package": {
+    "tikv-jemalloc-sys": {
+      "patch": "patches/Android.bp.patch",
+      "device_supported": false
+    }
+  },
+  "run_cargo": false,
+  "extra_cfg": [
+    "prefixed"
+  ],
+  "tests": false,
+  "min_sdk_version": "29"
+}
