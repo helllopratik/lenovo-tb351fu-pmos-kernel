@@ -12,21 +12,39 @@ PMOS_DIR="${PMOS_DIR:-$(dirname "$SCRIPT_DIR")}"
 COMMON_DIR="${COMMON_DIR:-$SCRIPT_DIR}"
 OUT_DIR="${OUT_DIR:-$COMMON_DIR/out}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$PMOS_DIR/artifacts}"
-# LLVM 20 toolchain (matches original clang-r547379 v20 used for GKI)
-export PATH="/usr/lib/llvm-20/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# LLVM / Clang toolchain
+export PATH="/usr/lib/llvm-20/bin:/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 echo "========================================================================"
 echo " 1. Compiling Freestanding /init & Generating Initramfs CPIO"
 echo "========================================================================"
+mkdir -p "$ARTIFACTS_DIR"
 mkdir -p /tmp/irfs_build/dev /tmp/irfs_build/proc /tmp/irfs_build/sys /tmp/irfs_build/root
 
-aarch64-linux-gnu-gcc -static -nostdlib -fno-builtin -O2 -fno-stack-protector \
+INIT_SRC="$COMMON_DIR/pmos_init_src/pmos_init.c"
+if [ ! -f "$INIT_SRC" ] && [ -f "$ARTIFACTS_DIR/pmos_init.c" ]; then
+  INIT_SRC="$ARTIFACTS_DIR/pmos_init.c"
+fi
+
+# Detect cross compiler (aarch64-linux-gnu-gcc or clang)
+if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+  CC="aarch64-linux-gnu-gcc"
+elif command -v clang >/dev/null 2>&1; then
+  CC="clang --target=aarch64-linux-gnu"
+elif [ -x "/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin/clang" ]; then
+  CC="/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin/clang --target=aarch64-linux-gnu"
+else
+  CC="aarch64-linux-gnu-gcc"
+fi
+
+$CC -static -nostdlib -fno-builtin -O2 -fno-stack-protector \
   -fno-asynchronous-unwind-tables -fno-ident -Wl,-e,_start \
-  "$ARTIFACTS_DIR/pmos_init.c" -o /tmp/irfs_build/init
+  "$INIT_SRC" -o /tmp/irfs_build/init
 
 chmod 755 /tmp/irfs_build/init
 
 (cd /tmp/irfs_build && find . | cpio -H newc -o) > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio"
+xz -9 --check=crc32 -c "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.xz"
 rm -rf /tmp/irfs_build
 
 echo "Initramfs created: $ARTIFACTS_DIR/pmos_initramfs_194.cpio ($(du -h "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" | cut -f1))"
