@@ -111,7 +111,7 @@ static const char * const fb_keep_keys[] = {
 
 /* High-volume probe noise that would otherwise drown the window. */
 static const char * const fb_drop_keys[] = {
-	"minix filesystem found", NULL,
+	"minix filesystem found", "minix", "ramdisk:", "RAMDISK:", NULL,
 };
 
 static bool fb_line_dropped(const char *s)

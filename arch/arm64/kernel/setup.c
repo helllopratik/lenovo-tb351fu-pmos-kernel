@@ -497,12 +497,17 @@ static void dump_kernel_offset(void)
 	}
 }
 
+void pmos_hardware_reset(void);
+
 static int arm64_panic_block_dump(struct notifier_block *self,
 				  unsigned long v, void *p)
 {
 	dump_kernel_offset();
 	dump_cpu_features();
 	dump_mem_limit();
+	pr_emerg("PMOSPANIC: panic detected! Hardware rebooting in 10 seconds...\n");
+	mdelay(10000);
+	pmos_hardware_reset();
 	return 0;
 }
 
@@ -521,7 +526,7 @@ device_initcall(register_arm64_panic_block);
 static int __init check_mmu_enabled_at_boot(void)
 {
 	if (!efi_enabled(EFI_BOOT) && mmu_enabled_at_boot)
-		panic("Non-EFI boot detected with MMU and caches enabled");
+		pr_warn("Non-EFI boot detected with MMU and caches enabled (LK bootloader - tolerated)\n");
 	return 0;
 }
 device_initcall_sync(check_mmu_enabled_at_boot);
@@ -597,13 +602,120 @@ static void pmos_bf_work(struct work_struct *w)
 }
 static DECLARE_DELAYED_WORK(pmos_bf_dwork, pmos_bf_work);
 
-static int __maybe_unused pmos_reboot_thread(void *data)
+void pmos_hardware_reset(void)
 {
-	ssleep(60);
-	pr_emerg("PMOSCAPTURE: clean warm restart at 60s - console flushed continuously to 0x48090000\n");
+	void __iomem *b = ioremap(0x10007000, 0x100);
+	if (b) {
+		writel(0x22000000 | (31 << 5), b + 0x04);
+		writel(0x1971, b + 0x08);
+		writel(0xF808, b + 0x04);
+		iounmap(b);
+	}
+	emergency_restart();
+}
+
+static int pmos_reboot_thread(void *data)
+{
+	int rem;
+	for (rem = 60; rem > 0; rem -= 10) {
+		pr_emerg("PMOSCAPTURE: warm auto-restart in %d seconds (pull DRAM log via 0x48090000)...\n", rem);
+		ssleep(10);
+	}
+	pr_emerg("PMOSCAPTURE: executing clean warm restart now...\n");
 	kernel_restart("bootloader");
+	pmos_hardware_reset();
 	return 0;
 }
+
+static int __init pmos_reboot_init(void)
+{
+	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
+	pr_emerg("PMOSCAPTURE: 60s warm auto-restart kthread active\n");
+	return 0;
+}
+late_initcall(pmos_reboot_init);
+
+#include <linux/input.h>
+
+static bool emg_pwr_down = false;
+static bool emg_vol_down = false;
+
+static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
+			       unsigned int code, int value)
+{
+	if (type != EV_KEY)
+		return;
+
+	if (code == KEY_POWER)
+		emg_pwr_down = (value != 0);
+	else if (code == KEY_VOLUMEDOWN)
+		emg_vol_down = (value != 0);
+
+	if (emg_pwr_down && emg_vol_down) {
+		pr_emerg("=====================================================\n");
+		pr_emerg("EMERGENCY: Power + Vol-Down detected! Instant shutdown...\n");
+		pr_emerg("=====================================================\n");
+		kernel_power_off();
+		pmos_hardware_reset();
+	}
+}
+
+static int pmos_emg_connect(struct input_handler *handler,
+			    struct input_dev *dev,
+			    const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int err;
+
+	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "pmos_emg_handle";
+
+	err = input_register_handle(handle);
+	if (err) {
+		kfree(handle);
+		return err;
+	}
+
+	err = input_open_device(handle);
+	if (err) {
+		input_unregister_handle(handle);
+		kfree(handle);
+		return err;
+	}
+
+	return 0;
+}
+
+static void pmos_emg_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id pmos_emg_ids[] = {
+	{ .flags = INPUT_DEVICE_ID_MATCH_EVBIT, .evbit = { BIT_MASK(EV_KEY) } },
+	{ },
+};
+
+static struct input_handler pmos_emg_handler = {
+	.event		= pmos_emg_key_event,
+	.connect	= pmos_emg_connect,
+	.disconnect	= pmos_emg_disconnect,
+	.name		= "pmos_emg_keys",
+	.id_table	= pmos_emg_ids,
+};
+
+static int __init pmos_emg_init(void)
+{
+	return input_register_handler(&pmos_emg_handler);
+}
+late_initcall(pmos_emg_init);
 
 static int __init pmos_ufs_census(void)
 {
@@ -662,9 +774,6 @@ static int __init pmos_ufs_census(void)
 	}
 
 	/* schedule_delayed_work(&pmos_dd_dwork, msecs_to_jiffies(12000)); */
-	/* kthread_run(pmos_reboot_thread, NULL, "pmos_reboot"); - disabled to allow continuous postmarketOS session */
-	pr_emerg("PMOSCAPTURE: warm restart kthread disabled (postmarketOS running continuously)\n");
-
 	return 0;
 }
 late_initcall(pmos_ufs_census);
