@@ -13,7 +13,7 @@ COMMON_DIR="${COMMON_DIR:-$SCRIPT_DIR}"
 OUT_DIR="${OUT_DIR:-$COMMON_DIR/out}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$PMOS_DIR/artifacts}"
 # LLVM / Clang toolchain
-export PATH="/usr/lib/llvm-20/bin:/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/mnt/Nvme/evolutionx/sync/prebuilts/kernel-build-tools/linux-x86/bin:/usr/lib/llvm-20/bin:/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 echo "========================================================================"
 echo " 1. Compiling Freestanding /init & Generating Initramfs CPIO"
@@ -44,6 +44,7 @@ $CC -static -nostdlib -fno-builtin -O2 -fno-stack-protector \
 chmod 755 /tmp/irfs_build/init
 
 (cd /tmp/irfs_build && find . | cpio -H newc -o) > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio"
+cp "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" "$ARTIFACTS_DIR/pmos_initramfs_latest.cpio"
 xz -9 --check=crc32 -c "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.xz"
 rm -rf /tmp/irfs_build
 
