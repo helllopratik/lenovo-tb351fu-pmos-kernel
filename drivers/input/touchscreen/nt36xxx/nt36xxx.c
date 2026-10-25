@@ -4261,6 +4261,11 @@ if(!ts->gesture_mode) {
 
 	mutex_unlock(&ts->lock);
 
+	/* Kick autonomous continuous scan immediately on resume so touch
+	 * wakes without waiting for the 20s watchdog cycle under simpledrm/pmosfb */
+	msleep(20);
+	nvt_force_continuous_scan();
+
 #if NVT_CUST_PROC_CMD
 	queue_work(nvt_fwu_wq, &ts_restore_cmd_work);
 #endif

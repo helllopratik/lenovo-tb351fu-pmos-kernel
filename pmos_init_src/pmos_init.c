@@ -1,10 +1,31 @@
 /* PMOS TB351FU embedded init (freestanding, aarch64)
  * Hardware storage pipeline is 100% built into the kernel.
- * Dumps /proc/partitions, creates mknod /dev/mmcblk0p2, mounts ext4 rootfs, boots postmarketOS Phosh.
+ * Supports UFS 2.2 internal storage (sdc64/userdata, sdc62/super)
+ * and MicroSD (mmcblk0p2) with ext4, f2fs, and erofs auto-detection.
  */
 
 #define S_IFCHR 0020000
 #define S_IFBLK 0060000
+
+struct root_target {
+	const char *path;
+	long dev_t;
+	const char *label;
+};
+
+static const struct root_target targets[] = {
+	{ "/dev/sdc64",     (259 << 8) | 48, "UFS userdata (sdc64)" },
+	{ "/dev/sdc62",     (259 << 8) | 46, "UFS super (sdc62)" },
+	{ "/dev/mmcblk0p2", (179 << 8) | 2,  "MicroSD p2 (mmcblk0p2)" },
+	{ "/dev/sdc57",     (259 << 8) | 41, "UFS tee_b (sdc57)" },
+	{ "/dev/sdc58",     (259 << 8) | 42, "UFS lenovoraw (sdc58)" },
+};
+
+static const char *fs_types[] = {
+	"ext4",
+	"f2fs",
+	"erofs",
+};
 
 static long syscall3(long nr, long a, long b, long c)
 {
@@ -141,27 +162,51 @@ void _start(void)
 	syscall5(40 /*mount*/, (long)"proc", (long)"/proc", (long)"proc", 0, 0);
 	syscall5(40 /*mount*/, (long)"sysfs", (long)"/sys", (long)"sysfs", 0, 0);
 
-	/* Wait 3s for kernel MSDC enumeration to settle */
+	/* Wait 3s for storage controllers (MSDC & UFS) to enumerate */
 	sleep_s(3);
 
 	/* Dump kernel partitions list */
 	dump_partitions();
 
-	/* Explicitly create block device nodes */
+	/* Explicitly create block device nodes for both MicroSD and UFS */
 	syscall4(33 /*mknodat*/, -100, (long)"/dev/mmcblk0", S_IFBLK | 0660, (179 << 8) | 0);
 	syscall4(33 /*mknodat*/, -100, (long)"/dev/mmcblk0p1", S_IFBLK | 0660, (179 << 8) | 1);
 	syscall4(33 /*mknodat*/, -100, (long)"/dev/mmcblk0p2", S_IFBLK | 0660, (179 << 8) | 2);
 
-	/* Mount rootfs on /root with retries (wait up to 35 seconds) */
+	syscall4(33 /*mknodat*/, -100, (long)"/dev/sdc", S_IFBLK | 0660, (8 << 8) | 32);
+	syscall4(33 /*mknodat*/, -100, (long)"/dev/sdc57", S_IFBLK | 0660, (259 << 8) | 41);
+	syscall4(33 /*mknodat*/, -100, (long)"/dev/sdc58", S_IFBLK | 0660, (259 << 8) | 42);
+	syscall4(33 /*mknodat*/, -100, (long)"/dev/sdc62", S_IFBLK | 0660, (259 << 8) | 46);
+	syscall4(33 /*mknodat*/, -100, (long)"/dev/sdc64", S_IFBLK | 0660, (259 << 8) | 48);
+
+	/* Mount rootfs on /root with retries (wait up to 40 seconds) */
 	rc = -1;
-	for (tries = 0; tries < 35; tries++) {
-		syscall4(33, -100, (long)"/dev/mmcblk0p2", S_IFBLK | 0660, (179 << 8) | 2);
-		rc = syscall5(40 /*mount*/, (long)"/dev/mmcblk0p2", (long)"/root", (long)"ext4", 0, 0);
-		if (rc == 0) {
-			kmsg("<3>PMOSINIT: /dev/mmcblk0p2 ext4 mount SUCCESS on /root!\n");
-			break;
+	const char *mounted_target = 0;
+	const char *mounted_fs = 0;
+
+	for (tries = 0; tries < 40 && rc != 0; tries++) {
+		int t;
+		for (t = 0; t < (int)(sizeof(targets) / sizeof(targets[0])); t++) {
+			int f;
+			syscall4(33 /*mknodat*/, -100, (long)targets[t].path, S_IFBLK | 0660, targets[t].dev_t);
+			for (f = 0; f < (int)(sizeof(fs_types) / sizeof(fs_types[0])); f++) {
+				rc = syscall5(40 /*mount*/, (long)targets[t].path, (long)"/root", (long)fs_types[f], 0, 0);
+				if (rc == 0) {
+					mounted_target = targets[t].label;
+					mounted_fs = fs_types[f];
+					kmsg("<3>PMOSINIT: rootfs mount SUCCESS: ");
+					kmsg(mounted_target);
+					kmsg(" (");
+					kmsg(mounted_fs);
+					kmsg(") on /root!\n");
+					break;
+				}
+			}
+			if (rc == 0)
+				break;
 		}
-		sleep_s(1);
+		if (rc != 0)
+			sleep_s(1);
 	}
 
 	if (rc == 0) {
