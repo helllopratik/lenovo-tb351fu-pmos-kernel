@@ -115,7 +115,21 @@ if adb get-state 1>/dev/null 2>&1; then
   adb push "$ARTIFACTS_DIR/vbmeta_latest.img" /data/local/tmp/vbmeta_latest.img
 
   echo "Confirming Slot B by-name symlinks resolve to real devices..."
-  adb shell "su root sh -c 'ls -la /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vbmeta_b /dev/block/by-name/vbmeta_system_b /dev/block/by-name/vbmeta_vendor_b'"
+  adb shell "su root sh -c 'ls -la /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vendor_boot_b /dev/block/by-name/dtbo_b /dev/block/by-name/vbmeta_b /dev/block/by-name/vbmeta_system_b /dev/block/by-name/vbmeta_vendor_b'"
+
+  echo "Checking Slot B DTBO and Vendor Boot prerequisites..."
+  adb shell "su root sh -c '
+    # If vendor_boot_b is empty/zeroed, initialize it from vendor_boot_a so LK has valid DTB & bootconfig
+    if [ \$(head -c 16 /dev/block/by-name/vendor_boot_b | tr -d \"\\0\" | wc -c) -eq 0 ]; then
+      echo \"vendor_boot_b is unpopulated; provisioning from vendor_boot_a...\"
+      dd if=/dev/block/by-name/vendor_boot_a of=/dev/block/by-name/vendor_boot_b bs=4194304 conv=fsync
+    fi
+    # If dtbo_b is empty/zeroed, initialize it from dtbo_a so LK has valid hardware overlays
+    if [ \$(head -c 16 /dev/block/by-name/dtbo_b | tr -d \"\\0\" | wc -c) -eq 0 ]; then
+      echo \"dtbo_b is unpopulated; provisioning from dtbo_a...\"
+      dd if=/dev/block/by-name/dtbo_a of=/dev/block/by-name/dtbo_b bs=4194304 conv=fsync
+    fi
+  '"
 
   echo "Flashing partitions to SLOT B ONLY via dd..."
   # Flash VBMeta to Slot B
@@ -128,7 +142,7 @@ if adb get-state 1>/dev/null 2>&1; then
   adb shell "su root sh -c 'dd if=/data/local/tmp/init_boot_latest.img of=/dev/block/by-name/init_boot_b bs=4194304 conv=fsync'"
 
   echo "Verifying MD5 checksums on Slot B..."
-  adb shell "su root sh -c 'md5sum /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vbmeta_b'"
+  adb shell "su root sh -c 'md5sum /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vendor_boot_b /dev/block/by-name/dtbo_b /dev/block/by-name/vbmeta_b'"
   md5sum "$ARTIFACTS_DIR/boot_latest.img" "$ARTIFACTS_DIR/init_boot_latest.img" "$ARTIFACTS_DIR/vbmeta_latest.img"
   echo "SUCCESS! Flashed and verified exclusively on Slot B (NO reboot performed)."
 else
