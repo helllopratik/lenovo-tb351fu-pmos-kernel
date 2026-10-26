@@ -543,10 +543,8 @@ static int aw88395_i2c_probe(struct i2c_client *i2c)
 		return ret;
 
 	ret = aw88395_request_firmware_file(aw88395);
-	if (ret < 0) {
-		dev_err(&i2c->dev, "%s failed\n", __func__);
-		return ret;
-	}
+	if (ret < 0)
+		dev_warn(&i2c->dev, "%s: firmware not loaded yet, continuing\n", __func__);
 
 	ret = devm_snd_soc_register_component(&i2c->dev,
 			&soc_codec_dev_aw88395,
@@ -561,13 +559,22 @@ static int aw88395_i2c_probe(struct i2c_client *i2c)
 
 static const struct i2c_device_id aw88395_i2c_id[] = {
 	{ AW88395_I2C_NAME },
+	{ "aw883xx_smartpa" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, aw88395_i2c_id);
 
+static const struct of_device_id aw88395_of_match[] = {
+	{ .compatible = "awinic,aw88395" },
+	{ .compatible = "awinic,aw883xx_smartpa" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, aw88395_of_match);
+
 static struct i2c_driver aw88395_i2c_driver = {
 	.driver = {
 		.name = AW88395_I2C_NAME,
+		.of_match_table = of_match_ptr(aw88395_of_match),
 	},
 	.probe = aw88395_i2c_probe,
 	.id_table = aw88395_i2c_id,

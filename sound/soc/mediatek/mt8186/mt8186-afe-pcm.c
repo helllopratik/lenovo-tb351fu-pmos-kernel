@@ -2903,13 +2903,15 @@ static int mt8186_afe_pcm_dev_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "mtk_afe_combine_sub_dai fail\n");
 
 	/* reset controller to reset audio regs before regmap cache */
-	rstc = devm_reset_control_get_exclusive(dev, "audiosys");
-	if (IS_ERR(rstc))
-		return dev_err_probe(dev, PTR_ERR(rstc), "could not get audiosys reset\n");
-
-	ret = reset_control_reset(rstc);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to trigger audio reset\n");
+	rstc = devm_reset_control_get_optional_exclusive(dev, "audiosys");
+	if (IS_ERR(rstc)) {
+		dev_warn(dev, "could not get audiosys reset: %ld, continuing\n", PTR_ERR(rstc));
+		rstc = NULL;
+	} else if (rstc) {
+		ret = reset_control_reset(rstc);
+		if (ret)
+			dev_warn(dev, "failed to trigger audio reset: %d, continuing\n", ret);
+	}
 
 	/* enable clock for regcache get default value from hw */
 	afe_priv->pm_runtime_bypass_reg_ctl = true;

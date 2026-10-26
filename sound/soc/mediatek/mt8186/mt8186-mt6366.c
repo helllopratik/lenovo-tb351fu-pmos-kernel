@@ -1358,6 +1358,10 @@ static const struct mtk_soundcard_pdata mt8186_mt6366_rt5650_pdata = {
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id mt8186_mt6366_dt_match[] = {
 	{
+		.compatible = "mediatek,mt6789-mt6366-sound",
+		.data = &mt8186_mt6366_rt1019_rt5682s_pdata,
+	},
+	{
 		.compatible = "mediatek,mt8186-mt6366-rt1019-rt5682s-sound",
 		.data = &mt8186_mt6366_rt1019_rt5682s_pdata,
 	},

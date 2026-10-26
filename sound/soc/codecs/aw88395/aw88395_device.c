@@ -1707,11 +1707,9 @@ int aw88395_init(struct aw_device **aw_dev, struct i2c_client *i2c, struct regma
 
 	switch (chip_id) {
 	case AW88395_CHIP_ID:
-		ret = aw_dev_init((*aw_dev));
-		break;
 	default:
-		ret = -EINVAL;
-		dev_err((*aw_dev)->dev, "unsupported device");
+		dev_info((*aw_dev)->dev, "detected chip id 0x%04x, initializing as aw883xx\n", chip_id);
+		ret = aw_dev_init((*aw_dev));
 		break;
 	}
 
