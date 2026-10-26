@@ -257,6 +257,14 @@ void _start(void)
 	if (rc == 0) {
 		kmsg("<3>PMOSINIT: mount SUCCESS! Switching root to postmarketOS...\n");
 
+		/* Disarm the 60s auto-reboot watchdog now that rootfs is mounted */
+		long cfd = syscall4(56 /*openat*/, -100, (long)"/proc/pmos_cancel", O_WRONLY, 0);
+		if (cfd >= 0) {
+			syscall3(64 /*write*/, cfd, (long)"1\n", 2);
+			syscall3(57 /*close*/, cfd, 0, 0);
+			kmsg("<3>PMOSINIT: 60s auto-reboot watchdog cancelled!\n");
+		}
+
 		/* Move mount /dev, /proc, /sys into rootfs */
 		syscall3(34 /*mkdirat*/, -100, (long)"/root/dev", 0755);
 		syscall3(34 /*mkdirat*/, -100, (long)"/root/proc", 0755);
@@ -278,6 +286,8 @@ void _start(void)
 		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/zero", S_IFCHR | 0666, (1 << 8) | 5);
 		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/kmsg", S_IFCHR | 0660, (1 << 8) | 11);
 		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/tty0", S_IFCHR | 0660, (4 << 8) | 0);
+		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/tty1", S_IFCHR | 0660, (4 << 8) | 1);
+		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/tty7", S_IFCHR | 0660, (4 << 8) | 7);
 		syscall4(33 /*mknodat*/, -100, (long)"/root/dev/tty", S_IFCHR | 0666, (5 << 8) | 0);
 
 		if (!syscall3(49 /*chdir*/, (long)"/root", 0, 0)) {

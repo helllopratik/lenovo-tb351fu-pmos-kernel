@@ -347,43 +347,47 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 	}
 
 	for_each_child_of_node(node, child) {
+		struct resource *r;
+
 		keys->keys[index].regs = &mtk_pmic_regs->keys_regs[index];
 
 		keys->keys[index].irq =
 			platform_get_irq_byname(pdev, irqnames[index]);
 		if (keys->keys[index].irq < 0) {
-			of_node_put(child);
-			return keys->keys[index].irq;
+			r = platform_get_resource_byname(pdev, IORESOURCE_IRQ, irqnames[index]);
+			if (r && r->start > 0)
+				keys->keys[index].irq = r->start;
+		}
+		if (keys->keys[index].irq < 0) {
+			r = platform_get_resource(pdev, IORESOURCE_IRQ, index);
+			if (r && r->start > 0)
+				keys->keys[index].irq = r->start;
 		}
 
 		if (of_device_is_compatible(node, "mediatek,mt6358-keys") ||
 		    of_device_is_compatible(node, "mediatek,mt6366-keys")) {
 			keys->keys[index].irq_r = platform_get_irq_byname(pdev,
 									  irqnames_r[index]);
-
 			if (keys->keys[index].irq_r < 0) {
-				of_node_put(child);
-				return keys->keys[index].irq_r;
+				r = platform_get_resource_byname(pdev, IORESOURCE_IRQ, irqnames_r[index]);
+				if (r && r->start > 0)
+					keys->keys[index].irq_r = r->start;
 			}
 		}
 
 		error = of_property_read_u32(child,
 			"linux,keycodes", &keys->keys[index].keycode);
 		if (error) {
-			dev_err(keys->dev,
-				"failed to read key:%d linux,keycode property: %d\n",
-				index, error);
-			of_node_put(child);
-			return error;
+			keys->keys[index].keycode = (index == 0) ? KEY_POWER : KEY_VOLUMEDOWN;
 		}
 
 		if (of_property_read_bool(child, "wakeup-source"))
 			keys->keys[index].wakeup = true;
 
-		error = mtk_pmic_key_setup(keys, &keys->keys[index]);
-		if (error) {
-			of_node_put(child);
-			return error;
+		if (keys->keys[index].irq > 0) {
+			error = mtk_pmic_key_setup(keys, &keys->keys[index]);
+			if (error)
+				dev_warn(keys->dev, "key %d setup failed: %d\n", index, error);
 		}
 
 		index++;

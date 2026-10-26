@@ -614,12 +614,37 @@ void pmos_hardware_reset(void)
 	emergency_restart();
 }
 
+bool pmos_reboot_cancelled = false;
+EXPORT_SYMBOL(pmos_reboot_cancelled);
+
+static ssize_t pmos_cancel_write(struct file *file, const char __user *buf,
+				 size_t count, loff_t *ppos)
+{
+	extern bool fb_klog_stop;
+	WRITE_ONCE(pmos_reboot_cancelled, true);
+	WRITE_ONCE(fb_klog_stop, true);
+	pr_emerg("PMOSCAPTURE: auto-reboot watchdog disarmed via /proc/pmos_cancel!\n");
+	return count;
+}
+
+static const struct proc_ops pmos_cancel_proc_ops = {
+	.proc_write = pmos_cancel_write,
+};
+
 static int pmos_reboot_thread(void *data)
 {
 	int rem;
-	for (rem = 60; rem > 0; rem -= 10) {
+	for (rem = 60; rem > 0; rem -= 5) {
+		if (READ_ONCE(pmos_reboot_cancelled)) {
+			pr_emerg("PMOSCAPTURE: warm auto-restart CANCELLED (userspace running)!\n");
+			return 0;
+		}
 		pr_emerg("PMOSCAPTURE: warm auto-restart in %d seconds (pull DRAM log via 0x48090000)...\n", rem);
-		ssleep(10);
+		ssleep(5);
+	}
+	if (READ_ONCE(pmos_reboot_cancelled)) {
+		pr_emerg("PMOSCAPTURE: warm auto-restart CANCELLED (userspace running)!\n");
+		return 0;
 	}
 	pr_emerg("PMOSCAPTURE: executing clean warm restart now...\n");
 	kernel_restart("bootloader");
@@ -629,8 +654,9 @@ static int pmos_reboot_thread(void *data)
 
 static int __init pmos_reboot_init(void)
 {
+	proc_create("pmos_cancel", 0222, NULL, &pmos_cancel_proc_ops);
 	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
-	pr_emerg("PMOSCAPTURE: 60s warm auto-restart kthread active\n");
+	pr_emerg("PMOSCAPTURE: 60s warm auto-restart kthread active (/proc/pmos_cancel disarms)\n");
 	return 0;
 }
 late_initcall(pmos_reboot_init);
@@ -648,6 +674,8 @@ static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 {
 	if (type != EV_KEY)
 		return;
+
+	WRITE_ONCE(pmos_reboot_cancelled, true);
 
 	if (code == KEY_POWER) {
 		emg_pwr_down = (value != 0);
