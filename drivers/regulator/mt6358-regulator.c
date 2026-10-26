@@ -708,28 +708,56 @@ static int mt6358_regulator_probe(struct platform_device *pdev)
 
 	for (i = 0; i < max_regulator; i++) {
 		struct device_node *child = NULL;
-		char ldo_name[32], buck_name[32];
 		const char *n = mt6358_info[i].desc.name;
 
 		config.dev = &pdev->dev;
 		config.regmap = mt6397->regmap;
 
-		snprintf(ldo_name, sizeof(ldo_name), "ldo-%s", n);
-		snprintf(buck_name, sizeof(buck_name), "buck-%s", n);
-
 		if (pdev->dev.of_node) {
-			if (mt6358_info[i].desc.of_match)
-				child = of_get_child_by_name(pdev->dev.of_node, mt6358_info[i].desc.of_match);
-			if (!child)
-				child = of_get_child_by_name(pdev->dev.of_node, n);
-			if (!child)
-				child = of_get_child_by_name(pdev->dev.of_node, ldo_name);
-			if (!child)
-				child = of_get_child_by_name(pdev->dev.of_node, buck_name);
-			if (!child && !strcmp(n, "vmch")) {
-				child = of_get_child_by_name(pdev->dev.of_node, "VMCH_EINT_HIGH");
-				if (!child)
-					child = of_get_child_by_name(pdev->dev.of_node, "VMCH_EINT_LOW");
+			struct device_node *cn;
+			const char *om = mt6358_info[i].desc.of_match;
+			char ldo_om[48], buck_om[48];
+			char ldo_name[48], buck_name[48];
+			char low_n[32];
+			int k;
+
+			for (k = 0; n[k] && k < sizeof(low_n) - 1; k++)
+				low_n[k] = (n[k] >= 'A' && n[k] <= 'Z') ? (n[k] + 32) : n[k];
+			low_n[k] = '\0';
+
+			snprintf(ldo_name, sizeof(ldo_name), "ldo-%s", low_n);
+			snprintf(buck_name, sizeof(buck_name), "buck-%s", low_n);
+
+			if (om) {
+				snprintf(ldo_om, sizeof(ldo_om), "ldo-%s", om);
+				snprintf(buck_om, sizeof(buck_om), "buck-%s", om);
+			} else {
+				ldo_om[0] = '\0';
+				buck_om[0] = '\0';
+			}
+
+			for_each_child_of_node(pdev->dev.of_node, cn) {
+				const char *cname = cn->name;
+
+				if (om && (!strcasecmp(cname, om) ||
+					   !strcasecmp(cname, ldo_om) ||
+					   !strcasecmp(cname, buck_om))) {
+					child = cn;
+					break;
+				}
+				if (!strcasecmp(cname, n) ||
+				    !strcasecmp(cname, low_n) ||
+				    !strcasecmp(cname, ldo_name) ||
+				    !strcasecmp(cname, buck_name)) {
+					child = cn;
+					break;
+				}
+				if (!strcasecmp(low_n, "vmch") &&
+				    (!strcasecmp(cname, "VMCH_EINT_HIGH") ||
+				     !strcasecmp(cname, "VMCH_EINT_LOW"))) {
+					child = cn;
+					break;
+				}
 			}
 		}
 		config.of_node = child;
@@ -743,7 +771,16 @@ static int mt6358_regulator_probe(struct platform_device *pdev)
 				 mt6358_info[i].desc.name, (long)PTR_ERR(rdev));
 			continue;
 		}
+
+		if (child)
+			pr_info("PMOSPWR: bound %s to DT <%s>\n",
+				mt6358_info[i].desc.name, child->name);
 	}
+
+	/* Force power on for UFS / eMMC storage (VEMC 3.0V) */
+	regmap_update_bits(mt6397->regmap, MT6358_LDO_VEMC_CON0, BIT(0), BIT(0));
+	regmap_update_bits(mt6397->regmap, MT6358_VEMC_ANA_CON0, 0x700, 0x500);
+	pr_emerg("PMOSPWR: UFS/eMMC power (VEMC 3.0V) forced ON!\n");
 
 	/* Force power on for MicroSD card slot (VMC and VMCH at 3.3V) */
 	regmap_update_bits(mt6397->regmap, MT6358_LDO_VMC_CON0, BIT(0), BIT(0));
@@ -751,6 +788,13 @@ static int mt6358_regulator_probe(struct platform_device *pdev)
 	regmap_update_bits(mt6397->regmap, MT6358_LDO_VMCH_CON0, BIT(0), BIT(0));
 	regmap_update_bits(mt6397->regmap, MT6358_VMCH_ANA_CON0, 0x700, 0x500);
 	pr_emerg("PMOSPWR: MicroSD card power (VMC 3.3V + VMCH 3.3V) forced ON!\n");
+
+	/* Configure MT6366/MT6358 PMIC hardware Power-Key long-press reset/shutdown:
+	 * Enable PWRKEY_RST (bit 6), disable HOMEKEY_RST (bit 5) so single Power key holds trigger hardware power-cut */
+	regmap_update_bits(mt6397->regmap, MT6358_TOP_RST_MISC,
+			   BIT(6) | BIT(5) | GENMASK(9, 8),
+			   BIT(6));
+	pr_emerg("PMOSPWR: MT6366 hardware power-key reset armed (8s Power hold = hardware cut)!\n");
 
 	pr_emerg("PMOSPWR: mt6358-regulator probe SUCCESS: all LDO & BUCK regulators bound to DT nodes!\n");
 

@@ -639,6 +639,9 @@ late_initcall(pmos_reboot_init);
 
 static bool emg_pwr_down = false;
 static bool emg_vol_down = false;
+static unsigned long emg_pwr_press_jiffies = 0;
+static int emg_pwr_tap_count = 0;
+static unsigned long emg_last_tap_jiffies = 0;
 
 static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 			       unsigned int code, int value)
@@ -646,14 +649,36 @@ static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 	if (type != EV_KEY)
 		return;
 
-	if (code == KEY_POWER)
+	if (code == KEY_POWER) {
 		emg_pwr_down = (value != 0);
-	else if (code == KEY_VOLUMEDOWN)
+		if (value) {
+			emg_pwr_press_jiffies = jiffies;
+			if (time_before(jiffies, emg_last_tap_jiffies + msecs_to_jiffies(1200))) {
+				emg_pwr_tap_count++;
+				if (emg_pwr_tap_count >= 3) {
+					pr_emerg("EMERGENCY: Triple Power tap detected! Instant shutdown...\n");
+					kernel_power_off();
+					pmos_hardware_reset();
+				}
+			} else {
+				emg_pwr_tap_count = 1;
+			}
+			emg_last_tap_jiffies = jiffies;
+		} else {
+			if (emg_pwr_press_jiffies &&
+			    time_after(jiffies, emg_pwr_press_jiffies + msecs_to_jiffies(1500))) {
+				pr_emerg("EMERGENCY: Long-press Power (>1.5s) detected! Instant shutdown...\n");
+				kernel_power_off();
+				pmos_hardware_reset();
+			}
+		}
+	} else if (code == KEY_VOLUMEDOWN || code == KEY_VOLUMEUP) {
 		emg_vol_down = (value != 0);
+	}
 
 	if (emg_pwr_down && emg_vol_down) {
 		pr_emerg("=====================================================\n");
-		pr_emerg("EMERGENCY: Power + Vol-Down detected! Instant shutdown...\n");
+		pr_emerg("EMERGENCY: Power + Volume key detected! Instant shutdown...\n");
 		pr_emerg("=====================================================\n");
 		kernel_power_off();
 		pmos_hardware_reset();

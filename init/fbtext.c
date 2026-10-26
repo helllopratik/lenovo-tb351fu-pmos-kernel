@@ -111,7 +111,9 @@ static const char * const fb_keep_keys[] = {
 
 /* High-volume probe noise that would otherwise drown the window. */
 static const char * const fb_drop_keys[] = {
-	"minix filesystem found", "minix", "ramdisk:", "RAMDISK:", NULL,
+	"minix filesystem found", "minix", "ramdisk:", "RAMDISK:",
+	"pinctrl deferred", "deferred probe", "spi transfer timed out",
+	"noqueue transfer failed", "failed to transfer one message", NULL,
 };
 
 static bool fb_line_dropped(const char *s)
@@ -152,8 +154,25 @@ static void fb_klog_ring_tail(char *ring, size_t cap)
 		if (!kmsg_dump_get_line(&iter, false, line, sizeof(line), &len))
 			break;
 		line[sizeof(line) - 1] = '\0';
-		while (*s == '<' || (*s >= '0' && *s <= '7'))
+
+		/* Strip syslog level prefix <N> */
+		while (*s == '<' || (*s >= '0' && *s <= '7') || *s == '>')
 			s++;
+		while (*s == ' ')
+			s++;
+
+		/* Strip kernel timestamps/caller prefixes [  1.234567][   T1] */
+		while (*s == '[') {
+			const char *cl = strchr(s, ']');
+			if (cl) {
+				s = cl + 1;
+				while (*s == ' ')
+					s++;
+			} else {
+				break;
+			}
+		}
+
 		fb_seen++;
 		for (i = 0; fb_keep_keys[i]; i++)
 			if (fb_line_matches(s, fb_keep_keys[i])) {
