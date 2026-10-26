@@ -816,3 +816,23 @@ static int __init pmos_simplefb_register(void)
 	return 0;
 }
 subsys_initcall(pmos_simplefb_register);
+
+static int __init pmos_afe_dt_fixup(void)
+{
+	struct device_node *np;
+
+	np = of_find_compatible_node(NULL, NULL, "mediatek,mt6789-sound");
+	if (!np)
+		np = of_find_compatible_node(NULL, NULL, "mediatek,mt8186-sound");
+	if (np) {
+		struct property *prop = of_find_property(np, "power-domains", NULL);
+		if (prop) {
+			of_remove_property(np, prop);
+			pr_emerg("PMOS-AFE: Removed unresolvable power-domains property from %s\n",
+				 of_node_full_name(np));
+		}
+		of_node_put(np);
+	}
+	return 0;
+}
+early_initcall(pmos_afe_dt_fixup);

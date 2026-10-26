@@ -74,9 +74,10 @@ int mt8186_afe_gpio_init(struct device *dev)
 	aud_pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR(aud_pinctrl)) {
 		ret = PTR_ERR(aud_pinctrl);
-		dev_err(dev, "%s(), ret %d, cannot get aud_pinctrl!\n",
+		dev_warn(dev, "%s(), ret %d, optional aud_pinctrl not found\n",
 			__func__, ret);
-		return ret;
+		aud_pinctrl = NULL;
+		return 0;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(aud_gpios); i++) {
@@ -112,11 +113,8 @@ static int mt8186_afe_gpio_select(struct device *dev,
 		return -EINVAL;
 	}
 
-	if (!aud_gpios[type].gpio_prepare) {
-		dev_dbg(dev, "%s(), error, gpio type %d not prepared\n",
-			__func__, type);
-		return -EIO;
-	}
+	if (!aud_pinctrl || !aud_gpios[type].gpio_prepare)
+		return 0;
 
 	ret = pinctrl_select_state(aud_pinctrl,
 				   aud_gpios[type].gpioctrl);
