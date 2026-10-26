@@ -148,13 +148,18 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 	error = matrix_keypad_parse_properties(&pdev->dev, &keypad->n_rows,
 					       &keypad->n_cols);
 	if (error) {
-		dev_err(&pdev->dev, "Failed to parse keypad params\n");
-		return error;
+		dev_warn(&pdev->dev, "keypad rows/cols missing from DT, default to 8x8\n");
+		keypad->n_rows = 8;
+		keypad->n_cols = 8;
+		error = 0;
 	}
 
 	if (device_property_read_u32(&pdev->dev, "debounce-delay-ms",
-				     &debounce))
-		debounce = 16;
+				     &debounce)) {
+		if (device_property_read_u32(&pdev->dev, "mediatek,key-debounce-ms",
+					     &debounce))
+			debounce = 16;
+	}
 
 	if (debounce > MTK_KPD_DEBOUNCE_MAX_MS) {
 		dev_err(&pdev->dev,
@@ -189,7 +194,20 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 					   keypad->n_rows, keypad->n_cols,
 					   NULL, keypad->input_dev);
 	if (error) {
+		unsigned short *keymap;
+		int k;
+
 		dev_info(&pdev->dev, "no standard matrix keymap in DT, registering fallback volume keys\n");
+		keymap = devm_kcalloc(&pdev->dev, MTK_KPD_NUM_BITS, sizeof(unsigned short), GFP_KERNEL);
+		if (keymap) {
+			for (k = 0; k < MTK_KPD_NUM_BITS; k++)
+				keymap[k] = KEY_RESERVED;
+			keymap[0] = KEY_VOLUMEDOWN;
+			keymap[1] = KEY_VOLUMEUP;
+			keypad->input_dev->keycode = keymap;
+			keypad->input_dev->keycodesize = sizeof(unsigned short);
+			keypad->input_dev->keycodemax = MTK_KPD_NUM_BITS;
+		}
 		input_set_capability(keypad->input_dev, EV_KEY, KEY_VOLUMEUP);
 		input_set_capability(keypad->input_dev, EV_KEY, KEY_VOLUMEDOWN);
 		error = 0;

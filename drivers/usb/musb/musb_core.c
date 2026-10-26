@@ -2563,12 +2563,14 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 	musb_init_debugfs(musb);
 
 	musb->is_initialized = 1;
+	pr_info("PMOSUSB: musb_init_controller SUCCESS (port_mode=%d)\n", musb->port_mode);
 	pm_runtime_mark_last_busy(musb->controller);
 	pm_runtime_put_autosuspend(musb->controller);
 
 	return 0;
 
 fail3:
+	pr_err("PMOSUSB: musb_init_controller failed at fail3 with status %d\n", status);
 	cancel_delayed_work_sync(&musb->irq_work);
 	cancel_delayed_work_sync(&musb->finish_resume_work);
 	cancel_delayed_work_sync(&musb->deassert_reset_work);
@@ -2610,12 +2612,23 @@ static int musb_probe(struct platform_device *pdev)
 	int		irq = platform_get_irq_byname(pdev, "mc");
 	void __iomem	*base;
 
-	if (irq < 0)
+	pr_info("PMOSUSB: musb_probe START dev=%s\n", dev_name(dev));
+	if (irq < 0) {
+		pr_info("PMOSUSB: platform_get_irq_byname(mc) returned %d, trying platform_get_irq(0)\n", irq);
+		irq = platform_get_irq(pdev, 0);
+	}
+	if (irq < 0) {
+		pr_err("PMOSUSB: musb_probe failed to get irq: %d\n", irq);
 		return irq;
+	}
+	pr_info("PMOSUSB: musb_probe got irq=%d\n", irq);
 
 	base = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(base))
+	if (IS_ERR(base)) {
+		pr_err("PMOSUSB: devm_platform_ioremap_resource failed: %ld\n", PTR_ERR(base));
 		return PTR_ERR(base);
+	}
+	pr_info("PMOSUSB: devm_platform_ioremap_resource ok, calling musb_init_controller\n");
 
 	return musb_init_controller(dev, irq, base);
 }
