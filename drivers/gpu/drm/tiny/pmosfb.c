@@ -643,6 +643,7 @@ static struct drm_display_mode pmosfb_mode(unsigned int width,
 	};
 
 	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
+	drm_mode_set_name(&mode);
 
 	return mode;
 }
