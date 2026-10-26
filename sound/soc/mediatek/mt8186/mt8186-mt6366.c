@@ -1184,46 +1184,43 @@ static int mt8186_mt6366_legacy_probe(struct mtk_soc_card_data *soc_card_data)
 	struct device *dev = card->dev;
 	struct snd_soc_dai_link *dai_link;
 	struct device_node *headset_codec, *playback_codec;
-	int ret, i;
+	int ret = 0, i;
 
 	playback_codec = of_get_child_by_name(dev->of_node, "playback-codecs");
 	if (!playback_codec)
-		return dev_err_probe(dev, -EINVAL,
-				     "Property 'playback-codecs' missing or invalid\n");
+		playback_codec = of_get_child_by_name(dev->of_node, "mediatek,speaker-codec");
 
 	headset_codec = of_get_child_by_name(dev->of_node, "headset-codec");
-	if (!headset_codec) {
-		of_node_put(playback_codec);
-		return dev_err_probe(dev, -EINVAL,
-				     "Property 'headset-codec' missing or invalid\n");
-	}
 
 	for_each_card_prelinks(card, i, dai_link) {
-		ret = mt8186_mt6366_card_set_be_link(card, dai_link, playback_codec, "I2S3");
-		if (ret) {
-			dev_err_probe(dev, ret, "%s set playback_codec fail\n",
-				      dai_link->name);
-			break;
+		if (playback_codec) {
+			ret = mt8186_mt6366_card_set_be_link(card, dai_link, playback_codec, "I2S3");
+			if (ret) {
+				dev_warn(dev, "%s set playback_codec warning: %d\n",
+					 dai_link->name, ret);
+				ret = 0;
+			}
 		}
 
-		ret = mt8186_mt6366_card_set_be_link(card, dai_link, headset_codec, "I2S0");
-		if (ret) {
-			dev_err_probe(dev, ret, "%s set headset_codec fail\n",
-				      dai_link->name);
-			break;
-		}
+		if (headset_codec) {
+			ret = mt8186_mt6366_card_set_be_link(card, dai_link, headset_codec, "I2S0");
+			if (ret)
+				dev_warn(dev, "%s set headset_codec I2S0 warning: %d\n",
+					 dai_link->name, ret);
 
-		ret = mt8186_mt6366_card_set_be_link(card, dai_link, headset_codec, "I2S1");
-		if (ret) {
-			dev_err_probe(dev, ret, "%s set headset_codec fail\n",
-				      dai_link->name);
-			break;
+			ret = mt8186_mt6366_card_set_be_link(card, dai_link, headset_codec, "I2S1");
+			if (ret)
+				dev_warn(dev, "%s set headset_codec I2S1 warning: %d\n",
+					 dai_link->name, ret);
+			ret = 0;
 		}
 	}
-	of_node_put(headset_codec);
-	of_node_put(playback_codec);
+	if (headset_codec)
+		of_node_put(headset_codec);
+	if (playback_codec)
+		of_node_put(playback_codec);
 
-	return ret;
+	return 0;
 }
 
 static int mt8186_mt6366_soc_card_probe(struct mtk_soc_card_data *soc_card_data, bool legacy)
