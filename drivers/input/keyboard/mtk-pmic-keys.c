@@ -161,8 +161,8 @@ static void mtk_pmic_keys_lp_reset_setup(struct mtk_pmic_keys *keys,
 	error  = of_property_read_u32(keys->dev->of_node,
 				      "mediatek,long-press-mode",
 				      &long_press_mode);
-	if (error)
-		long_press_mode = LP_DISABLE;
+	if (error || long_press_mode == LP_TWOKEY)
+		long_press_mode = LP_ONEKEY; /* Tablet has no physical homekey; use Power key alone for HW reset */
 
 	switch (long_press_mode) {
 	case LP_TWOKEY:
