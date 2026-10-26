@@ -611,13 +611,17 @@ void pmos_hardware_reset(void)
 		pr_emerg("PMOSRST: Triggering instant TopRGU hardware SoC reset...\n");
 		/* 1. Arm reset mode with timer enable, dual output, and external reset */
 		writel(0x22000000 | (1 << 6) | (1 << 2) | (1 << 0), b + 0x00);
-		/* 2. Issue immediate software reset (0x1209) */
-		writel(0x1209, b + 0x14);
 		wmb();
-		iounmap(b);
-		mdelay(10);
+		/* 2. Issue continuous software + system reset until hardware resets */
+		while (1) {
+			writel(0x1209, b + 0x14);
+			writel(0x88000000, b + 0x18);
+			wmb();
+			mdelay(5);
+		}
 	}
-	emergency_restart();
+	while (1)
+		cpu_relax();
 }
 EXPORT_SYMBOL(pmos_hardware_reset);
 
