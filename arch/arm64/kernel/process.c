@@ -110,11 +110,15 @@ void machine_halt(void)
  * achieves this. When the system power is turned off, it will take all CPUs
  * with it.
  */
+extern void pmos_hardware_reset(void);
+
 void machine_power_off(void)
 {
 	local_irq_disable();
 	smp_send_stop();
 	do_kernel_power_off();
+	/* Fallback: if PMIC power cut did not drop power, reset hardware immediately */
+	pmos_hardware_reset();
 }
 
 /*
@@ -141,6 +145,9 @@ void machine_restart(char *cmd)
 
 	/* Now call the architecture specific reboot code. */
 	do_kernel_restart(cmd);
+
+	/* Fallback: direct TopRGU hardware SoC reset guarantee */
+	pmos_hardware_reset();
 
 	/*
 	 * Whoops - the architecture was unable to reboot.

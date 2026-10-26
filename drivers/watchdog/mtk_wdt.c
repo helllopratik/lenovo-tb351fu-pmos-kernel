@@ -239,10 +239,12 @@ static int mtk_wdt_restart(struct watchdog_device *wdt_dev,
 	/* Enable reset in order to issue a system reset instead of an IRQ */
 	reg = readl(wdt_base + WDT_MODE);
 	reg &= ~WDT_MODE_IRQ_EN;
-	writel(reg | WDT_MODE_KEY, wdt_base + WDT_MODE);
+	reg |= WDT_MODE_KEY | WDT_MODE_EN | WDT_MODE_DUAL_EN | WDT_MODE_EXRST_EN;
+	writel(reg, wdt_base + WDT_MODE);
 
 	while (1) {
 		writel(WDT_SWRST_KEY, wdt_base + WDT_SWRST);
+		wmb();
 		mdelay(5);
 	}
 
@@ -459,7 +461,7 @@ static int mtk_wdt_probe(struct platform_device *pdev)
 
 	watchdog_init_timeout(&mtk_wdt->wdt_dev, timeout, dev);
 	watchdog_set_nowayout(&mtk_wdt->wdt_dev, nowayout);
-	watchdog_set_restart_priority(&mtk_wdt->wdt_dev, 128);
+	watchdog_set_restart_priority(&mtk_wdt->wdt_dev, 255);
 
 	watchdog_set_drvdata(&mtk_wdt->wdt_dev, mtk_wdt);
 
