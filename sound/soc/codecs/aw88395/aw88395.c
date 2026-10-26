@@ -26,6 +26,8 @@ static const struct regmap_config aw88395_remap_config = {
 	.val_format_endian = REGMAP_ENDIAN_BIG,
 };
 
+static int aw88395_request_firmware_file(struct aw88395 *aw88395);
+
 static void aw88395_start_pa(struct aw88395 *aw88395)
 {
 	int ret, i;
@@ -60,8 +62,11 @@ static void aw88395_start(struct aw88395 *aw88395, bool sync_start)
 {
 	int ret;
 
-	if (aw88395->aw_pa->fw_status != AW88395_DEV_FW_OK)
-		return;
+	if (aw88395->aw_pa->fw_status != AW88395_DEV_FW_OK) {
+		ret = aw88395_request_firmware_file(aw88395);
+		if (ret < 0)
+			return;
+	}
 
 	if (aw88395->aw_pa->status == AW88395_DEV_PW_ON)
 		return;
@@ -474,6 +479,8 @@ static int aw88395_request_firmware_file(struct aw88395 *aw88395)
 	aw88395->aw_pa->fw_status = AW88395_DEV_FW_FAILED;
 
 	ret = request_firmware(&cont, AW88395_ACF_FILE, aw88395->aw_pa->dev);
+	if ((ret < 0) || (!cont))
+		ret = request_firmware(&cont, "aw883xx_acf.bin", aw88395->aw_pa->dev);
 	if ((ret < 0) || (!cont)) {
 		dev_err(aw88395->aw_pa->dev, "load [%s] failed!", AW88395_ACF_FILE);
 		return ret;
