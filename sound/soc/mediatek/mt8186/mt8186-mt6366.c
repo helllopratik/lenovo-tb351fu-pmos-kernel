@@ -339,7 +339,7 @@ static const struct snd_soc_ops mt8186_rt5682s_i2s_ops = {
 	.hw_params = mt8186_rt5682s_i2s_hw_params,
 };
 
-static int mt8186_mt6366_rt1019_rt5682s_hdmi_init(struct snd_soc_pcm_runtime *rtd)
+static int __maybe_unused mt8186_mt6366_rt1019_rt5682s_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_component *cmpnt_afe =
 		snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
@@ -883,10 +883,9 @@ static struct snd_soc_dai_link mt8186_mt6366_rt1019_rt5682s_dai_links[] = {
 		.no_pcm = 1,
 		.dai_fmt = SND_SOC_DAIFMT_I2S |
 			   SND_SOC_DAIFMT_IB_IF |
-			   SND_SOC_DAIFMT_CBM_CFM,
+			   SND_SOC_DAIFMT_CBS_CFS,
 		.dpcm_playback = 1,
 		.ignore_suspend = 1,
-		.init = mt8186_mt6366_rt1019_rt5682s_hdmi_init,
 		SND_SOC_DAILINK_REG(i2s3),
 	},
 	{
