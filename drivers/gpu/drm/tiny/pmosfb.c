@@ -372,25 +372,10 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
  */
 static void pmosfb_pace_present(struct pmosfb_device *sdev)
 {
-	ktime_t now, since, period;
-	u64 remain_us;
-
-	period = sdev->vblank_period;
-	if (ktime_to_ns(period) <= 0)
-		return;
-	if (ktime_to_ns(sdev->last_present) == 0) {
-		sdev->last_present = ktime_get();
-		return;
-	}
-
-	now = ktime_get();
-	since = ktime_sub(now, sdev->last_present);
-	if (ktime_to_ns(since) >= ktime_to_ns(period))
-		goto out;
-
-	remain_us = (ktime_to_ns(period) - ktime_to_ns(since)) / NSEC_PER_USEC;
-	usleep_range(remain_us, remain_us + 1000);
-out:
+	/* The synthetic vblank timer already delivers 60 Hz frame pacing to
+	 * Mutter/Phosh. Extra sleeping inside the commit worker stalls video
+	 * frames and causes playback lag. We update timestamp without sleeping.
+	 */
 	sdev->last_present = ktime_get();
 }
 
@@ -653,9 +638,11 @@ static struct drm_display_mode pmosfb_mode(unsigned int width,
 					   unsigned int width_mm,
 					   unsigned int height_mm)
 {
-	const struct drm_display_mode mode = {
+	struct drm_display_mode mode = {
 		DRM_MODE_INIT(60, width, height, width_mm, height_mm)
 	};
+
+	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
 
 	return mode;
 }

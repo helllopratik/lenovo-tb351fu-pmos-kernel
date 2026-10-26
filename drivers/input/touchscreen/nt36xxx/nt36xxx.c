@@ -2693,7 +2693,7 @@ XFER_ERROR:
 static int nvt_ts_thread_func(void *data)
 {
 	struct nvt_ts_data *ts_data = (struct nvt_ts_data *)data;
-	uint32_t prev_touch_frames = 0;
+	uint64_t prev_spi_errors = 0;
 	uint8_t dead_ticks = 0;
 	struct sched_param sp = { .sched_priority = 50 };
 
@@ -2718,26 +2718,17 @@ static int nvt_ts_thread_func(void *data)
 			nvt_reg_rd(base + 0x60, rv, 1);
 
 			/*
-			 * Watchdog: detect two failure modes:
-			 *  1) Touch was working then died (prev > 0,
-			 *     frames frozen, mask == 0).
-			 *  2) Touch never produced frames from boot
-			 *     (frames == 0, mask == 0).
-			 *
-			 * After 2 consecutive dead ticks (20s) trigger
-			 * a full hardware recovery: GPIO reset pulse
-			 * (clears a hung SPI-controller/bus state that
-			 * blocks plain SPI reset + re-download), then
-			 * firmware re-download + continuous-scan kick.
+			 * Watchdog: ONLY detect genuine SPI bus communication failures.
+			 * Idle periods without user touch input are completely normal
+			 * and must never trigger a hardware reset or firmware re-flash.
 			 */
-			if (ts->diag_last_status_mask == 0 &&
-			    ts->diag_touch_frames == prev_touch_frames) {
+			if (ts->diag_spi_errors > prev_spi_errors) {
 				dead_ticks++;
 				dead = true;
 			} else {
 				dead_ticks = 0;
 			}
-			prev_touch_frames = ts->diag_touch_frames;
+			prev_spi_errors = ts->diag_spi_errors;
 
 			nvt_crash_append("NVT diag boot=%lus reset=0x%02X "
 					 "dma=%02X/%02X/%02X dead=%d/%d\n",
@@ -2753,7 +2744,7 @@ static int nvt_ts_thread_func(void *data)
 					"ticks, full HW+SPI recovery\n",
 					dead_ticks);
 				dead_ticks = 0;
-				prev_touch_frames = 0;
+				prev_spi_errors = 0;
 				nvt_hw_reset_pulse();
 				msleep(50);
 				nvt_bootloader_reset();
