@@ -282,7 +282,25 @@ int mtk_soundcard_common_probe(struct platform_device *pdev)
 			card->topology_shortname_created = true;
 		}
 		card->name = card->topology_shortname;
+	} else {
+		struct snd_soc_dai_link *filtered_links;
+		int count = 0;
+
+		filtered_links = devm_kcalloc(&pdev->dev, card->num_links,
+					      sizeof(*filtered_links), GFP_KERNEL);
+		if (!filtered_links)
+			return -ENOMEM;
+
+		for (i = 0; i < card->num_links; i++) {
+			if (strncmp(card->dai_link[i].name, "AFE_SOF", 7) == 0)
+				continue;
+			filtered_links[count++] = card->dai_link[i];
+		}
+		card->dai_link = filtered_links;
+		card->num_links = count;
 	}
+
+	card->disable_route_checks = true;
 
 	/*
 	 * Regardless of whether the ADSP is wanted and/or present in a machine
