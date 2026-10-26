@@ -614,39 +614,14 @@ void pmos_hardware_reset(void)
 	emergency_restart();
 }
 
-bool pmos_reboot_cancelled = false;
-EXPORT_SYMBOL(pmos_reboot_cancelled);
-
-static ssize_t pmos_cancel_write(struct file *file, const char __user *buf,
-				 size_t count, loff_t *ppos)
-{
-	extern bool fb_klog_stop;
-	WRITE_ONCE(pmos_reboot_cancelled, true);
-	WRITE_ONCE(fb_klog_stop, true);
-	pr_emerg("PMOSCAPTURE: auto-reboot watchdog disarmed via /proc/pmos_cancel!\n");
-	return count;
-}
-
-static const struct proc_ops pmos_cancel_proc_ops = {
-	.proc_write = pmos_cancel_write,
-};
-
 static int pmos_reboot_thread(void *data)
 {
 	int rem;
-	for (rem = 60; rem > 0; rem -= 5) {
-		if (READ_ONCE(pmos_reboot_cancelled)) {
-			pr_emerg("PMOSCAPTURE: warm auto-restart CANCELLED (userspace running)!\n");
-			return 0;
-		}
+	for (rem = 120; rem > 0; rem -= 10) {
 		pr_emerg("PMOSCAPTURE: warm auto-restart in %d seconds (pull DRAM log via 0x48090000)...\n", rem);
-		ssleep(5);
+		ssleep(10);
 	}
-	if (READ_ONCE(pmos_reboot_cancelled)) {
-		pr_emerg("PMOSCAPTURE: warm auto-restart CANCELLED (userspace running)!\n");
-		return 0;
-	}
-	pr_emerg("PMOSCAPTURE: executing clean warm restart now...\n");
+	pr_emerg("PMOSCAPTURE: executing clean warm restart now (120s watchdog)...\n");
 	kernel_restart("bootloader");
 	pmos_hardware_reset();
 	return 0;
@@ -654,9 +629,8 @@ static int pmos_reboot_thread(void *data)
 
 static int __init pmos_reboot_init(void)
 {
-	proc_create("pmos_cancel", 0222, NULL, &pmos_cancel_proc_ops);
 	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
-	pr_emerg("PMOSCAPTURE: 60s warm auto-restart kthread active (/proc/pmos_cancel disarms)\n");
+	pr_emerg("PMOSCAPTURE: 120s warm auto-restart kthread active (unconditional)\n");
 	return 0;
 }
 late_initcall(pmos_reboot_init);
@@ -668,14 +642,14 @@ static bool emg_vol_down = false;
 static unsigned long emg_pwr_press_jiffies = 0;
 static int emg_pwr_tap_count = 0;
 static unsigned long emg_last_tap_jiffies = 0;
+static int emg_vol_tap_count = 0;
+static unsigned long emg_last_vol_jiffies = 0;
 
 static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 			       unsigned int code, int value)
 {
 	if (type != EV_KEY)
 		return;
-
-	WRITE_ONCE(pmos_reboot_cancelled, true);
 
 	if (code == KEY_POWER) {
 		emg_pwr_down = (value != 0);
@@ -684,8 +658,7 @@ static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 			if (time_before(jiffies, emg_last_tap_jiffies + msecs_to_jiffies(1200))) {
 				emg_pwr_tap_count++;
 				if (emg_pwr_tap_count >= 3) {
-					pr_emerg("EMERGENCY: Triple Power tap detected! Instant shutdown...\n");
-					kernel_power_off();
+					pr_emerg("EMERGENCY: Triple Power tap detected! Hardware reset now...\n");
 					pmos_hardware_reset();
 				}
 			} else {
@@ -694,21 +667,31 @@ static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
 			emg_last_tap_jiffies = jiffies;
 		} else {
 			if (emg_pwr_press_jiffies &&
-			    time_after(jiffies, emg_pwr_press_jiffies + msecs_to_jiffies(1500))) {
-				pr_emerg("EMERGENCY: Long-press Power (>1.5s) detected! Instant shutdown...\n");
-				kernel_power_off();
+			    time_after(jiffies, emg_pwr_press_jiffies + msecs_to_jiffies(1200))) {
+				pr_emerg("EMERGENCY: Long-press Power (>1.2s) detected! Hardware reset now...\n");
 				pmos_hardware_reset();
 			}
 		}
 	} else if (code == KEY_VOLUMEDOWN || code == KEY_VOLUMEUP) {
 		emg_vol_down = (value != 0);
+		if (value) {
+			if (time_before(jiffies, emg_last_vol_jiffies + msecs_to_jiffies(1500))) {
+				emg_vol_tap_count++;
+				if (emg_vol_tap_count >= 4) {
+					pr_emerg("EMERGENCY: 4x Volume tap detected! Hardware reset now...\n");
+					pmos_hardware_reset();
+				}
+			} else {
+				emg_vol_tap_count = 1;
+			}
+			emg_last_vol_jiffies = jiffies;
+		}
 	}
 
 	if (emg_pwr_down && emg_vol_down) {
 		pr_emerg("=====================================================\n");
-		pr_emerg("EMERGENCY: Power + Volume key detected! Instant shutdown...\n");
+		pr_emerg("EMERGENCY: Power + Volume key combo! Instant reset...\n");
 		pr_emerg("=====================================================\n");
-		kernel_power_off();
 		pmos_hardware_reset();
 	}
 }

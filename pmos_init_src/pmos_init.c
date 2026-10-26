@@ -255,15 +255,7 @@ void _start(void)
 	}
 
 	if (rc == 0) {
-		kmsg("<3>PMOSINIT: mount SUCCESS! Switching root to postmarketOS...\n");
-
-		/* Disarm the 60s auto-reboot watchdog now that rootfs is mounted */
-		long cfd = syscall4(56 /*openat*/, -100, (long)"/proc/pmos_cancel", O_WRONLY, 0);
-		if (cfd >= 0) {
-			syscall3(64 /*write*/, cfd, (long)"1\n", 2);
-			syscall3(57 /*close*/, cfd, 0, 0);
-			kmsg("<3>PMOSINIT: 60s auto-reboot watchdog cancelled!\n");
-		}
+		kmsg("<3>PMOSINIT: mount SUCCESS! Switching root to postmarketOS (120s reboot watchdog active)...\n");
 
 		/* Move mount /dev, /proc, /sys into rootfs */
 		syscall3(34 /*mkdirat*/, -100, (long)"/root/dev", 0755);
