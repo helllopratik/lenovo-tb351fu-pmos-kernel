@@ -62,9 +62,9 @@ static int mm8013_checkdevice(struct mm8013_chip *chip)
 	else if (val == BATID_101)
 		battery_id = 1;
 	else
-		return -EINVAL;
+		dev_warn(&chip->client->dev, "MM8013 unexpected battery ID: 0x%04x (proceeding)\n", val);
 
-	dev_dbg(&chip->client->dev, "battery_id: %d\n", battery_id);
+	dev_info(&chip->client->dev, "MM8013 battery fuel gauge detected (id=0x%04x)\n", val);
 
 	return 0;
 }
@@ -229,7 +229,7 @@ static int mm8013_get_property(struct power_supply *psy,
 }
 
 static const struct power_supply_desc mm8013_desc = {
-	.name			= "mm8013",
+	.name			= "battery",
 	.type			= POWER_SUPPLY_TYPE_BATTERY,
 	.properties		= mm8013_battery_props,
 	.num_properties		= ARRAY_SIZE(mm8013_battery_props),

@@ -3774,7 +3774,8 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	 * reboot loops (MT65xx Preloader cycling on USB). */
 	nvt_crash_append("probe: SPI untouched this boot, chip reveal deferred\n");
 
-	nvt_irq_enable(true);
+	if (!nvt_poll_exclusive)
+		nvt_irq_enable(true);
 
 	/* NO SPI access until the deferred firmware step has armed the MCU.
 	 * Reading a cold / half-booted chip (poll kthread, drain read, etc.)
@@ -4239,7 +4240,8 @@ if(!ts->gesture_mode) {
 #endif
 	nvt_sw_reset_idle();
 
-	nvt_irq_enable(true);
+	if (!nvt_poll_exclusive)
+		nvt_irq_enable(true);
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);

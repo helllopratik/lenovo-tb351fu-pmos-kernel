@@ -2921,8 +2921,10 @@ static int mt8186_afe_pcm_dev_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = pm_runtime_resume_and_get(dev);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to resume device\n");
+	if (ret) {
+		dev_warn(dev, "failed to resume device: %d (continuing without pm_runtime abort)\n", ret);
+		ret = 0;
+	}
 
 	afe->regmap = devm_regmap_init_mmio(dev, afe->base_addr,
 					    &mt8186_afe_regmap_config);
@@ -2955,9 +2957,8 @@ static int mt8186_afe_pcm_dev_probe(struct platform_device *pdev)
 
 	ret = pm_runtime_put_sync(dev);
 	if (ret) {
-		pm_runtime_get_noresume(dev);
-		dev_err(dev, "failed to suspend device: %d\n", ret);
-		goto err_pm_disable;
+		dev_warn(dev, "failed to suspend device: %d (continuing)\n", ret);
+		ret = 0;
 	}
 	afe_priv->pm_runtime_bypass_reg_ctl = false;
 
