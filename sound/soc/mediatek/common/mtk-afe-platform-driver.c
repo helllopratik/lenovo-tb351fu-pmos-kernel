@@ -85,7 +85,6 @@ snd_pcm_uframes_t mtk_afe_pcm_pointer(struct snd_soc_component *component,
 	struct mtk_base_afe_memif *memif = &afe->memif[snd_soc_rtd_to_cpu(rtd, 0)->id];
 	const struct mtk_base_memif_data *memif_data = memif->data;
 	struct regmap *regmap = afe->regmap;
-	struct device *dev = afe->dev;
 	int reg_ofs_base = memif_data->reg_ofs_base;
 	int reg_ofs_cur = memif_data->reg_ofs_cur;
 	unsigned int hw_ptr = 0, hw_base = 0;
@@ -93,19 +92,20 @@ snd_pcm_uframes_t mtk_afe_pcm_pointer(struct snd_soc_component *component,
 
 	ret = regmap_read(regmap, reg_ofs_cur, &hw_ptr);
 	if (ret || hw_ptr == 0) {
-		dev_err(dev, "%s hw_ptr err\n", __func__);
 		pcm_ptr_bytes = 0;
 		goto POINTER_RETURN_FRAMES;
 	}
 
 	ret = regmap_read(regmap, reg_ofs_base, &hw_base);
 	if (ret || hw_base == 0) {
-		dev_err(dev, "%s hw_ptr err\n", __func__);
 		pcm_ptr_bytes = 0;
 		goto POINTER_RETURN_FRAMES;
 	}
 
-	pcm_ptr_bytes = hw_ptr - hw_base;
+	if (hw_ptr < hw_base)
+		pcm_ptr_bytes = 0;
+	else
+		pcm_ptr_bytes = hw_ptr - hw_base;
 
 POINTER_RETURN_FRAMES:
 	return bytes_to_frames(substream->runtime, pcm_ptr_bytes);
