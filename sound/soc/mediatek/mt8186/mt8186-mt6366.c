@@ -75,14 +75,6 @@ static struct snd_soc_codec_conf mt8186_mt6366_rt1019_rt5682s_codec_conf[] = {
 		.dlc = COMP_CODEC_CONF("mt6358-sound"),
 		.name_prefix = "Mt6366",
 	},
-	{
-		.dlc = COMP_CODEC_CONF("bt-sco"),
-		.name_prefix = "Mt8186 bt",
-	},
-	{
-		.dlc = COMP_CODEC_CONF("hdmi-audio-codec"),
-		.name_prefix = "Mt8186 hdmi",
-	},
 };
 
 static int dmic_get(struct snd_kcontrol *kcontrol,
@@ -221,7 +213,10 @@ static int mt8186_headset_codec_init(struct snd_soc_pcm_runtime *rtd)
 	snd_jack_set_key(jack->jack, SND_JACK_BTN_3, hs_keys[3]);
 
 	type = SND_JACK_HEADSET | SND_JACK_BTN_0 | SND_JACK_BTN_1 | SND_JACK_BTN_2 | SND_JACK_BTN_3;
-	return snd_soc_component_set_jack(cmpnt_codec, jack, (void *)&type);
+	ret = snd_soc_component_set_jack(cmpnt_codec, jack, (void *)&type);
+	if (ret && ret != -ENOTSUPP)
+		return ret;
+	return 0;
 }
 
 static int mt8186_da7219_i2s_hw_params(struct snd_pcm_substream *substream,
@@ -368,7 +363,10 @@ static int mt8186_mt6366_rt1019_rt5682s_hdmi_init(struct snd_soc_pcm_runtime *rt
 		return ret;
 	}
 
-	return snd_soc_component_set_jack(cmpnt_codec, jack, NULL);
+	ret = snd_soc_component_set_jack(cmpnt_codec, jack, NULL);
+	if (ret && ret != -ENOTSUPP)
+		return ret;
+	return 0;
 }
 
 static int mt8186_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
@@ -534,9 +532,7 @@ SND_SOC_DAILINK_DEFS(hostless_src_bargein,
 SND_SOC_DAILINK_DEFS(adda,
 		     DAILINK_COMP_ARRAY(COMP_CPU("ADDA")),
 		     DAILINK_COMP_ARRAY(COMP_CODEC("mt6358-sound",
-						   "mt6358-snd-codec-aif1"),
-					COMP_CODEC("dmic-codec",
-						   "dmic-hifi")),
+						   "mt6358-snd-codec-aif1")),
 		     DAILINK_COMP_ARRAY(COMP_EMPTY()));
 SND_SOC_DAILINK_DEFS(i2s0,
 		     DAILINK_COMP_ARRAY(COMP_CPU("I2S0")),
@@ -576,7 +572,7 @@ SND_SOC_DAILINK_DEFS(connsys_i2s,
 		     DAILINK_COMP_ARRAY(COMP_EMPTY()));
 SND_SOC_DAILINK_DEFS(pcm1,
 		     DAILINK_COMP_ARRAY(COMP_CPU("PCM 1")),
-		     DAILINK_COMP_ARRAY(COMP_CODEC("bt-sco", "bt-sco-pcm-wb")),
+		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
 		     DAILINK_COMP_ARRAY(COMP_EMPTY()));
 SND_SOC_DAILINK_DEFS(tdm_in,
 		     DAILINK_COMP_ARRAY(COMP_CPU("TDM IN")),
@@ -1213,6 +1209,14 @@ static int mt8186_mt6366_legacy_probe(struct mtk_soc_card_data *soc_card_data)
 				dev_warn(dev, "%s set headset_codec I2S1 warning: %d\n",
 					 dai_link->name, ret);
 			ret = 0;
+		}
+
+		/* Guard: if any DAI link has no codec assigned, set dummy to prevent EPROBE_DEFER */
+		if (!dai_link->codecs || dai_link->num_codecs == 0 ||
+		    (dai_link->num_codecs == 1 &&
+		     !dai_link->codecs->name && !dai_link->codecs->of_node)) {
+			dai_link->codecs = &snd_soc_dummy_dlc;
+			dai_link->num_codecs = 1;
 		}
 	}
 	if (headset_codec)
