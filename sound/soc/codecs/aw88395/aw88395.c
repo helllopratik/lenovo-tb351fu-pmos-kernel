@@ -407,6 +407,9 @@ static int aw88395_codec_probe(struct snd_soc_component *component)
 	struct aw88395 *aw88395 = snd_soc_component_get_drvdata(component);
 	int ret;
 
+	if (!component->name_prefix)
+		component->name_prefix = dev_name(component->dev);
+
 	INIT_DELAYED_WORK(&aw88395->start_work, aw88395_startup_work);
 
 	/* add widgets */

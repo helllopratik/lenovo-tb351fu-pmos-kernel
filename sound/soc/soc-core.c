@@ -1537,8 +1537,12 @@ static void soc_set_name_prefix(struct snd_soc_card *card,
 	 * check if a prefix is provided in the node
 	 */
 	ret = of_property_read_string(of_node, "sound-name-prefix", &str);
-	if (ret < 0)
+	if (ret < 0) {
+		if (of_device_is_compatible(of_node, "awinic,aw88395") ||
+		    of_device_is_compatible(of_node, "awinic,aw883xx"))
+			component->name_prefix = dev_name(component->dev);
 		return;
+	}
 
 	component->name_prefix = str;
 }
