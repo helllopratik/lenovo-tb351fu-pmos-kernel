@@ -24,25 +24,25 @@ static const struct mtk_gate_regs imp_iic_wrap_cg_regs = {
 		&mtk_clk_gate_ops_setclr, CLK_OPS_PARENT_ENABLE)
 
 static const struct mtk_gate imp_iic_wrap_c_clks[] = {
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C3, "imp_iic_wrap_c_i2c3", "i2c_ck", 0),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C5, "imp_iic_wrap_c_i2c5", "i2c_ck", 1),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C6, "imp_iic_wrap_c_i2c6", "i2c_ck", 2),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C3, "imp_iic_wrap_c_i2c3", "top_i2c", 0),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C5, "imp_iic_wrap_c_i2c5", "top_i2c", 1),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_C_I2C6, "imp_iic_wrap_c_i2c6", "top_i2c", 2),
 };
 
 static const struct mtk_gate imp_iic_wrap_w_clks[] = {
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_W_I2C0, "imp_iic_wrap_w_i2c0", "i2c_ck", 0),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_W_I2C1, "imp_iic_wrap_w_i2c1", "i2c_ck", 1),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_W_I2C0, "imp_iic_wrap_w_i2c0", "top_i2c", 0),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_W_I2C1, "imp_iic_wrap_w_i2c1", "top_i2c", 1),
 };
 
 static const struct mtk_gate imp_iic_wrap_n_clks[] = {
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_N_I2C7, "imp_iic_wrap_n_i2c7", "i2c_ck", 0),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_N_I2C7, "imp_iic_wrap_n_i2c7", "top_i2c", 0),
 };
 
 static const struct mtk_gate imp_iic_wrap_en_clks[] = {
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C2, "imp_iic_wrap_en_i2c2", "i2c_ck", 0),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C4, "imp_iic_wrap_en_i2c4", "i2c_ck", 1),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C8, "imp_iic_wrap_en_i2c8", "i2c_ck", 2),
-	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C9, "imp_iic_wrap_en_i2c9", "i2c_ck", 3),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C2, "imp_iic_wrap_en_i2c2", "top_i2c", 0),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C4, "imp_iic_wrap_en_i2c4", "top_i2c", 1),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C8, "imp_iic_wrap_en_i2c8", "top_i2c", 2),
+	GATE_IMP_IIC_WRAP(CLK_IMP_IIC_WRAP_EN_I2C9, "imp_iic_wrap_en_i2c9", "top_i2c", 3),
 };
 
 static const struct mtk_clk_desc imp_iic_wrap_c_desc = {
@@ -66,13 +66,9 @@ static const struct mtk_clk_desc imp_iic_wrap_en_desc = {
 };
 
 static const struct of_device_id of_match_clk_mt6789_imp_iic_wrap[] = {
-	{ .compatible = "mediatek,mt6789-imp_iic_wrap_c", .data = &imp_iic_wrap_c_desc },
 	{ .compatible = "mediatek,mt6789-imp-iic-wrap-c", .data = &imp_iic_wrap_c_desc },
-	{ .compatible = "mediatek,mt6789-imp_iic_wrap_w", .data = &imp_iic_wrap_w_desc },
 	{ .compatible = "mediatek,mt6789-imp-iic-wrap-w", .data = &imp_iic_wrap_w_desc },
-	{ .compatible = "mediatek,mt6789-imp_iic_wrap_n", .data = &imp_iic_wrap_n_desc },
 	{ .compatible = "mediatek,mt6789-imp-iic-wrap-n", .data = &imp_iic_wrap_n_desc },
-	{ .compatible = "mediatek,mt6789-imp_iic_wrap_en", .data = &imp_iic_wrap_en_desc },
 	{ .compatible = "mediatek,mt6789-imp-iic-wrap-en", .data = &imp_iic_wrap_en_desc },
 	{ /* sentinel */ }
 };
