@@ -189,8 +189,10 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 					   keypad->n_rows, keypad->n_cols,
 					   NULL, keypad->input_dev);
 	if (error) {
-		dev_err(&pdev->dev, "Failed to build keymap\n");
-		return error;
+		dev_info(&pdev->dev, "no standard matrix keymap in DT, registering fallback volume keys\n");
+		input_set_capability(keypad->input_dev, EV_KEY, KEY_VOLUMEUP);
+		input_set_capability(keypad->input_dev, EV_KEY, KEY_VOLUMEDOWN);
+		error = 0;
 	}
 
 	input_set_capability(keypad->input_dev, EV_MSC, MSC_SCAN);
@@ -242,6 +244,7 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 static const struct of_device_id mt6779_keypad_of_match[] = {
 	{ .compatible = "mediatek,mt6779-keypad" },
 	{ .compatible = "mediatek,mt6873-keypad" },
+	{ .compatible = "mediatek,kp" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mt6779_keypad_of_match);

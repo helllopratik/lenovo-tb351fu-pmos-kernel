@@ -341,8 +341,14 @@ static int fb_klog_thread(void *arg)
 	unsigned long paints = 0;
 
 	for (;;) {
-		if (fb_klog_stop)
+		if (fb_klog_stop) {
+			if (fb_lin) {
+				memset(fb_lin, 0, DBG_WIN_SIZE);
+				dcache_clean_poc((unsigned long)fb_lin,
+						 (unsigned long)fb_lin + DBG_WIN_SIZE);
+			}
 			break;
+		}
 		fb_klog_ring_tail(ring, sizeof(ring));
 		scnprintf(title, sizeof(title),
 			  "T267 s=%lu k=%lu d=%lu paint=%lu",
