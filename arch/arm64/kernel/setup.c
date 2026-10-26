@@ -301,15 +301,17 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	{
 		void __iomem *wdt = early_ioremap(0x10007000, 0x100);
 		if (wdt) {
-			/* PMOSWDT: Explicitly disarm hardware RGU watchdog so postmarketOS
-			 * runs continuously without tripping reset.
+			/* PMOSWDT: TopRGU Watchdog configuration:
+			 * Disarm timer counter (EN = 0) so kernel boot is uninterrupted,
+			 * BUT enable external reset pin (EXRST_EN = 1 << 2) and dual reset output (DUAL_EN = 1 << 6)
+			 * so PMIC 8-second Power key hold will ALWAYS trigger hardware reset!
 			 */
 			iowrite32(0x1971, wdt + 0x08);              /* RESTART key */
-			iowrite32(0x22000000, wdt + 0x00);          /* MODE_KEY (EN bit 0 = DISABLED) */
+			iowrite32(0x22000000 | (1 << 2) | (1 << 6), wdt + 0x00); /* MODE_KEY | EXRST_EN | DUAL_EN */
 			iowrite32(0x1971, wdt + 0x08);              /* RESTART key */
 
 			early_iounmap(wdt, 0x100);
-			pr_info("MediaTek topRGU MASTER WATCHDOG DISARMED for continuous operation\n");
+			pr_info("MediaTek topRGU: external hardware reset ARMED (EXRST_EN | DUAL_EN)\n");
 		}
 	}
 
@@ -505,8 +507,8 @@ static int arm64_panic_block_dump(struct notifier_block *self,
 	dump_kernel_offset();
 	dump_cpu_features();
 	dump_mem_limit();
-	pr_emerg("PMOSPANIC: panic detected! Hardware rebooting in 10 seconds...\n");
-	mdelay(10000);
+	pr_emerg("PMOSPANIC: panic detected! Hardware rebooting in 1 second...\n");
+	mdelay(1000);
 	pmos_hardware_reset();
 	return 0;
 }
@@ -606,13 +608,30 @@ void pmos_hardware_reset(void)
 {
 	void __iomem *b = ioremap(0x10007000, 0x100);
 	if (b) {
-		writel(0x22000000 | (31 << 5), b + 0x04);
-		writel(0x1971, b + 0x08);
-		writel(0xF808, b + 0x04);
+		pr_emerg("PMOSRST: Triggering instant TopRGU hardware SoC reset...\n");
+		/* 1. Arm reset mode with timer enable, dual output, and external reset */
+		writel(0x22000000 | (1 << 6) | (1 << 2) | (1 << 0), b + 0x00);
+		/* 2. Issue immediate software reset (0x1209) */
+		writel(0x1209, b + 0x14);
+		wmb();
 		iounmap(b);
+		mdelay(10);
 	}
 	emergency_restart();
 }
+EXPORT_SYMBOL(pmos_hardware_reset);
+
+static int pmos_restart_notify(struct notifier_block *nb,
+			       unsigned long action, void *data)
+{
+	pmos_hardware_reset();
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block pmos_restart_nb = {
+	.notifier_call = pmos_restart_notify,
+	.priority = 255, /* HIGHEST PRIORITY: beats PSCI (129) and watchdog (128) */
+};
 
 static atomic_t pmos_cancel_watchdog = ATOMIC_INIT(0);
 
@@ -661,6 +680,8 @@ static int pmos_reboot_thread(void *data)
 
 static int __init pmos_reboot_init(void)
 {
+	register_restart_handler(&pmos_restart_nb);
+	pr_info("PMOSRST: Registered priority 255 TopRGU instant hardware restart handler\n");
 	proc_create("pmos_cancel", 0666, NULL, &pmos_cancel_proc_ops);
 	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
 	pr_emerg("PMOSCAPTURE: 120s warm auto-restart kthread active (cancel with /proc/pmos_cancel)\n");
@@ -668,123 +689,10 @@ static int __init pmos_reboot_init(void)
 }
 late_initcall(pmos_reboot_init);
 
-#include <linux/input.h>
-
-static bool emg_pwr_down = false;
-static bool emg_vol_down = false;
-static unsigned long emg_pwr_press_jiffies = 0;
-static int emg_pwr_tap_count = 0;
-static unsigned long emg_last_tap_jiffies = 0;
-static int emg_vol_tap_count = 0;
-static unsigned long emg_last_vol_jiffies = 0;
-
-static void pmos_emg_key_event(struct input_handle *handle, unsigned int type,
-			       unsigned int code, int value)
-{
-	if (type != EV_KEY)
-		return;
-
-	if (code == KEY_POWER) {
-		emg_pwr_down = (value != 0);
-		if (value) {
-			emg_pwr_press_jiffies = jiffies;
-			if (time_before(jiffies, emg_last_tap_jiffies + msecs_to_jiffies(1200))) {
-				emg_pwr_tap_count++;
-				if (emg_pwr_tap_count >= 3) {
-					pr_emerg("EMERGENCY: Triple Power tap detected! Hardware reset now...\n");
-					pmos_hardware_reset();
-				}
-			} else {
-				emg_pwr_tap_count = 1;
-			}
-			emg_last_tap_jiffies = jiffies;
-		} else {
-			if (emg_pwr_press_jiffies &&
-			    time_after(jiffies, emg_pwr_press_jiffies + msecs_to_jiffies(1200))) {
-				pr_emerg("EMERGENCY: Long-press Power (>1.2s) detected! Hardware reset now...\n");
-				pmos_hardware_reset();
-			}
-		}
-	} else if (code == KEY_VOLUMEDOWN || code == KEY_VOLUMEUP) {
-		emg_vol_down = (value != 0);
-		if (value) {
-			if (time_before(jiffies, emg_last_vol_jiffies + msecs_to_jiffies(1500))) {
-				emg_vol_tap_count++;
-				if (emg_vol_tap_count >= 4) {
-					pr_emerg("EMERGENCY: 4x Volume tap detected! Hardware reset now...\n");
-					pmos_hardware_reset();
-				}
-			} else {
-				emg_vol_tap_count = 1;
-			}
-			emg_last_vol_jiffies = jiffies;
-		}
-	}
-
-	if (emg_pwr_down && emg_vol_down) {
-		pr_emerg("=====================================================\n");
-		pr_emerg("EMERGENCY: Power + Volume key combo! Instant reset...\n");
-		pr_emerg("=====================================================\n");
-		pmos_hardware_reset();
-	}
-}
-
-static int pmos_emg_connect(struct input_handler *handler,
-			    struct input_dev *dev,
-			    const struct input_device_id *id)
-{
-	struct input_handle *handle;
-	int err;
-
-	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
-	if (!handle)
-		return -ENOMEM;
-
-	handle->dev = dev;
-	handle->handler = handler;
-	handle->name = "pmos_emg_handle";
-
-	err = input_register_handle(handle);
-	if (err) {
-		kfree(handle);
-		return err;
-	}
-
-	err = input_open_device(handle);
-	if (err) {
-		input_unregister_handle(handle);
-		kfree(handle);
-		return err;
-	}
-
-	return 0;
-}
-
-static void pmos_emg_disconnect(struct input_handle *handle)
-{
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(handle);
-}
-
-static const struct input_device_id pmos_emg_ids[] = {
-	{ .flags = INPUT_DEVICE_ID_MATCH_EVBIT, .evbit = { BIT_MASK(EV_KEY) } },
-	{ },
-};
-
-static struct input_handler pmos_emg_handler = {
-	.event		= pmos_emg_key_event,
-	.connect	= pmos_emg_connect,
-	.disconnect	= pmos_emg_disconnect,
-	.name		= "pmos_emg_keys",
-	.id_table	= pmos_emg_ids,
-};
-
-static int __init pmos_emg_init(void)
-{
-	return input_register_handler(&pmos_emg_handler);
-}
-late_initcall(pmos_emg_init);
+/* Emergency keys: Hardware PMIC (MT6366) handles 8-second hardware power cut.
+ * Software key interception removed so Power button locks/unlocks screen
+ * and Volume keys adjust audio volume without false emergency triggers.
+ */
 
 static int __init pmos_ufs_census(void)
 {

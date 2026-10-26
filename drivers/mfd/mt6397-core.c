@@ -11,6 +11,8 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/reboot.h>
+#include <linux/delay.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/mt6323/core.h>
 #include <linux/mfd/mt6331/core.h>
@@ -333,6 +335,21 @@ static const struct chip_data mt6397_core = {
 	.irq_init = mt6397_irq_init,
 };
 
+static struct regmap *pmos_pmic_regmap;
+
+static int pmos_pmic_poweroff(struct sys_off_data *data)
+{
+	if (pmos_pmic_regmap) {
+		pr_emerg("PMOSPWR: Powering off MT6358/MT6366 PMIC (RTC BBPU)...\n");
+		/* Clear BBPU PWREN by writing RTC_BBPU_KEY (0x4300) to RTC_BBPU */
+		regmap_write(pmos_pmic_regmap, MT6358_RTC_BBPU, 0x4300);
+		/* Write WRTGR to trigger RTC register commit */
+		regmap_write(pmos_pmic_regmap, MT6358_RTC_WRTGR, 1);
+		mdelay(1000);
+	}
+	return NOTIFY_DONE;
+}
+
 static int mt6397_probe(struct platform_device *pdev)
 {
 	pr_emerg("PMOSPWR: mt6397_core_probe enter %s\n", dev_name(&pdev->dev));
@@ -354,6 +371,21 @@ static int mt6397_probe(struct platform_device *pdev)
 	pmic->regmap = dev_get_regmap(pdev->dev.parent, NULL);
 	if (!pmic->regmap)
 		return -ENODEV;
+
+	pmos_pmic_regmap = pmic->regmap;
+
+	/* Arm MT6358 / MT6366 PMIC hardware 8-second Power-key reset */
+	regmap_update_bits(pmic->regmap, MT6358_TOP_RST_MISC,
+			   BIT(6) | BIT(5) | GENMASK(9, 8),
+			   BIT(6));
+	pr_emerg("PMOSPWR: PMIC hardware 8s Power-key reset armed (PWRKEY_RST=1, HOMEKEY_RST=0)\n");
+
+	/* Register PMIC poweroff handler with high priority */
+	devm_register_sys_off_handler(&pdev->dev,
+				      SYS_OFF_MODE_POWER_OFF,
+				      SYS_OFF_PRIO_HIGH,
+				      pmos_pmic_poweroff,
+				      NULL);
 
 	pmic_core = of_device_get_match_data(&pdev->dev);
 	if (!pmic_core)

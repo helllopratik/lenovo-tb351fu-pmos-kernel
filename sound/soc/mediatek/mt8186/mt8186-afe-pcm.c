@@ -2973,6 +2973,7 @@ err_pm_disable:
 
 static const struct of_device_id mt8186_afe_pcm_dt_match[] = {
 	{ .compatible = "mediatek,mt8186-sound", },
+	{ .compatible = "mediatek,mt6789-sound", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, mt8186_afe_pcm_dt_match);
