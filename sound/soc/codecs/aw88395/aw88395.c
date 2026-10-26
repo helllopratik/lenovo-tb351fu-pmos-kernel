@@ -506,12 +506,10 @@ static int aw88395_request_firmware_file(struct aw88395 *aw88395)
 
 	dev_dbg(aw88395->aw_pa->dev, "%s : bin load success\n", __func__);
 
-	mutex_lock(&aw88395->lock);
 	/* aw device init */
 	ret = aw88395_dev_init(aw88395->aw_pa, aw88395->aw_cfg);
 	if (ret < 0)
 		dev_err(aw88395->aw_pa->dev, "dev init failed");
-	mutex_unlock(&aw88395->lock);
 
 	return ret;
 }
