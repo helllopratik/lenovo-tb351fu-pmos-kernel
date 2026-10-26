@@ -76,13 +76,22 @@ int mt8186_set_audio_int_bus_parent(struct mtk_base_afe *afe,
 	struct mt8186_afe_private *afe_priv = afe->platform_priv;
 	int ret;
 
+	if (!afe_priv->clk[clk_id])
+		clk_id = CLK_CLK26M;
+
+	if (!afe_priv->clk[clk_id] || !afe_priv->clk[CLK_MUX_AUDIOINTBUS])
+		return 0;
+
 	ret = clk_set_parent(afe_priv->clk[CLK_MUX_AUDIOINTBUS],
 			     afe_priv->clk[clk_id]);
 	if (ret) {
-		dev_err(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
+		dev_warn(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
 			__func__, aud_clks[CLK_MUX_AUDIOINTBUS],
 			aud_clks[clk_id], ret);
-		return ret;
+		if (clk_id != CLK_CLK26M && afe_priv->clk[CLK_CLK26M])
+			clk_set_parent(afe_priv->clk[CLK_MUX_AUDIOINTBUS],
+				       afe_priv->clk[CLK_CLK26M]);
+		return 0;
 	}
 
 	return 0;
@@ -262,13 +271,13 @@ int mt8186_afe_enable_clock(struct mtk_base_afe *afe)
 			__func__, aud_clks[CLK_MUX_AUDIO], ret);
 		goto clk_mux_audio_err;
 	}
-	ret = clk_set_parent(afe_priv->clk[CLK_MUX_AUDIO],
-			     afe_priv->clk[CLK_CLK26M]);
-	if (ret) {
-		dev_err(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
-			__func__, aud_clks[CLK_MUX_AUDIO],
-			aud_clks[CLK_CLK26M], ret);
-		goto clk_mux_audio_err;
+	if (afe_priv->clk[CLK_MUX_AUDIO] && afe_priv->clk[CLK_CLK26M]) {
+		ret = clk_set_parent(afe_priv->clk[CLK_MUX_AUDIO],
+				     afe_priv->clk[CLK_CLK26M]);
+		if (ret)
+			dev_warn(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
+				__func__, aud_clks[CLK_MUX_AUDIO],
+				aud_clks[CLK_CLK26M], ret);
 	}
 
 	ret = clk_prepare_enable(afe_priv->clk[CLK_MUX_AUDIOINTBUS]);
@@ -277,18 +286,15 @@ int mt8186_afe_enable_clock(struct mtk_base_afe *afe)
 			__func__, aud_clks[CLK_MUX_AUDIOINTBUS], ret);
 		goto clk_mux_audio_intbus_err;
 	}
-	ret = mt8186_set_audio_int_bus_parent(afe,
-					      CLK_TOP_MAINPLL_D2_D4);
-	if (ret)
-		goto clk_mux_audio_intbus_parent_err;
+	mt8186_set_audio_int_bus_parent(afe, CLK_TOP_MAINPLL_D2_D4);
 
-	ret = clk_set_parent(afe_priv->clk[CLK_TOP_MUX_AUDIO_H],
-			     afe_priv->clk[CLK_TOP_APLL2_CK]);
-	if (ret) {
-		dev_err(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
-			__func__, aud_clks[CLK_TOP_MUX_AUDIO_H],
-			aud_clks[CLK_TOP_APLL2_CK], ret);
-		goto clk_mux_audio_h_parent_err;
+	if (afe_priv->clk[CLK_TOP_MUX_AUDIO_H] && afe_priv->clk[CLK_TOP_APLL2_CK]) {
+		ret = clk_set_parent(afe_priv->clk[CLK_TOP_MUX_AUDIO_H],
+				     afe_priv->clk[CLK_TOP_APLL2_CK]);
+		if (ret)
+			dev_warn(afe->dev, "%s clk_set_parent %s-%s fail %d\n",
+				__func__, aud_clks[CLK_TOP_MUX_AUDIO_H],
+				aud_clks[CLK_TOP_APLL2_CK], ret);
 	}
 
 	ret = clk_prepare_enable(afe_priv->clk[CLK_AFE]);
@@ -302,9 +308,6 @@ int mt8186_afe_enable_clock(struct mtk_base_afe *afe)
 
 clk_afe_err:
 	clk_disable_unprepare(afe_priv->clk[CLK_AFE]);
-clk_mux_audio_h_parent_err:
-clk_mux_audio_intbus_parent_err:
-	mt8186_set_audio_int_bus_parent(afe, CLK_CLK26M);
 clk_mux_audio_intbus_err:
 	clk_disable_unprepare(afe_priv->clk[CLK_MUX_AUDIOINTBUS]);
 clk_mux_audio_err:
@@ -609,7 +612,13 @@ int mt8186_init_clock(struct mtk_base_afe *afe)
 	for (i = 0; i < CLK_NUM; i++) {
 		afe_priv->clk[i] = devm_clk_get(afe->dev, aud_clks[i]);
 		if (IS_ERR(afe_priv->clk[i])) {
-			dev_err(afe->dev, "%s devm_clk_get %s fail, ret %ld\n",
+			if (i == CLK_TOP_MAINPLL_D2_D4)
+				afe_priv->clk[i] = devm_clk_get(afe->dev, "top_mainpll_d4_d4");
+			else if (i == CLK_INFRA_AUDIO_26M)
+				afe_priv->clk[i] = devm_clk_get(afe->dev, "aud_infra_26m_clk");
+		}
+		if (IS_ERR(afe_priv->clk[i])) {
+			dev_warn(afe->dev, "%s devm_clk_get %s fail, ret %ld\n",
 				__func__,
 				aud_clks[i], PTR_ERR(afe_priv->clk[i]));
 			afe_priv->clk[i] = NULL;
