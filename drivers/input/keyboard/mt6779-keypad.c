@@ -162,10 +162,10 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 	}
 
 	if (debounce > MTK_KPD_DEBOUNCE_MAX_MS) {
-		dev_err(&pdev->dev,
-			"Debounce time exceeds the maximum allowed time %dms\n",
-			MTK_KPD_DEBOUNCE_MAX_MS);
-		return -EINVAL;
+		dev_warn(&pdev->dev,
+			"Debounce time %dms exceeds maximum %dms, clamping to 16ms\n",
+			debounce, MTK_KPD_DEBOUNCE_MAX_MS);
+		debounce = 16;
 	}
 
 	if (device_property_read_u32(&pdev->dev, "mediatek,keys-per-group",
