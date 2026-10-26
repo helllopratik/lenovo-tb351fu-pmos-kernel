@@ -614,12 +614,44 @@ void pmos_hardware_reset(void)
 	emergency_restart();
 }
 
+static atomic_t pmos_cancel_watchdog = ATOMIC_INIT(0);
+
+static ssize_t pmos_cancel_proc_write(struct file *file, const char __user *buf,
+				      size_t count, loff_t *ppos)
+{
+	atomic_set(&pmos_cancel_watchdog, 1);
+	pr_emerg("PMOSCAPTURE: Auto-reboot watchdog DISARMED via /proc/pmos_cancel!\n");
+	return count;
+}
+
+static ssize_t pmos_cancel_proc_read(struct file *file, char __user *buf,
+				     size_t count, loff_t *ppos)
+{
+	char msg[32];
+	int len = scnprintf(msg, sizeof(msg), "%d\n", atomic_read(&pmos_cancel_watchdog));
+	return simple_read_from_buffer(buf, count, ppos, msg, len);
+}
+
+static const struct proc_ops pmos_cancel_proc_ops = {
+	.proc_read = pmos_cancel_proc_read,
+	.proc_write = pmos_cancel_proc_write,
+};
+
 static int pmos_reboot_thread(void *data)
 {
 	int rem;
-	for (rem = 120; rem > 0; rem -= 10) {
-		pr_emerg("PMOSCAPTURE: warm auto-restart in %d seconds (pull DRAM log via 0x48090000)...\n", rem);
-		ssleep(10);
+	for (rem = 120; rem > 0; rem -= 5) {
+		if (atomic_read(&pmos_cancel_watchdog)) {
+			pr_emerg("PMOSCAPTURE: Watchdog cancelled by userspace (echo 1 > /proc/pmos_cancel).\n");
+			return 0;
+		}
+		if ((rem % 10) == 0)
+			pr_emerg("PMOSCAPTURE: warm auto-restart in %d seconds (echo 1 > /proc/pmos_cancel to disarm)...\n", rem);
+		ssleep(5);
+	}
+	if (atomic_read(&pmos_cancel_watchdog)) {
+		pr_emerg("PMOSCAPTURE: Watchdog cancelled by userspace.\n");
+		return 0;
 	}
 	pr_emerg("PMOSCAPTURE: executing clean warm restart now (120s watchdog)...\n");
 	kernel_restart("bootloader");
@@ -629,8 +661,9 @@ static int pmos_reboot_thread(void *data)
 
 static int __init pmos_reboot_init(void)
 {
+	proc_create("pmos_cancel", 0666, NULL, &pmos_cancel_proc_ops);
 	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
-	pr_emerg("PMOSCAPTURE: 120s warm auto-restart kthread active (unconditional)\n");
+	pr_emerg("PMOSCAPTURE: 120s warm auto-restart kthread active (cancel with /proc/pmos_cancel)\n");
 	return 0;
 }
 late_initcall(pmos_reboot_init);
