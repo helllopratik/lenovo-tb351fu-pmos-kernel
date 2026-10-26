@@ -1,0 +1,1 @@
+/mnt/Nvme/slot_b_bundle/flash_quick.sh
