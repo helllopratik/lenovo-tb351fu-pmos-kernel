@@ -210,11 +210,16 @@ static int mt8186_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 				   fs << irq_data->irq_fs_shift);
 
 		/* enable interrupt */
-		if (runtime->stop_threshold != ~(0U))
+		if (runtime->stop_threshold != ~(0U)) {
 			regmap_update_bits(afe->regmap,
 					   irq_data->irq_en_reg,
 					   1 << irq_data->irq_en_shift,
 					   1 << irq_data->irq_en_shift);
+			regmap_update_bits(afe->regmap,
+					   AFE_IRQ_MCU_EN,
+					   1 << irq_data->irq_en_shift,
+					   1 << irq_data->irq_en_shift);
+		}
 		return 0;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
@@ -234,11 +239,16 @@ static int mt8186_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 				__func__, id, ret);
 
 		/* disable interrupt */
-		if (runtime->stop_threshold != ~(0U))
+		if (runtime->stop_threshold != ~(0U)) {
 			regmap_update_bits(afe->regmap,
 					   irq_data->irq_en_reg,
 					   1 << irq_data->irq_en_shift,
 					   0 << irq_data->irq_en_shift);
+			regmap_update_bits(afe->regmap,
+					   AFE_IRQ_MCU_EN,
+					   1 << irq_data->irq_en_shift,
+					   0);
+		}
 
 		/* clear pending IRQ */
 		regmap_write(afe->regmap, irq_data->irq_clr_reg,
@@ -2757,6 +2767,9 @@ static int mt8186_afe_runtime_resume(struct device *dev)
 
 	/* enable AFE */
 	regmap_update_bits(afe->regmap, AFE_DAC_CON0, AUDIO_AFE_ON_MASK_SFT, BIT(0));
+
+	/* unmask all AFE IRQs to MCU */
+	regmap_write(afe->regmap, AFE_IRQ_MCU_EN, AFE_IRQ_STATUS_BITS);
 
 skip_regmap:
 	return 0;

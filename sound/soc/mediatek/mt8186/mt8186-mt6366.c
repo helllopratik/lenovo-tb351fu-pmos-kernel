@@ -1058,9 +1058,20 @@ mt8186_mt6366_rt1019_rt5682s_widgets[] = {
 
 static const struct snd_soc_dapm_route
 mt8186_mt6366_rt1019_rt5682s_routes[] = {
-	/* SPK */
+	/* SPK - 8x AW88395 smart PAs on Lenovo Tab Plus */
+	{ "Speakers", NULL, "2-0034 DAC Output" },
+	{ "Speakers", NULL, "2-0035 DAC Output" },
+	{ "Speakers", NULL, "2-0036 DAC Output" },
+	{ "Speakers", NULL, "2-0037 DAC Output" },
+	{ "Speakers", NULL, "6-0034 DAC Output" },
+	{ "Speakers", NULL, "6-0035 DAC Output" },
+	{ "Speakers", NULL, "6-0036 DAC Output" },
+	{ "Speakers", NULL, "6-0037 DAC Output" },
+	/* Fallback RT1019 widget */
 	{ "Speakers", NULL, "Speaker" },
-	/* Headset */
+	/* Headphone */
+	{ "Headphone", NULL, "Headphone L" },
+	{ "Headphone", NULL, "Headphone R" },
 	{ "Headphone", NULL, "HPOL" },
 	{ "Headphone", NULL, "HPOR" },
 	{ "IN1P", NULL, "Headset Mic" },
