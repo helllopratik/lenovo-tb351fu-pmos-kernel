@@ -333,7 +333,7 @@ static void psblk_retry_work(struct work_struct *work)
 	mutex_lock(&pstore_blk_lock);
 	ret = best_effort_attach(blkdev, psblk_try_count % 6 == 0);
 	mutex_unlock(&pstore_blk_lock);
-	if (ret && psblk_try_count < PSBLK_RETRY_MAX)
+	if (ret && ret != -ENOMEM && psblk_try_count < 10)
 		schedule_delayed_work(&psblk_retry_dwork,
 				      msecs_to_jiffies(PSBLK_RETRY_MS));
 }

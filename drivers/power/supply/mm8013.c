@@ -42,6 +42,8 @@
 struct mm8013_chip {
 	struct i2c_client *client;
 	struct regmap *regmap;
+	struct power_supply *psy;
+	struct delayed_work work;
 };
 
 static int mm8013_checkdevice(struct mm8013_chip *chip)
@@ -80,6 +82,8 @@ static enum power_supply_property mm8013_battery_props[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_TECHNOLOGY,
+	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_AVG,
@@ -135,7 +139,7 @@ static int mm8013_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
-		val->intval = -1000 * (s16)regval;
+		val->intval = 1000 * (s16)regval;
 		break;
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		ret = regmap_read(chip->regmap, REG_CYCLE_COUNT, &regval);
@@ -184,6 +188,12 @@ static int mm8013_get_property(struct power_supply *psy,
 			val->intval = POWER_SUPPLY_STATUS_FULL;
 		else
 			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+		break;
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+		break;
+	case POWER_SUPPLY_PROP_MODEL_NAME:
+		val->strval = "MM8013";
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		ret = regmap_read(chip->regmap, REG_TEMPERATURE, &regval);
@@ -245,6 +255,16 @@ static const struct regmap_config mm8013_regmap_config = {
 	.val_format_endian = REGMAP_ENDIAN_LITTLE,
 };
 
+static void mm8013_work(struct work_struct *work)
+{
+	struct mm8013_chip *chip = container_of(work, struct mm8013_chip, work.work);
+
+	if (chip->psy)
+		power_supply_changed(chip->psy);
+
+	schedule_delayed_work(&chip->work, msecs_to_jiffies(10000));
+}
+
 static int mm8013_probe(struct i2c_client *client)
 {
 	struct power_supply_config psy_cfg = {};
@@ -262,6 +282,7 @@ static int mm8013_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	chip->client = client;
+	i2c_set_clientdata(client, chip);
 
 	chip->regmap = devm_regmap_init_i2c(client, &mm8013_regmap_config);
 	if (IS_ERR(chip->regmap)) {
@@ -280,7 +301,19 @@ static int mm8013_probe(struct i2c_client *client)
 	if (IS_ERR(psy))
 		return PTR_ERR(psy);
 
+	chip->psy = psy;
+	INIT_DELAYED_WORK(&chip->work, mm8013_work);
+	schedule_delayed_work(&chip->work, msecs_to_jiffies(10000));
+
 	return 0;
+}
+
+static void mm8013_remove(struct i2c_client *client)
+{
+	struct mm8013_chip *chip = i2c_get_clientdata(client);
+
+	if (chip)
+		cancel_delayed_work_sync(&chip->work);
 }
 
 static const struct i2c_device_id mm8013_id_table[] = {
@@ -298,6 +331,7 @@ static const struct of_device_id mm8013_match_table[] = {
 
 static struct i2c_driver mm8013_i2c_driver = {
 	.probe = mm8013_probe,
+	.remove = mm8013_remove,
 	.id_table = mm8013_id_table,
 	.driver = {
 		.name = "mm8013",

@@ -1524,35 +1524,8 @@ return:
 *******************************************************/
 void nvt_force_continuous_scan(void)
 {
-	int32_t ret;
-	uint8_t buf[2] = {0};
-
-	if (!nvt_asyn_scan || !ts || !ts->client)
-		return;
-
-	if (!bTouchIsAwake) {
-		NVT_LOG("[asyn] touch not awake, skip\n");
-		return;
-	}
-
-	/* Only probe when the MCU is already in normal run */
-	ret = nvt_check_fw_reset_state(RESET_STATE_INIT);
-	if (ret) {
-		NVT_LOG("[asyn] fw not in normal run (ret=%d), skip\n", ret);
-		return;
-	}
-
-	nvt_set_page(0x03F100);
-	buf[0] = 0x02;                 /* offset 0x02 within 0x03F100 page = 0x03F102 */
-	buf[1] = 0x01;                 /* continuous scan enable bit */
-	if (CTP_SPI_WRITE(ts->client, buf, 2))
-		NVT_ERR("[asyn] continuous-scan write failed\n");
-	else
-		NVT_LOG("[asyn] wrote 0x03F102=0x01 (continuous scan attempt)\n");
-
-	nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
-	if (nvt_check_fw_reset_state(RESET_STATE_INIT))
-		NVT_LOG("[asyn] warning: MCU left normal-run after kick\n");
+	/* 0x03F102 write is known to corrupt MCU state into 0xFE error mode; keep no-op */
+	return;
 }
 
 #if NVT_TOUCH_PROC
@@ -1645,6 +1618,8 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 	u8 rv[6];
 	unsigned int base;
 
+	if (*offp > 0)
+		return 0;
 	if (count < sizeof(kbuf))
 		return -EINVAL;
 	if (!ts)
@@ -1663,6 +1638,7 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 		last ? jiffies_to_msecs(jiffies - last) : 0U,
 		nvt_poll_ms, nvt_asyn_scan, base);
 
+	mutex_lock(&ts->lock);
 	nvt_reg_rd(base + 0x60, rv, 1);
 	n += scnprintf(kbuf + n, sizeof(kbuf) - n,
 		"regs: reset=0x%02X ", rv[0]);
@@ -1683,6 +1659,8 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 		"dmaval=0x%02X txinfo=0x%02X autocopy=0x%02X ",
 		nvt_reg_rd_as_u8(0x3F7D0), nvt_reg_rd_as_u8(0x3F7F1),
 		nvt_reg_rd_as_u8(0x3F7E8));
+	nvt_set_page(base);
+	mutex_unlock(&ts->lock);
 	if (gpio_is_valid(ts->irq_gpio) && gpio_is_valid(ts->reset_gpio))
 		n += scnprintf(kbuf + n, sizeof(kbuf) - n,
 			"gpio: irq=%d rst=%d\n",
@@ -1692,6 +1670,7 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 
 	if (copy_to_user(buff, kbuf, n))
 		return -EFAULT;
+	*offp += n;
 	return n;
 }
 static const struct proc_ops nvt_diag_fops = {
@@ -2413,13 +2392,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	/* ESD protect by WDT */
 	if (nvt_wdt_fw_recovery(point_data)) {
 		NVT_ERR("Recover for fw reset, %02X\n", point_data[1]);
-		if (point_data[1] == 0xFE) {
-			nvt_sw_reset_idle();
-			nvt_clear_aci_error_flag();
-		}
-		nvt_read_fw_history_all();
+		nvt_hw_reset_pulse();
+		msleep(50);
+		nvt_bootloader_reset();
+		msleep(10);
 		nvt_update_firmware(boot_update_firmware_name);
-		nvt_read_fw_history_all();
 #if NVT_CUST_PROC_CMD
 		nvt_extra_proc_init();
 #endif
@@ -2536,41 +2513,44 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		}
 	}
 
+	if (finger_cnt > 0 || ts->prev_finger_cnt > 0) {
 #if MT_PROTOCOL_B
-	for (i = 0; i < ts->max_touch_num; i++) {
-		if (press_id[i] != 1) {
-			input_mt_slot(ts->input_dev, i);
-			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
-			input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
+		for (i = 0; i < ts->max_touch_num; i++) {
+			if (press_id[i] != 1) {
+				input_mt_slot(ts->input_dev, i);
+				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
+				input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
+				input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
+			}
 		}
-	}
 
-	input_report_key(ts->input_dev, BTN_TOUCH, (finger_cnt > 0));
+		input_report_key(ts->input_dev, BTN_TOUCH, (finger_cnt > 0));
 #else /* MT_PROTOCOL_B */
-	if (finger_cnt == 0) {
-		input_report_key(ts->input_dev, BTN_TOUCH, 0);
-		input_mt_sync(ts->input_dev);
-	}
+		if (finger_cnt == 0) {
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+			input_mt_sync(ts->input_dev);
+		}
 #endif /* MT_PROTOCOL_B */
 
 #if TOUCH_KEY_NUM > 0
-	if (point_data[61] == 0xF8) {
+		if (point_data[61] == 0xF8) {
 #if NVT_TOUCH_ESD_PROTECT
-		/* update interrupt timer */
-		irq_timer = jiffies;
+			/* update interrupt timer */
+			irq_timer = jiffies;
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
-		for (i = 0; i < ts->max_button_num; i++) {
-			input_report_key(ts->input_dev, touch_key_array[i], ((point_data[62] >> i) & 0x01));
+			for (i = 0; i < ts->max_button_num; i++) {
+				input_report_key(ts->input_dev, touch_key_array[i], ((point_data[62] >> i) & 0x01));
+			}
+		} else {
+			for (i = 0; i < ts->max_button_num; i++) {
+				input_report_key(ts->input_dev, touch_key_array[i], 0);
+			}
 		}
-	} else {
-		for (i = 0; i < ts->max_button_num; i++) {
-			input_report_key(ts->input_dev, touch_key_array[i], 0);
-		}
-	}
 #endif
 
-	input_sync(ts->input_dev);
+		input_sync(ts->input_dev);
+		ts->prev_finger_cnt = finger_cnt;
+	}
 
 	if (ts->pen_support) {
 /*
@@ -2738,6 +2718,7 @@ static int nvt_ts_thread_func(void *data)
 					 nvt_reg_rd_as_u8(0x3F7F1),
 					 nvt_reg_rd_as_u8(0x3F7E8),
 					 dead_ticks, dead);
+			nvt_set_page(base);
 
 			if (dead_ticks >= 2) {
 				NVT_ERR("watchdog: touch dead for %d "
