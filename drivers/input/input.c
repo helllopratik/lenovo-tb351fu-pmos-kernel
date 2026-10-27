@@ -370,6 +370,37 @@ void input_handle_event(struct input_dev *dev,
 	}
 }
 
+#include <linux/reboot.h>
+
+static void pmos_combo_poweroff_workfn(struct work_struct *work)
+{
+	pr_emerg("PMOSEMG: Power + Vol- held for 2 seconds! Immediate hardware poweroff!\n");
+	kernel_power_off();
+}
+static DECLARE_DELAYED_WORK(pmos_combo_poweroff_work, pmos_combo_poweroff_workfn);
+static bool pmos_pwr_down;
+static bool pmos_voldown_down;
+
+static void pmos_track_emergency_combo(unsigned int type, unsigned int code, int value)
+{
+	if (type != EV_KEY)
+		return;
+
+	if (code == KEY_POWER)
+		pmos_pwr_down = (value != 0);
+	else if (code == KEY_VOLUMEDOWN)
+		pmos_voldown_down = (value != 0);
+	else
+		return;
+
+	if (pmos_pwr_down && pmos_voldown_down) {
+		pr_emerg("PMOSEMG: Power + Vol- both pressed! Scheduling poweroff in 2s\n");
+		schedule_delayed_work(&pmos_combo_poweroff_work, msecs_to_jiffies(2000));
+	} else {
+		cancel_delayed_work(&pmos_combo_poweroff_work);
+	}
+}
+
 /**
  * input_event() - report new input event
  * @dev: device that generated the event
@@ -393,6 +424,7 @@ void input_event(struct input_dev *dev,
 	unsigned long flags;
 
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
+		pmos_track_emergency_combo(type, code, value);
 
 		spin_lock_irqsave(&dev->event_lock, flags);
 		input_handle_event(dev, type, code, value);
