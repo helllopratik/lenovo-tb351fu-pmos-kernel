@@ -106,6 +106,90 @@ void mtk_wcn_set_connsys_power_off_flag(int flag)
 }
 EXPORT_SYMBOL(mtk_wcn_set_connsys_power_off_flag);
 
+/* WiFi & DVFSRC / Battery / EMI-MPU stubs */
+int dvfsrc_get_required_opp_peak_bw(void *dev, int opp)
+{
+	return 0;
+}
+EXPORT_SYMBOL(dvfsrc_get_required_opp_peak_bw);
+
+int lbat_user_register(void *cb, int v1, int v2, int v3, void *data)
+{
+	return 0;
+}
+EXPORT_SYMBOL(lbat_user_register);
+
+int mtk_emimpu_init_region(void *region, int id)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_init_region);
+
+int mtk_emimpu_set_addr(void *region, unsigned long start, unsigned long end)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_set_addr);
+
+int mtk_emimpu_set_apc(void *region, int d1, int d2)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_set_apc);
+
+int mtk_emimpu_lock_region(void *region, int lock)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_lock_region);
+
+int mtk_emimpu_set_protection(void *region)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_set_protection);
+
+int mtk_emimpu_free_region(void *region)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mtk_emimpu_free_region);
+
+/* SCP & SensorHub stubs */
+void aed_common_exception_api(void *p, int l, const char *m)
+{
+}
+EXPORT_SYMBOL(aed_common_exception_api);
+
+int aee_get_mode(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(aee_get_mode);
+
+void gpio_dump_regs_range(int s, int e)
+{
+}
+EXPORT_SYMBOL(gpio_dump_regs_range);
+
+unsigned int mt_get_fmeter_freq(int id)
+{
+	return 26000000;
+}
+EXPORT_SYMBOL(mt_get_fmeter_freq);
+
+int register_3way_semaphore_notifier(void *nb)
+{
+	return 0;
+}
+EXPORT_SYMBOL(register_3way_semaphore_notifier);
+
+int unregister_3way_semaphore_notifier(void *nb)
+{
+	return 0;
+}
+EXPORT_SYMBOL(unregister_3way_semaphore_notifier);
+
 /* Alias mtk_mux_clr_set_ops to mtk_mux_clr_set_upd_ops */
 const struct clk_ops mtk_mux_clr_set_ops = {
 	.get_parent = NULL,
