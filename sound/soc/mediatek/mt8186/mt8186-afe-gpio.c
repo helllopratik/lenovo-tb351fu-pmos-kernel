@@ -6,6 +6,8 @@
 // Author: Jiaxin Yu <jiaxin.yu@mediatek.com>
 
 #include <linux/pinctrl/consumer.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 
 #include "mt8186-afe-common.h"
 #include "mt8186-afe-gpio.h"
@@ -72,7 +74,21 @@ int mt8186_afe_gpio_init(struct device *dev)
 	int i, j, ret;
 
 	aud_pinctrl = devm_pinctrl_get(dev);
-	if (IS_ERR(aud_pinctrl)) {
+	if (IS_ERR(aud_pinctrl) && dev->of_node) {
+		struct device_node *plat_node = of_parse_phandle(dev->of_node, "mediatek,platform", 0);
+		if (plat_node) {
+			struct platform_device *plat_pdev = of_find_device_by_node(plat_node);
+			of_node_put(plat_node);
+			if (plat_pdev) {
+				aud_pinctrl = devm_pinctrl_get(&plat_pdev->dev);
+				if (!IS_ERR(aud_pinctrl))
+					dev_info(dev, "%s(): obtained aud_pinctrl from %s\n",
+						 __func__, dev_name(&plat_pdev->dev));
+				put_device(&plat_pdev->dev);
+			}
+		}
+	}
+	if (IS_ERR_OR_NULL(aud_pinctrl)) {
 		ret = PTR_ERR(aud_pinctrl);
 		dev_warn(dev, "%s(), ret %d, optional aud_pinctrl not found\n",
 			__func__, ret);
@@ -89,6 +105,7 @@ int mt8186_afe_gpio_init(struct device *dev)
 				 __func__, aud_gpios[i].name, ret);
 		} else {
 			aud_gpios[i].gpio_prepare = true;
+			dev_info(dev, "%s(): prepared state %s\n", __func__, aud_gpios[i].name);
 		}
 	}
 
@@ -119,10 +136,11 @@ static int mt8186_afe_gpio_select(struct device *dev,
 	ret = pinctrl_select_state(aud_pinctrl,
 				   aud_gpios[type].gpioctrl);
 	if (ret) {
-		dev_dbg(dev, "%s(), error, can not set gpio type %d\n",
-			__func__, type);
+		dev_err(dev, "%s(), error, can not set gpio type %d (%s), ret %d\n",
+			__func__, type, aud_gpios[type].name, ret);
 		return ret;
 	}
+	dev_info(dev, "%s(): switched pinctrl to %s\n", __func__, aud_gpios[type].name);
 
 	return 0;
 }

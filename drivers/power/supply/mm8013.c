@@ -178,14 +178,29 @@ static int mm8013_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
-		if (regval & MM8013_FLAG_DSG)
+		{
+			u32 cur_raw = 0;
+			int cur_ret = regmap_read(chip->regmap, REG_AVERAGE_CURRENT, &cur_raw);
+			if (!cur_ret) {
+				s16 cur_ma = (s16)cur_raw;
+				if (cur_ma > 20) {
+					val->intval = POWER_SUPPLY_STATUS_CHARGING;
+					break;
+				} else if (cur_ma < -20) {
+					val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+					break;
+				}
+			}
+		}
+
+		if (regval & MM8013_FLAG_FC)
+			val->intval = POWER_SUPPLY_STATUS_FULL;
+		else if (regval & MM8013_FLAG_CHG)
+			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+		else if (regval & MM8013_FLAG_DSG)
 			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 		else if (regval & MM8013_FLAG_CHG_INH)
 			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
-		else if (regval & MM8013_FLAG_CHG)
-			val->intval = POWER_SUPPLY_STATUS_CHARGING;
-		else if (regval & MM8013_FLAG_FC)
-			val->intval = POWER_SUPPLY_STATUS_FULL;
 		else
 			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
 		break;
