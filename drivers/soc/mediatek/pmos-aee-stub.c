@@ -155,6 +155,39 @@ int mtk_emimpu_free_region(void *region)
 }
 EXPORT_SYMBOL(mtk_emimpu_free_region);
 
+int get_low_latency_mode(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(get_low_latency_mode);
+
+void update_driver_loaded_status(int status)
+{
+}
+EXPORT_SYMBOL(update_driver_loaded_status);
+
+int register_set_p2p_mode_handler(void *handler)
+{
+	return 0;
+}
+EXPORT_SYMBOL(register_set_p2p_mode_handler);
+
+int register_file_buf_handler(void *h, ...)
+{
+	return 0;
+}
+EXPORT_SYMBOL(register_file_buf_handler);
+
+void wifi_reset_start(void)
+{
+}
+EXPORT_SYMBOL(wifi_reset_start);
+
+void wifi_reset_end(void)
+{
+}
+EXPORT_SYMBOL(wifi_reset_end);
+
 /* SCP & SensorHub stubs */
 void aed_common_exception_api(void *p, int l, const char *m)
 {
