@@ -185,6 +185,17 @@ static void mtk_pmic_keys_lp_reset_setup(struct mtk_pmic_keys *keys,
 	regmap_update_bits(keys->regmap, regs->pmic_rst_reg, mask, value);
 }
 
+#include <linux/reboot.h>
+
+static void pmos_combo_poweroff_func(struct work_struct *work)
+{
+	pr_emerg("PMOSEMG: Power + Vol- held for 2 seconds! Immediate hardware poweroff!\n");
+	kernel_power_off();
+}
+static DECLARE_DELAYED_WORK(pmos_combo_poweroff_work, pmos_combo_poweroff_func);
+static bool pmos_pwr_down;
+static bool pmos_vol_down;
+
 static irqreturn_t mtk_pmic_keys_irq_handler_thread(int irq, void *data)
 {
 	struct mtk_pmic_keys_info *info = data;
@@ -195,6 +206,18 @@ static irqreturn_t mtk_pmic_keys_irq_handler_thread(int irq, void *data)
 	key_deb &= info->regs->deb_mask;
 
 	pressed = !key_deb;
+
+	if (info->keycode == KEY_POWER)
+		pmos_pwr_down = (pressed != 0);
+	else
+		pmos_vol_down = (pressed != 0);
+
+	if (pmos_pwr_down && pmos_vol_down) {
+		pr_emerg("PMOSEMG: Power + Vol- held simultaneously, armed 2s emergency shutdown\n");
+		schedule_delayed_work(&pmos_combo_poweroff_work, msecs_to_jiffies(2000));
+	} else {
+		cancel_delayed_work(&pmos_combo_poweroff_work);
+	}
 
 	input_report_key(info->keys->input_dev, info->keycode, pressed);
 	input_sync(info->keys->input_dev);
