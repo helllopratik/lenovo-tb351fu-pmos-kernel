@@ -202,8 +202,8 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 		if (keymap) {
 			for (k = 0; k < MTK_KPD_NUM_BITS; k++)
 				keymap[k] = KEY_RESERVED;
-			keymap[0] = KEY_VOLUMEDOWN;
-			keymap[1] = KEY_VOLUMEUP;
+			keymap[0] = KEY_VOLUMEUP;
+			keymap[1] = KEY_VOLUMEDOWN;
 			keypad->input_dev->keycode = keymap;
 			keypad->input_dev->keycodesize = sizeof(unsigned short);
 			keypad->input_dev->keycodemax = MTK_KPD_NUM_BITS;
