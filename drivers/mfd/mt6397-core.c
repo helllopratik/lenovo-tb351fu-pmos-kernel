@@ -374,11 +374,11 @@ static int mt6397_probe(struct platform_device *pdev)
 
 	pmos_pmic_regmap = pmic->regmap;
 
-	/* Arm MT6358 / MT6366 PMIC hardware 8-second Power-key reset */
+	/* Arm MT6358 / MT6366 PMIC hardware 8-second Power-key & Volume-key reset */
 	regmap_update_bits(pmic->regmap, MT6358_TOP_RST_MISC,
 			   BIT(6) | BIT(5) | GENMASK(9, 8),
-			   BIT(6));
-	pr_emerg("PMOSPWR: PMIC hardware 8s Power-key reset armed (PWRKEY_RST=1, HOMEKEY_RST=0)\n");
+			   BIT(6) | BIT(5));
+	pr_emerg("PMOSPWR: PMIC hardware 8s Power+Vol reset armed (PWRKEY_RST=1, HOMEKEY_RST=1)\n");
 
 	/* Register PMIC poweroff handler with high priority */
 	devm_register_sys_off_handler(&pdev->dev,

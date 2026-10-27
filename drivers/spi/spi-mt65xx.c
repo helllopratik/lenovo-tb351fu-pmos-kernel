@@ -1350,6 +1350,10 @@ static int mtk_spi_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "failed to register irq\n");
 
 	pm_runtime_enable(dev);
+	if (strstr(dev_name(dev), "11012000.spi")) {
+		pm_runtime_forbid(dev);
+		dev_info(dev, "PMOS: forbidden runtime PM autosuspend to keep touch controller awake\n");
+	}
 
 	ret = devm_spi_register_controller(dev, host);
 	if (ret) {
