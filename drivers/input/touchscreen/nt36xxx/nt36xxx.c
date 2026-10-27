@@ -2721,25 +2721,12 @@ static int nvt_ts_thread_func(void *data)
 			nvt_set_page(base);
 
 			if (dead_ticks >= 2) {
-				NVT_ERR("watchdog: touch dead for %d "
-					"ticks, full HW+SPI recovery\n",
-					dead_ticks);
+				/* Do NOT destroy the running firmware by pulsing HW reset or entering bootloader.
+				 * Simply re-assert the active scan page and clear error counters. */
+				NVT_LOG("watchdog: transient error tick, re-asserting event page\n");
 				dead_ticks = 0;
 				prev_spi_errors = 0;
-				nvt_hw_reset_pulse();
-				msleep(50);
-				nvt_bootloader_reset();
-				msleep(10);
-				nvt_update_firmware(
-					boot_update_firmware_name);
-				msleep(20);
-				nvt_force_continuous_scan();
-				msleep(50);
-				nvt_crash_append("NVT watchdog: "
-						"HW+SPI recovery done\n");
-				mutex_unlock(&ts->lock);
-				msleep(200);
-				continue;
+				nvt_set_page(base);
 			}
 			mutex_unlock(&ts->lock);
 		}
