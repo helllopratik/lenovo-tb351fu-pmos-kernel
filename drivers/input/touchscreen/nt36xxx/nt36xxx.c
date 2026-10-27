@@ -4078,102 +4078,7 @@ return:
 *******************************************************/
 static int32_t nvt_ts_suspend(struct device *dev)
 {
-	uint8_t buf[4] = {0};
-#if MT_PROTOCOL_B
-	uint32_t i = 0;
-#endif
-	struct pinctrl *spi_module_pinctrl;
-	struct pinctrl_state *spi_pinctrl_state;
-	int ret = 0;
-	if (!bTouchIsAwake) {
-		NVT_LOG("Touch is already suspend\n");
-		return 0;
-	}
-
-	if(!ts->gesture_mode) {
-	nvt_irq_enable(false);
-	}
-
-#if NVT_TOUCH_ESD_PROTECT
-	NVT_LOG("cancel delayed work sync\n");
-	cancel_delayed_work_sync(&nvt_esd_check_work);
-	nvt_esd_check_enable(false);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
-	mutex_lock(&ts->lock);
-
-	NVT_LOG("start\n");
-
-	bTouchIsAwake = 0;
-
-	if(ts->gesture_mode) {
-	//---write command to enter "wakeup gesture mode"---
-	buf[0] = EVENT_MAP_HOST_CMD;
-	buf[1] = 0x13;
-	CTP_SPI_WRITE(ts->client, buf, 2);
-
-	enable_irq_wake(ts->client->irq);
-
-	NVT_LOG("Enabled touch wakeup gesture\n");
-
-	} else {
-	//---write command to enter "deep sleep mode"---
-	buf[0] = EVENT_MAP_HOST_CMD;
-	buf[1] = 0x11;
-	CTP_SPI_WRITE(ts->client, buf, 2);
-	}
-	msleep(50);
-
-	mutex_unlock(&ts->lock);
-
-	/* release all touches */
-#if MT_PROTOCOL_B
-	for (i = 0; i < ts->max_touch_num; i++) {
-		input_mt_slot(ts->input_dev, i);
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-		input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
-		input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
-	}
-#endif
-	input_report_key(ts->input_dev, BTN_TOUCH, 0);
-#if !MT_PROTOCOL_B
-	input_mt_sync(ts->input_dev);
-#endif
-	input_sync(ts->input_dev);
-
-	/* release pen event */
-	if (ts->pen_support) {
-		input_report_abs(ts->pen_input_dev, ABS_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-		input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
-		input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
-		input_sync(ts->pen_input_dev);
-	}
-
-if(!ts->gesture_mode) {
-	spi_module_pinctrl = devm_pinctrl_get(dev);
-	NVT_LOG("enter normal gpio mode\n");
-	if(!IS_ERR(spi_module_pinctrl)) {
-		NVT_LOG("spi_module_pinctrl enter!\n");
-		spi_pinctrl_state = pinctrl_lookup_state(spi_module_pinctrl, "suspend");
-		if(!IS_ERR(spi_pinctrl_state)) {
-			NVT_LOG("spi_pinctrl_state enter!\n");
-			ret = pinctrl_select_state(spi_module_pinctrl, spi_pinctrl_state);
-			if(ret < 0)
-				NVT_ERR("enter normal gpio mode fail!\n");
-		}
-	}
-}
-
-	ts->is_suspend = true;
-	NVT_LOG("end\n");
-
+	NVT_LOG("keeping touch alive across suspend (deep sleep & pinmux disable prevented)\n");
 	return 0;
 }
 
@@ -4220,6 +4125,9 @@ if(!ts->gesture_mode) {
 	gpio_set_value(ts->reset_gpio, 1);
 #endif
 	nvt_sw_reset_idle();
+	nvt_boot_ready();
+	nvt_tx_auto_copy_mode();
+	nvt_sw_reset();
 
 	if (!nvt_poll_exclusive)
 		nvt_irq_enable(true);
