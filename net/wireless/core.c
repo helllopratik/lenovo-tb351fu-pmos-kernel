@@ -984,11 +984,9 @@ int wiphy_register(struct wiphy *wiphy)
 		 * VENDOR_CMD_RAW_DATA which is non-NULL) and also that
 		 * we have at least one of doit/dumpit.
 		 */
-		if (WARN_ON(!rdev->wiphy.vendor_commands[i].policy))
-			return -EINVAL;
-		if (WARN_ON(!rdev->wiphy.vendor_commands[i].doit &&
-			    !rdev->wiphy.vendor_commands[i].dumpit))
-			return -EINVAL;
+		if (!rdev->wiphy.vendor_commands[i].doit &&
+		    !rdev->wiphy.vendor_commands[i].dumpit)
+			continue;
 	}
 
 #ifdef CONFIG_PM
@@ -1079,6 +1077,7 @@ int wiphy_register(struct wiphy *wiphy)
 
 	res = rfkill_register(rdev->wiphy.rfkill);
 	if (res) {
+		if (rdev->wiphy.registered && rdev->wiphy.rfkill)
 		rfkill_destroy(rdev->wiphy.rfkill);
 		rdev->wiphy.rfkill = NULL;
 		wiphy_unregister(&rdev->wiphy);
@@ -1209,7 +1208,8 @@ void cfg80211_dev_free(struct cfg80211_registered_device *rdev)
 	spin_unlock_irqrestore(&rdev->wiphy_work_lock, flags);
 	cancel_work_sync(&rdev->wiphy_work);
 
-	rfkill_destroy(rdev->wiphy.rfkill);
+	if (rdev->wiphy.registered && rdev->wiphy.rfkill)
+		rfkill_destroy(rdev->wiphy.rfkill);
 	list_for_each_entry_safe(reg, treg, &rdev->beacon_registrations, list) {
 		list_del(&reg->list);
 		kfree(reg);
