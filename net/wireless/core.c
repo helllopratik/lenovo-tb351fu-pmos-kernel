@@ -757,16 +757,20 @@ int wiphy_register(struct wiphy *wiphy)
 		    !wiphy->wowlan->tcp))
 		return -EINVAL;
 #endif
-	if (WARN_ON((wiphy->features & NL80211_FEATURE_TDLS_CHANNEL_SWITCH) &&
-		    (!rdev->ops->tdls_channel_switch ||
-		     !rdev->ops->tdls_cancel_channel_switch)))
-		return -EINVAL;
+	if ((wiphy->features & NL80211_FEATURE_TDLS_CHANNEL_SWITCH) &&
+	    (!rdev->ops->tdls_channel_switch ||
+	     !rdev->ops->tdls_cancel_channel_switch)) {
+		pr_info("cfg80211: clearing unsupported TDLS_CHANNEL_SWITCH for vendor driver\n");
+		wiphy->features &= ~NL80211_FEATURE_TDLS_CHANNEL_SWITCH;
+	}
 
-	if (WARN_ON((wiphy->interface_modes & BIT(NL80211_IFTYPE_NAN)) &&
-		    (!rdev->ops->start_nan || !rdev->ops->stop_nan ||
-		     !rdev->ops->add_nan_func || !rdev->ops->del_nan_func ||
-		     !(wiphy->nan_supported_bands & BIT(NL80211_BAND_2GHZ)))))
-		return -EINVAL;
+	if ((wiphy->interface_modes & BIT(NL80211_IFTYPE_NAN)) &&
+	    (!rdev->ops->start_nan || !rdev->ops->stop_nan ||
+	     !rdev->ops->add_nan_func || !rdev->ops->del_nan_func ||
+	     !(wiphy->nan_supported_bands & BIT(NL80211_BAND_2GHZ)))) {
+		pr_info("cfg80211: clearing unsupported NAN ifmode for vendor driver\n");
+		wiphy->interface_modes &= ~BIT(NL80211_IFTYPE_NAN);
+	}
 
 	if (WARN_ON(wiphy->interface_modes & BIT(NL80211_IFTYPE_WDS)))
 		return -EINVAL;

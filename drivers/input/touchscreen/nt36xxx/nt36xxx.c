@@ -3035,7 +3035,7 @@ static int nvt_ts_check_dt(struct device_node *np)
 
 #if NVT_CUST_PROC_CMD
 static void nvt_restore_cmd_func(struct work_struct *work){
-	int ret = 0;
+	int __maybe_unused ret = 0;
 	NVT_LOG("%s++\n", __func__);
 	if (bTouchIsAwake) {
 #if NVT_EDGE_REJECT
@@ -3083,7 +3083,7 @@ static const struct mtk_chip_config nvt_spidata = {
 #if NVT_CHARGER_NOTIFIER_CALLBACK
 static int nvt_charger_notifier_callback(struct notifier_block *nb, unsigned long val, void *v)
 {
-	int ret = 0;
+	int __maybe_unused ret = 0;
 	struct power_supply *psy = NULL;
 	union power_supply_propval prop;
 	psy = power_supply_get_by_name("mtk-master-charger");
@@ -3117,7 +3117,7 @@ static int nvt_charger_notifier_callback(struct notifier_block *nb, unsigned lon
 }
 static void nvt_update_charger(struct work_struct *work)
 {
-	int ret = 0;
+	int __maybe_unused ret = 0;
 	if (ts->usb_plug_status) {
 		NVT_LOG("enter charger mode");
 		ret = nvt_set_charger(USB_DETECT_IN);
@@ -3134,7 +3134,7 @@ static void nvt_update_charger(struct work_struct *work)
 }
 int nvt_plat_charger_init(void)
 {
-	int ret = 0;
+	int __maybe_unused ret = 0;
 	ts->usb_plug_status = 2;
 	ts->charger_notify_wq = create_singlethread_workqueue("nvt_charger_wq");
 	if (!ts->charger_notify_wq) {
@@ -4079,7 +4079,7 @@ static int32_t nvt_ts_resume(struct device *dev)
 {
 	struct pinctrl *spi_module_pinctrl;
 	struct pinctrl_state *spi_pinctrl_state;
-	int ret = 0;
+	int __maybe_unused ret = 0;
 	ts->is_suspend = false;
 
 	if (bTouchIsAwake) {
