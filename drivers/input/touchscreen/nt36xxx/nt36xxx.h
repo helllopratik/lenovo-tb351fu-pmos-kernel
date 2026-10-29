@@ -133,7 +133,7 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 #define NVT_PALM_MODE 1
 #define NVT_SUPPORT_PEN 1
 #define NVT_DPR_SWITCH 1
-#define NVT_CHARGER_NOTIFIER_CALLBACK 1
+#define NVT_CHARGER_NOTIFIER_CALLBACK 0
 
 #if WAKEUP_GESTURE
 extern const uint16_t gesture_key_array[];

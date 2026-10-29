@@ -378,10 +378,10 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 		error = of_property_read_u32(child,
 			"linux,keycodes", &keys->keys[index].keycode);
 		if (error) {
-			keys->keys[index].keycode = (index == 0) ? KEY_POWER : KEY_VOLUMEUP;
+			keys->keys[index].keycode = (index == 0) ? KEY_POWER : KEY_VOLUMEDOWN;
 		}
 		if (index == 1)
-			keys->keys[index].keycode = KEY_VOLUMEUP;
+			keys->keys[index].keycode = KEY_VOLUMEDOWN;
 
 		if (of_property_read_bool(child, "wakeup-source"))
 			keys->keys[index].wakeup = true;
