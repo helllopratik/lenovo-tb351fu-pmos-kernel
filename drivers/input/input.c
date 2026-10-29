@@ -374,28 +374,32 @@ void input_handle_event(struct input_dev *dev,
 
 static void pmos_combo_poweroff_workfn(struct work_struct *work)
 {
-	pr_emerg("PMOSEMG: Power + Vol- held for 2 seconds! Immediate hardware poweroff!\n");
+	pr_emerg("PMOSEMG: Emergency button hold detected! Immediate hardware poweroff!\n");
 	kernel_power_off();
 }
 static DECLARE_DELAYED_WORK(pmos_combo_poweroff_work, pmos_combo_poweroff_workfn);
 static bool pmos_pwr_down;
-static bool pmos_voldown_down;
+static bool pmos_vol_down;
 
 static void pmos_track_emergency_combo(unsigned int type, unsigned int code, int value)
 {
 	if (type != EV_KEY)
 		return;
 
-	if (code == KEY_POWER)
+	if (code == KEY_POWER) {
 		pmos_pwr_down = (value != 0);
-	else if (code == KEY_VOLUMEDOWN)
-		pmos_voldown_down = (value != 0);
-	else
+	} else if (code == KEY_VOLUMEDOWN || code == KEY_VOLUMEUP) {
+		pmos_vol_down = (value != 0);
+	} else {
 		return;
+	}
 
-	if (pmos_pwr_down && pmos_voldown_down) {
-		pr_emerg("PMOSEMG: Power + Vol- both pressed! Scheduling poweroff in 2s\n");
-		schedule_delayed_work(&pmos_combo_poweroff_work, msecs_to_jiffies(2000));
+	if (pmos_pwr_down && pmos_vol_down) {
+		pr_emerg("PMOSEMG: Power + Volume held simultaneously! Scheduling poweroff in 2s\n");
+		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(2000));
+	} else if (pmos_pwr_down) {
+		pr_emerg("PMOSEMG: Power key held! Scheduling poweroff in 4s\n");
+		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(4000));
 	} else {
 		cancel_delayed_work(&pmos_combo_poweroff_work);
 	}

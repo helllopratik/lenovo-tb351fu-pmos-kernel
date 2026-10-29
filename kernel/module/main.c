@@ -1436,11 +1436,11 @@ static int verify_exported_symbols(struct module *mod)
 				.gplok	= true,
 			};
 			if (find_symbol(&fsa)) {
-				pr_err("%s: exports duplicate symbol %s"
-				       " (owned by %s)\n",
+				pr_warn("%s: exports duplicate symbol %s"
+				       " (owned by %s), allowing load\n",
 				       mod->name, kernel_symbol_name(s),
 				       module_name(fsa.owner));
-				return -ENOEXEC;
+				continue;
 			}
 #ifdef CONFIG_MODULE_SIG_PROTECT
 			if (!mod->sig_ok && is_protected_symbol_export(kernel_symbol_name(s))) {

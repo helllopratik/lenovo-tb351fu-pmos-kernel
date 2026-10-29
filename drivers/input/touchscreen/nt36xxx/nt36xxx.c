@@ -411,7 +411,6 @@ void nvt_crash_append(const char *fmt, ...)
 	mutex_lock(&nvt_crash_mtx);
 	if (nvt_crash_file) {
 		nvt_crash_write_locked(buf, (size_t)n);
-		vfs_fsync(nvt_crash_file, 0);
 	} else if (nvt_crash_open() == 0) {
 		nvt_crash_flush_ring_locked();
 		nvt_crash_write_locked(buf, (size_t)n);
