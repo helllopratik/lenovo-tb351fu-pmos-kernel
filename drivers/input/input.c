@@ -395,11 +395,11 @@ static void pmos_track_emergency_combo(unsigned int type, unsigned int code, int
 	}
 
 	if (pmos_pwr_down && pmos_vol_down) {
-		pr_emerg("PMOSEMG: Power + Volume held simultaneously! Scheduling poweroff in 2s\n");
-		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(2000));
+		pr_emerg("PMOSEMG: Power + Volume held simultaneously! Scheduling poweroff in 1.5s\n");
+		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(1500));
 	} else if (pmos_pwr_down) {
-		pr_emerg("PMOSEMG: Power key held! Scheduling poweroff in 4s\n");
-		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(4000));
+		pr_emerg("PMOSEMG: Power key held! Scheduling poweroff in 3s\n");
+		mod_delayed_work(system_highpri_wq, &pmos_combo_poweroff_work, msecs_to_jiffies(3000));
 	} else {
 		cancel_delayed_work(&pmos_combo_poweroff_work);
 	}

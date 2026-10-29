@@ -1152,9 +1152,11 @@ void rfkill_unregister(struct rfkill *rfkill)
 }
 EXPORT_SYMBOL(rfkill_unregister);
 
+#include <asm-generic/sections.h>
+
 void rfkill_destroy(struct rfkill *rfkill)
 {
-	if (rfkill)
+	if (rfkill && virt_addr_valid(rfkill) && !is_kernel_rodata((unsigned long)rfkill))
 		put_device(&rfkill->dev);
 }
 EXPORT_SYMBOL(rfkill_destroy);
