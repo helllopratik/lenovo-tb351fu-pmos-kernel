@@ -686,12 +686,21 @@ return:
 int32_t nvt_set_page(uint32_t addr)
 {
 	uint8_t buf[4] = {0};
+	uint32_t page = addr & ~0x7FUL;
+
+	if (ts && ts->current_page == page)
+		return 0;
 
 	buf[0] = 0xFF;	//set index/page/addr command
 	buf[1] = (addr >> 15) & 0xFF;
 	buf[2] = (addr >> 7) & 0xFF;
 
-	return CTP_SPI_WRITE(ts->client, buf, 3);
+	if (CTP_SPI_WRITE(ts->client, buf, 3))
+		return -1;
+
+	if (ts)
+		ts->current_page = page;
+	return 0;
 }
 
 /*******************************************************
@@ -1003,6 +1012,8 @@ return:
 *******************************************************/
 void nvt_sw_reset(void)
 {
+	if (ts)
+		ts->current_page = 0xFFFFFFFF;
 	//---software reset cmds to SWRST_SIF_ADDR---
 	nvt_write_addr(ts->swrst_sif_addr, 0x55);
 
@@ -1019,6 +1030,8 @@ return:
 *******************************************************/
 void nvt_sw_reset_idle(void)
 {
+	if (ts)
+		ts->current_page = 0xFFFFFFFF;
 	//---MCU idle cmds to SWRST_SIF_ADDR---
 	nvt_write_addr(ts->swrst_sif_addr, 0xAA);
 
@@ -1034,6 +1047,8 @@ return:
 *******************************************************/
 void nvt_bootloader_reset(void)
 {
+	if (ts)
+		ts->current_page = 0xFFFFFFFF;
 	//---reset cmds to SWRST_SIF_ADDR---
 	nvt_write_addr(ts->swrst_sif_addr, 0x69);
 
@@ -1628,14 +1643,16 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 	last = ts->diag_last_jiffies;
 	n = scnprintf(kbuf, sizeof(kbuf),
 		"frames=%llu touch_frames=%llu spi_errors=%llu "
-		"last_mask=0x%x max_fingers=%u last_ms_ago=%u poll_ms=%d asyn=%d base=0x%06X\n",
+		"last_mask=0x%x max_fingers=%u last_ms_ago=%u poll_ms=%d asyn=%d recov=%llu fault=%u base=0x%06X\n",
 		(unsigned long long)ts->diag_frames,
 		(unsigned long long)ts->diag_touch_frames,
 		(unsigned long long)ts->diag_spi_errors,
 		ts->diag_last_status_mask,
 		ts->diag_max_fingers,
 		last ? jiffies_to_msecs(jiffies - last) : 0U,
-		nvt_poll_ms, nvt_asyn_scan, base);
+		nvt_poll_ms, nvt_asyn_scan,
+		(unsigned long long)ts->diag_recoveries,
+		ts->diag_fault_count, base);
 
 	mutex_lock(&ts->lock);
 	nvt_reg_rd(base + 0x60, rv, 1);
@@ -2387,23 +2404,41 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	nvt_diag_update(point_data);
 
-	/* Remove noisy 60Hz poll log to prevent journald rotation loops */
-#if NVT_TOUCH_WDT_RECOVERY
-	/* ESD protect by WDT */
-	if (nvt_wdt_fw_recovery(point_data)) {
-		NVT_ERR("Recover for fw reset, %02X\n", point_data[1]);
-		nvt_hw_reset_pulse();
-		msleep(50);
-		nvt_bootloader_reset();
-		msleep(10);
-		nvt_update_firmware(boot_update_firmware_name);
-#if NVT_CUST_PROC_CMD
-		nvt_extra_proc_init();
-#endif
-		mutex_unlock(&ts->lock);
-		return IRQ_HANDLED;
+	/* TDDI fault detection: NT36523N firmware outputs 0xFD or 0xFE across
+	 * point_data[1..6] when an internal MCU crash or ESD fault occurs.
+	 * In simpledrm/pmosfb there is no DSI VBLANK sync, so transient panel
+	 * noise or baseline recalibration can trigger a fault. Without host
+	 * re-download, the MCU cannot restart on its own because its internal
+	 * ROM flash only holds bootloader.
+	 */
+	{
+		bool is_fault = true;
+		int fi;
+		for (fi = 1; fi <= 6; fi++) {
+			if (point_data[fi] != 0xFD && point_data[fi] != 0xFE) {
+				is_fault = false;
+				break;
+			}
+		}
+		if (is_fault) {
+			ts->diag_fault_count++;
+			if (ts->diag_fault_count >= 12) { /* ~200ms of consecutive fault */
+				NVT_ERR("NT36523N TDDI fault 0x%02X detected, auto-reloading firmware...\n",
+					point_data[1]);
+				ts->diag_fault_count = 0;
+				ts->diag_recoveries++;
+				nvt_bootloader_reset();
+				msleep(10);
+				nvt_update_firmware(boot_update_firmware_name);
+				ts->current_page = 0xFFFFFFFF;
+				nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
+				mutex_unlock(&ts->lock);
+				return IRQ_HANDLED;
+			}
+		} else {
+			ts->diag_fault_count = 0;
+		}
 	}
-#endif /* #if NVT_TOUCH_WDT_RECOVERY */
 
 #if 0
 	if (nvt_fw_recovery(point_data)) {
@@ -2698,11 +2733,11 @@ static int nvt_ts_thread_func(void *data)
 			nvt_reg_rd(base + 0x60, rv, 1);
 
 			/*
-			 * Watchdog: ONLY detect genuine SPI bus communication failures.
-			 * Idle periods without user touch input are completely normal
-			 * and must never trigger a hardware reset or firmware re-flash.
+			 * Watchdog: Detect genuine SPI errors OR firmware halted out of NORMAL_RUN.
+			 * Idle periods without user touch input are normal with rv[0] == 0xA3.
+			 * If rv[0] drops to 0xFE/0xFD/0x00, the TDDI firmware app has halted.
 			 */
-			if (ts->diag_spi_errors > prev_spi_errors) {
+			if (ts->diag_spi_errors > prev_spi_errors || (rv[0] != 0xA3 && rv[0] != 0x1A)) {
 				dead_ticks++;
 				dead = true;
 			} else {
@@ -2711,21 +2746,25 @@ static int nvt_ts_thread_func(void *data)
 			prev_spi_errors = ts->diag_spi_errors;
 
 			nvt_crash_append("NVT diag boot=%lus reset=0x%02X "
-					 "dma=%02X/%02X/%02X dead=%d/%d\n",
+					 "dma=%02X/%02X/%02X dead=%d/%d recov=%llu\n",
 					 (ulong)(jiffies_to_msecs(now) / 1000UL),
 					 rv[0],
 					 nvt_reg_rd_as_u8(0x3F7D0),
 					 nvt_reg_rd_as_u8(0x3F7F1),
 					 nvt_reg_rd_as_u8(0x3F7E8),
-					 dead_ticks, dead);
+					 dead_ticks, dead,
+					 (unsigned long long)ts->diag_recoveries);
 			nvt_set_page(base);
 
 			if (dead_ticks >= 2) {
-				/* Do NOT destroy the running firmware by pulsing HW reset or entering bootloader.
-				 * Simply re-assert the active scan page and clear error counters. */
-				NVT_LOG("watchdog: transient error tick, re-asserting event page\n");
+				NVT_LOG("watchdog: TDDI firmware halted (reset=0x%02X), auto-reloading...\n", rv[0]);
 				dead_ticks = 0;
 				prev_spi_errors = 0;
+				ts->diag_recoveries++;
+				nvt_bootloader_reset();
+				msleep(10);
+				nvt_update_firmware(boot_update_firmware_name);
+				ts->current_page = 0xFFFFFFFF;
 				nvt_set_page(base);
 			}
 			mutex_unlock(&ts->lock);
@@ -2924,6 +2963,8 @@ Description:
 *******************************************************/
 void nvt_hw_reset_pulse(void)
 {
+	if (ts)
+		ts->current_page = 0xFFFFFFFF;
 	nvt_crash_append("NVT hw-reset: rst_gpio=%d valid=%d\n",
 			 ts->reset_gpio, gpio_is_valid(ts->reset_gpio));
 	if (gpio_is_valid(ts->reset_gpio)) {
@@ -3258,6 +3299,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 #endif /* NVT_PM_WAIT_BUS_RESUME_COMPLETE */
 
 	ts->client = client;
+	ts->current_page = 0xFFFFFFFF;
 	spi_set_drvdata(client, ts);
 
 	//---prepare for spi parameter---

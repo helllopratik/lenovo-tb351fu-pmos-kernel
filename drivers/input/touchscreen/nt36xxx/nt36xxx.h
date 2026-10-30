@@ -275,6 +275,9 @@ struct nvt_ts_data {
 	u32 diag_max_fingers;       /* high-water mark of simultaneous fingers */
 	unsigned long diag_last_jiffies;
 	unsigned long diag_last_err_jiffies;
+	u32 current_page;           /* cached SPI page address (avoids redundant 60Hz writes) */
+	u32 diag_fault_count;       /* consecutive frames with 0xFD/0xFE fault pattern */
+	u64 diag_recoveries;        /* total successful auto-recoveries executed */
 };
 
 #if NVT_TOUCH_PROC
