@@ -296,10 +296,21 @@ void __ref fb_text_panic_dump(void)
 static void fb_panic_dump_fn(struct kmsg_dumper *dumper,
 			     struct kmsg_dump_detail *detail)
 {
+	void __iomem *wdt;
+
 	if (!detail || detail->reason == KMSG_DUMP_SHUTDOWN)
 		return;
 	fb_text_panic_dump();
-	mdelay(5000);
+	mdelay(3000);
+
+	/* Pulse MediaTek TopRGU Hardware Watchdog Reset directly */
+	wdt = ioremap(0x10007000, 0x100);
+	if (wdt) {
+		writel(0x22000000 | (1 << 0) | (1 << 2) | (1 << 6), wdt + 0x00);
+		wmb();
+		writel(0x1209, wdt + 0x14);
+		wmb();
+	}
 	emergency_restart();
 }
 

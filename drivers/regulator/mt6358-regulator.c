@@ -790,11 +790,11 @@ static int mt6358_regulator_probe(struct platform_device *pdev)
 	pr_emerg("PMOSPWR: MicroSD card power (VMC 3.3V + VMCH 3.3V) forced ON!\n");
 
 	/* Configure MT6366/MT6358 PMIC hardware Power-Key long-press reset/shutdown:
-	 * Enable PWRKEY_RST (bit 6), disable HOMEKEY_RST (bit 5) so single Power key holds trigger hardware power-cut */
+	 * Enable BOTH PWRKEY_RST (bit 6) and HOMEKEY_RST (bit 5) so hardware Power+Vol- hold triggers silicon reset */
 	regmap_update_bits(mt6397->regmap, MT6358_TOP_RST_MISC,
 			   BIT(6) | BIT(5) | GENMASK(9, 8),
-			   BIT(6));
-	pr_emerg("PMOSPWR: MT6366 hardware power-key reset armed (8s Power hold = hardware cut)!\n");
+			   BIT(6) | BIT(5));
+	pr_emerg("PMOSPWR: MT6366 hardware Power+Vol- reset armed (8s hold = hardware cut)!\n");
 
 	pr_emerg("PMOSPWR: mt6358-regulator probe SUCCESS: all LDO & BUCK regulators bound to DT nodes!\n");
 
