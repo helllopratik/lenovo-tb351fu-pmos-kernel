@@ -2949,10 +2949,14 @@ err_disable_supply:
  */
 int regulator_enable(struct regulator *regulator)
 {
-	struct regulator_dev *rdev = regulator->rdev;
+	struct regulator_dev *rdev;
 	struct ww_acquire_ctx ww_ctx;
 	int ret;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
+	rdev = regulator->rdev;
 	regulator_lock_dependent(rdev, &ww_ctx);
 	ret = _regulator_enable(regulator);
 	regulator_unlock_dependent(rdev, &ww_ctx);
@@ -3061,10 +3065,14 @@ static int _regulator_disable(struct regulator *regulator)
  */
 int regulator_disable(struct regulator *regulator)
 {
-	struct regulator_dev *rdev = regulator->rdev;
+	struct regulator_dev *rdev;
 	struct ww_acquire_ctx ww_ctx;
 	int ret;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
+	rdev = regulator->rdev;
 	regulator_lock_dependent(rdev, &ww_ctx);
 	ret = _regulator_disable(regulator);
 	regulator_unlock_dependent(rdev, &ww_ctx);
@@ -3275,6 +3283,9 @@ static int _regulator_list_voltage(struct regulator_dev *rdev,
 int regulator_is_enabled(struct regulator *regulator)
 {
 	int ret;
+
+	if (IS_ERR_OR_NULL(regulator))
+		return 0;
 
 	if (regulator->always_on)
 		return 1;
@@ -4217,6 +4228,9 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 	struct ww_acquire_ctx ww_ctx;
 	int ret;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
 	regulator_lock_dependent(regulator->rdev, &ww_ctx);
 
 	ret = regulator_set_voltage_unlocked(regulator, min_uV, max_uV,
@@ -4544,6 +4558,9 @@ int regulator_get_voltage(struct regulator *regulator)
 	struct ww_acquire_ctx ww_ctx;
 	int ret;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
 	regulator_lock_dependent(regulator->rdev, &ww_ctx);
 	ret = regulator_get_voltage_rdev(regulator->rdev);
 	regulator_unlock_dependent(regulator->rdev, &ww_ctx);
@@ -4647,10 +4664,14 @@ EXPORT_SYMBOL_GPL(regulator_get_current_limit);
  */
 int regulator_set_mode(struct regulator *regulator, unsigned int mode)
 {
-	struct regulator_dev *rdev = regulator->rdev;
+	struct regulator_dev *rdev;
 	int ret;
 	int regulator_curr_mode;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
+	rdev = regulator->rdev;
 	regulator_lock(rdev);
 
 	/* sanity check */
@@ -4711,6 +4732,9 @@ static unsigned int _regulator_get_mode(struct regulator_dev *rdev)
  */
 unsigned int regulator_get_mode(struct regulator *regulator)
 {
+	if (IS_ERR_OR_NULL(regulator))
+		return 0;
+
 	return _regulator_get_mode(regulator->rdev);
 }
 EXPORT_SYMBOL_GPL(regulator_get_mode);
@@ -4800,10 +4824,14 @@ EXPORT_SYMBOL_GPL(regulator_get_error_flags);
  */
 int regulator_set_load(struct regulator *regulator, int uA_load)
 {
-	struct regulator_dev *rdev = regulator->rdev;
+	struct regulator_dev *rdev;
 	int old_uA_load;
 	int ret = 0;
 
+	if (IS_ERR_OR_NULL(regulator))
+		return PTR_ERR_OR_ZERO(regulator) ?: -EINVAL;
+
+	rdev = regulator->rdev;
 	regulator_lock(rdev);
 	old_uA_load = regulator->uA_load;
 	regulator->uA_load = uA_load;
