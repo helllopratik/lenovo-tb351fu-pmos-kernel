@@ -371,11 +371,18 @@ void input_handle_event(struct input_dev *dev,
 }
 
 #include <linux/reboot.h>
+#include <linux/io.h>
 
 static void pmos_combo_poweroff_workfn(struct work_struct *work)
 {
-	pr_emerg("PMOSEMG: Emergency button hold detected! Immediate hardware poweroff!\n");
-	kernel_power_off();
+	void __iomem *wdt = ioremap(0x10007000, 0x100);
+	pr_emerg("PMOSEMG: Emergency button hold detected! Immediate MTK hardware reset!\n");
+	if (wdt) {
+		writel(0x22000045, wdt + 0x00);
+		writel(0x1209, wdt + 0x14);
+		wmb();
+	}
+	emergency_restart();
 }
 static DECLARE_DELAYED_WORK(pmos_combo_poweroff_work, pmos_combo_poweroff_workfn);
 static bool pmos_pwr_down;
