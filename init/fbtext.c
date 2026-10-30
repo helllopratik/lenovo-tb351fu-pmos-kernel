@@ -299,8 +299,8 @@ static void fb_panic_dump_fn(struct kmsg_dumper *dumper,
 	if (!detail || detail->reason == KMSG_DUMP_SHUTDOWN)
 		return;
 	fb_text_panic_dump();
-	mdelay(10000);
-	kernel_restart("bootloader");
+	mdelay(5000);
+	emergency_restart();
 }
 
 static struct kmsg_dumper fb_panic_kd = {
