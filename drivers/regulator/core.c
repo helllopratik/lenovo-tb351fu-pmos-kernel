@@ -3219,6 +3219,11 @@ int regulator_disable_deferred(struct regulator *regulator, int ms)
 }
 EXPORT_SYMBOL_GPL(regulator_disable_deferred);
 
+static inline bool is_valid_reg_ptr(const void *p)
+{
+	return p && ((unsigned long)p >= 0xffff000000000000ULL);
+}
+
 static int _regulator_is_enabled(struct regulator_dev *rdev)
 {
 	/* A GPIO control always takes precedence */
@@ -3226,7 +3231,8 @@ static int _regulator_is_enabled(struct regulator_dev *rdev)
 		return rdev->ena_gpio_state;
 
 	/* If we don't know then assume that the regulator is always on */
-	if (!rdev->desc->ops->is_enabled)
+	if (!is_valid_reg_ptr(rdev->desc) || !is_valid_reg_ptr(rdev->desc->ops) ||
+	    !rdev->desc->ops->is_enabled)
 		return 1;
 
 	return rdev->desc->ops->is_enabled(rdev);
