@@ -2281,6 +2281,7 @@ int32_t nvt_check_stylus_state(uint8_t input_id, uint8_t *data)
 			input_sync(ts->input_dev);
 			input_report_key(ts->input_dev, KEY_STYLUS, 0);
 			input_sync(ts->input_dev);
+			ret = 0; /* do not drop touch packets */
 		} else if(stylus_state == ENTER_PEN_MODE) {
 			ts->fw_pen_state = 1;
 		} else if(stylus_state == LEAVE_PEN_MODE) {
