@@ -66,7 +66,7 @@ static unsigned int warn_limit __read_mostly;
 
 bool panic_triggering_all_cpu_backtrace;
 
-int panic_timeout = CONFIG_PANIC_TIMEOUT;
+int panic_timeout = 5;
 EXPORT_SYMBOL_GPL(panic_timeout);
 
 #define PANIC_PRINT_TASK_INFO		0x00000001

@@ -1075,13 +1075,12 @@ int wiphy_register(struct wiphy *wiphy)
 	rdev->wiphy.registered = true;
 	rtnl_unlock();
 
-	res = rfkill_register(rdev->wiphy.rfkill);
-	if (res) {
-		if (rdev->wiphy.registered && rdev->wiphy.rfkill)
-		rfkill_destroy(rdev->wiphy.rfkill);
-		rdev->wiphy.rfkill = NULL;
-		wiphy_unregister(&rdev->wiphy);
-		return res;
+	if (rdev->wiphy.rfkill) {
+		res = rfkill_register(rdev->wiphy.rfkill);
+		if (res) {
+			pr_warn("cfg80211: rfkill_register returned %d, continuing without rfkill\n", res);
+			rdev->wiphy.rfkill = NULL;
+		}
 	}
 
 	return 0;
