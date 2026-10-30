@@ -1218,6 +1218,8 @@ static void pinctrl_release(struct kref *kref)
  */
 void pinctrl_put(struct pinctrl *p)
 {
+	if (IS_ERR_OR_NULL(p))
+		return;
 	kref_put(&p->users, pinctrl_release);
 }
 EXPORT_SYMBOL_GPL(pinctrl_put);
@@ -1231,6 +1233,9 @@ struct pinctrl_state *pinctrl_lookup_state(struct pinctrl *p,
 						 const char *name)
 {
 	struct pinctrl_state *state;
+
+	if (IS_ERR_OR_NULL(p))
+		return ERR_PTR(-EINVAL);
 
 	state = find_state(p, name);
 	if (!state) {
@@ -1365,6 +1370,9 @@ unapply_new_state:
  */
 int pinctrl_select_state(struct pinctrl *p, struct pinctrl_state *state)
 {
+	if (IS_ERR_OR_NULL(p) || IS_ERR_OR_NULL(state))
+		return 0;
+
 	if (p->state == state)
 		return 0;
 
@@ -1421,6 +1429,8 @@ static int devm_pinctrl_match(struct device *dev, void *res, void *data)
  */
 void devm_pinctrl_put(struct pinctrl *p)
 {
+	if (IS_ERR_OR_NULL(p))
+		return;
 	WARN_ON(devres_release(p->dev, devm_pinctrl_release,
 			       devm_pinctrl_match, p));
 }
