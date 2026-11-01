@@ -2392,10 +2392,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		 * page yields a FIXED set of coords with an incrementing counter. */
 		nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
 	}
-	if (ts->pen_support)
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + PEN_DATA_LEN + 1);
-	else
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
+	ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
 	if (ret < 0) {
 		ts->diag_spi_errors++;
 		if (time_after(jiffies, ts->diag_last_err_jiffies + HZ / 4))
@@ -2406,41 +2403,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	nvt_diag_update(point_data);
 
-	/* TDDI fault detection: NT36523N firmware outputs 0xFD or 0xFE across
-	 * point_data[1..6] when an internal MCU crash or ESD fault occurs.
-	 * In simpledrm/pmosfb there is no DSI VBLANK sync, so transient panel
-	 * noise or baseline recalibration can trigger a fault. Without host
-	 * re-download, the MCU cannot restart on its own because its internal
-	 * ROM flash only holds bootloader.
+	/* TDDI fault monitoring: The watchdog thread in nvt_ts_thread_func
+	 * already monitors whether the chip drops out of 0xA3 (NORMAL_RUN).
+	 * We do not reset the TDDI MCU from the poll worker, avoiding
+	 * false-positive firmware downloads that disrupt display scanout.
 	 */
-	{
-		bool is_fault = true;
-		int fi;
-		for (fi = 1; fi <= 6; fi++) {
-			if (point_data[fi] != 0xFD && point_data[fi] != 0xFE) {
-				is_fault = false;
-				break;
-			}
-		}
-		if (is_fault) {
-			ts->diag_fault_count++;
-			if (ts->diag_fault_count >= 12) { /* ~200ms of consecutive fault */
-				NVT_ERR("NT36523N TDDI fault 0x%02X detected, auto-reloading firmware...\n",
-					point_data[1]);
-				ts->diag_fault_count = 0;
-				ts->diag_recoveries++;
-				nvt_bootloader_reset();
-				msleep(10);
-				nvt_update_firmware(boot_update_firmware_name);
-				ts->current_page = 0xFFFFFFFF;
-				nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
-				mutex_unlock(&ts->lock);
-				return IRQ_HANDLED;
-			}
-		} else {
-			ts->diag_fault_count = 0;
-		}
-	}
 
 #if 0
 	if (nvt_fw_recovery(point_data)) {
@@ -2479,7 +2446,7 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 	}
 #endif
 	if (ts->pen_support) {
-		pen_data = &point_data[POINT_DATA_LEN + 1];
+		pen_data = &point_data[66];
 		pen_format_id = pen_data[0];
 		if (pen_format_id == 0x01) {
 			pen_pressure = (uint32_t)(pen_data[5] << 8) + (uint32_t)(pen_data[6]);
@@ -3600,7 +3567,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		ts->pen_input_dev->evbit[0] = BIT_MASK(EV_SYN) | BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
 		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_PEN)] |= BIT_MASK(BTN_TOOL_PEN);
-		ts->pen_input_dev->keybit[BIT_WORD(KEY_STYLUS)] |= BIT_MASK(KEY_STYLUS);
 		//ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_RUBBER)] |= BIT_MASK(BTN_TOOL_RUBBER);
 		ts->pen_input_dev->keybit[BIT_WORD(BTN_STYLUS)] |= BIT_MASK(BTN_STYLUS);
 		ts->pen_input_dev->keybit[BIT_WORD(BTN_STYLUS2)] |= BIT_MASK(BTN_STYLUS2);
