@@ -90,6 +90,8 @@ struct pmosfb_device {
 
 	/* display parameters */
 	struct drm_display_mode mode;
+	struct drm_display_mode mode_90;
+	struct drm_display_mode mode_60;
 	const struct drm_format_info *format;
 
 	/* backlight */
@@ -300,7 +302,11 @@ static enum drm_mode_status pmosfb_crtc_helper_mode_valid(struct drm_crtc *crtc,
 {
 	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
 
-	return drm_crtc_helper_mode_valid_fixed(crtc, mode, &sdev->mode);
+	if (drm_mode_match(mode, &sdev->mode_90, DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK) ||
+	    drm_mode_match(mode, &sdev->mode_60, DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK))
+		return MODE_OK;
+
+	return MODE_BAD;
 }
 
 /*
@@ -408,6 +414,15 @@ static void pmosfb_crtc_atomic_enable(struct drm_crtc *crtc,
 				      struct drm_atomic_state *state)
 {
 	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	int vrefresh = 90;
+
+	if (crtc_state && crtc_state->mode.clock) {
+		vrefresh = drm_mode_vrefresh(&crtc_state->mode);
+		if (vrefresh <= 0)
+			vrefresh = 90;
+	}
+	sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / vrefresh);
 
 	drm_crtc_vblank_on(crtc);
 	pmosfb_vblank_start(sdev);
@@ -461,8 +476,28 @@ static const struct drm_encoder_funcs pmosfb_encoder_funcs = {
 static int pmosfb_connector_helper_get_modes(struct drm_connector *connector)
 {
 	struct pmosfb_device *sdev = pmosfb_device_of_dev(connector->dev);
+	struct drm_display_mode *m90, *m60;
+	int count = 0;
 
-	return drm_connector_helper_get_modes_fixed(connector, &sdev->mode);
+	/* 90Hz native panel mode (Preferred, Default) */
+	m90 = drm_mode_duplicate(connector->dev, &sdev->mode_90);
+	if (m90) {
+		m90->type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
+		drm_mode_set_name(m90);
+		drm_mode_probed_add(connector, m90);
+		count++;
+	}
+
+	/* 60Hz mode (Alternative / Battery-saver / Low CPU load) */
+	m60 = drm_mode_duplicate(connector->dev, &sdev->mode_60);
+	if (m60) {
+		m60->type |= DRM_MODE_TYPE_DRIVER;
+		drm_mode_set_name(m60);
+		drm_mode_probed_add(connector, m60);
+		count++;
+	}
+
+	return count;
 }
 
 static const struct drm_connector_helper_funcs pmosfb_connector_helper_funcs = {
@@ -633,10 +668,10 @@ static struct drm_driver pmosfb_driver = {
  * Platform driver
  */
 
-static struct drm_display_mode pmosfb_mode(unsigned int width,
-					   unsigned int height,
-					   unsigned int width_mm,
-					   unsigned int height_mm)
+static struct drm_display_mode pmosfb_mode_90hz(unsigned int width,
+						unsigned int height,
+						unsigned int width_mm,
+						unsigned int height_mm)
 {
 	/* Modeline extracted directly from stock Android MTK DRM DSI-1 state:
 	 * "1200x2000": 90 265446 1200 1282 1286 1368 2000 2026 2028 2156 0x48 0x0
@@ -657,6 +692,35 @@ static struct drm_display_mode pmosfb_mode(unsigned int width,
 	};
 
 	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
+	drm_mode_set_name(&mode);
+
+	return mode;
+}
+
+static struct drm_display_mode pmosfb_mode_60hz(unsigned int width,
+						unsigned int height,
+						unsigned int width_mm,
+						unsigned int height_mm)
+{
+	/* 60Hz mode matching panel blanking geometry:
+	 * 1368 * 2156 * 60 = 176965 kHz
+	 */
+	struct drm_display_mode mode = {
+		.clock = 176965,
+		.hdisplay = 1200,
+		.hsync_start = 1282,
+		.hsync_end = 1286,
+		.htotal = 1368,
+		.vdisplay = 2000,
+		.vsync_start = 2026,
+		.vsync_end = 2028,
+		.vtotal = 2156,
+		.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+		.width_mm = width_mm ? width_mm : 150,
+		.height_mm = height_mm ? height_mm : 250,
+	};
+
+	mode.type |= DRM_MODE_TYPE_DRIVER;
 	drm_mode_set_name(&mode);
 
 	return mode;
@@ -739,7 +803,9 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 	width_mm = DRM_MODE_RES_MM(width, 96ul);
 	height_mm = DRM_MODE_RES_MM(height, 96ul);
 
-	sdev->mode = pmosfb_mode(width, height, width_mm, height_mm);
+	sdev->mode_90 = pmosfb_mode_90hz(width, height, width_mm, height_mm);
+	sdev->mode_60 = pmosfb_mode_60hz(width, height, width_mm, height_mm);
+	sdev->mode = sdev->mode_90;
 	sdev->format = format;
 	sdev->pitch = stride;
 
