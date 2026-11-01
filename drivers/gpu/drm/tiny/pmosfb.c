@@ -378,10 +378,26 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
  */
 static void pmosfb_pace_present(struct pmosfb_device *sdev)
 {
-	/* The synthetic vblank timer already delivers 60 Hz frame pacing to
-	 * Mutter/Phosh. Extra sleeping inside the commit worker stalls video
-	 * frames and causes playback lag. We update timestamp without sleeping.
-	 */
+	ktime_t now, since, period;
+	u64 remain_us;
+
+	period = sdev->vblank_period;
+	if (ktime_to_ns(period) <= 0)
+		return;
+	if (ktime_to_ns(sdev->last_present) == 0) {
+		sdev->last_present = ktime_get();
+		return;
+	}
+
+	now = ktime_get();
+	since = ktime_sub(now, sdev->last_present);
+	if (ktime_to_ns(since) >= ktime_to_ns(period))
+		goto out;
+
+	remain_us = (ktime_to_ns(period) - ktime_to_ns(since)) / NSEC_PER_USEC;
+	if (remain_us > 0 && remain_us < 20000)
+		usleep_range(remain_us, remain_us + 500);
+out:
 	sdev->last_present = ktime_get();
 }
 
