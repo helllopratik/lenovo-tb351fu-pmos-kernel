@@ -4623,11 +4623,25 @@ static int hci_get_mws_transport_config_sync(struct hci_dev *hdev)
 /* Check for Synchronization Train support */
 static int hci_read_sync_train_params_sync(struct hci_dev *hdev)
 {
+	int err;
+
 	if (!lmp_sync_train_capable(hdev))
 		return 0;
 
-	return __hci_cmd_sync_status(hdev, HCI_OP_READ_SYNC_TRAIN_PARAMS,
-				     0, NULL, HCI_CMD_TIMEOUT);
+	err = __hci_cmd_sync_status(hdev, HCI_OP_READ_SYNC_TRAIN_PARAMS,
+				    0, NULL, HCI_CMD_TIMEOUT);
+	/*
+	 * Some controllers (e.g. MTK soc2 firmware) set the Sync Train
+	 * LMP feature bit but reject this command with Unknown Command
+	 * (HCI status 0x01 -> -EBADRQC). Treat that as not capable
+	 * instead of aborting the whole init sequence.
+	 * PMOS TB351FU port: firmware parity with stock keeps this
+	 * quirk; stock never hits it because the HAL is the HCI host.
+	 */
+	if (err == -EBADRQC)
+		return 0;
+
+	return err;
 }
 
 /* Enable Secure Connections if supported and configured */
