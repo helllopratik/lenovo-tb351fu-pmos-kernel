@@ -59,7 +59,7 @@
 #define DRIVER_MAJOR	1
 #define DRIVER_MINOR	2
 
-#define PMOSFB_VBLANK_HZ	60
+#define PMOSFB_VBLANK_HZ	90
 
 /*
  * Backlight via the DISP_PWM0 block. Layout follows the mt8183-style
@@ -638,8 +638,22 @@ static struct drm_display_mode pmosfb_mode(unsigned int width,
 					   unsigned int width_mm,
 					   unsigned int height_mm)
 {
+	/* Modeline extracted directly from stock Android MTK DRM DSI-1 state:
+	 * "1200x2000": 90 265446 1200 1282 1286 1368 2000 2026 2028 2156 0x48 0x0
+	 */
 	struct drm_display_mode mode = {
-		DRM_MODE_INIT(60, width, height, width_mm, height_mm)
+		.clock = 265446,
+		.hdisplay = 1200,
+		.hsync_start = 1282,
+		.hsync_end = 1286,
+		.htotal = 1368,
+		.vdisplay = 2000,
+		.vsync_start = 2026,
+		.vsync_end = 2028,
+		.vtotal = 2156,
+		.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+		.width_mm = width_mm ? width_mm : 150,
+		.height_mm = height_mm ? height_mm : 250,
 	};
 
 	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
