@@ -2293,11 +2293,14 @@ int32_t nvt_check_stylus_state(uint8_t input_id, uint8_t *data)
 	if ((input_id == DATA_PROTOCOL) && (func_type == FUNCPAGE_STYLUS)) {
 		ret = stylus_state;
 		if (stylus_state == DETECT_PEN) {
-			NVT_LOG("Enter stylus mode\n");
-			input_report_key(ts->input_dev, KEY_STYLUS, 1);
-			input_sync(ts->input_dev);
-			input_report_key(ts->input_dev, KEY_STYLUS, 0);
-			input_sync(ts->input_dev);
+			if (!ts->fw_pen_state) {
+				NVT_LOG("Enter stylus mode\n");
+				input_report_key(ts->input_dev, KEY_STYLUS, 1);
+				input_sync(ts->input_dev);
+				input_report_key(ts->input_dev, KEY_STYLUS, 0);
+				input_sync(ts->input_dev);
+			}
+			ts->fw_pen_state = 1;
 			ret = 0; /* do not drop touch packets */
 		} else if(stylus_state == ENTER_PEN_MODE) {
 			ts->fw_pen_state = 1;
@@ -2334,6 +2337,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif /* MT_PROTOCOL_B */
 	int32_t i = 0;
 	int32_t finger_cnt = 0;
+	uint8_t *pen_data = NULL;
 	uint8_t pen_format_id = 0;
 	uint32_t pen_x = 0;
 	uint32_t pen_y = 0;
@@ -2344,6 +2348,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	uint32_t pen_btn1 = 0;
 	uint32_t pen_btn2 = 0;
 	uint32_t pen_battery = 0;
+	bool pen_is_touching = false;
+	bool pen_is_active = false;
 	u16 frame_time	= 0;
 	struct lenovo_pen_info *ppen_info;
 
@@ -2386,14 +2392,10 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		 * page yields a FIXED set of coords with an incrementing counter. */
 		nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
 	}
-#if NVT_SUPER_RESOLUTION_N
-	ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#else /* #if NVT_SUPER_RESOLUTION_N */
 	if (ts->pen_support)
 		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + PEN_DATA_LEN + 1);
 	else
 		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#endif /* #if NVT_SUPER_RESOLUTION_N */
 	if (ret < 0) {
 		ts->diag_spi_errors++;
 		if (time_after(jiffies, ts->diag_last_err_jiffies + HZ / 4))
@@ -2476,6 +2478,41 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		return IRQ_HANDLED;
 	}
 #endif
+	if (ts->pen_support) {
+		pen_data = &point_data[POINT_DATA_LEN + 1];
+		pen_format_id = pen_data[0];
+		if (pen_format_id == 0x01) {
+			pen_pressure = (uint32_t)(pen_data[5] << 8) + (uint32_t)(pen_data[6]);
+			pen_is_touching = (pen_pressure > 0);
+		}
+		pen_is_active = (ts->fw_pen_state == 1 || pen_format_id == 0x01);
+	}
+
+	/* Hardware Palm Rejection:
+	 * When the pen tip is pressed down, completely suppress finger contacts
+	 * (which are accidental palm touches from writing) and release active finger slots.
+	 */
+	if (pen_is_touching) {
+		if (ts->prev_finger_cnt > 0) {
+#if MT_PROTOCOL_B
+			for (i = 0; i < ts->max_touch_num; i++) {
+				input_mt_slot(ts->input_dev, i);
+				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
+				input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
+				input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
+			}
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+#else
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+			input_mt_sync(ts->input_dev);
+#endif
+			input_sync(ts->input_dev);
+			ts->prev_finger_cnt = 0;
+		}
+		finger_cnt = 0;
+		goto SKIP_FINGER_PARSING;
+	}
+
 	finger_cnt = 0;
 
 	for (i = 0; i < ts->max_touch_num; i++) {
@@ -2525,6 +2562,10 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 				input_p = 1;
 #endif /* #if NVT_SUPER_RESOLUTION_N */
 
+			/* Palm rejection: when pen is in proximity/hovering, ignore large palm contacts */
+			if (pen_is_active && input_w >= 10)
+				continue;
+
 #if MT_PROTOCOL_B
 			press_id[input_id - 1] = 1;
 			input_mt_slot(ts->input_dev, input_id - 1);
@@ -2548,6 +2589,7 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		}
 	}
 
+SKIP_FINGER_PARSING:
 	if (finger_cnt > 0 || ts->prev_finger_cnt > 0) {
 #if MT_PROTOCOL_B
 		for (i = 0; i < ts->max_touch_num; i++) {
@@ -2587,41 +2629,33 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		ts->prev_finger_cnt = finger_cnt;
 	}
 
-	if (ts->pen_support) {
-/*
-		//--- dump pen buf ---
-		printk("%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-			point_data[66], point_data[67], point_data[68], point_data[69], point_data[70],
-			point_data[71], point_data[72], point_data[73], point_data[74], point_data[75],
-			point_data[76], point_data[77], point_data[78], point_data[79]);
-*/
+	if (ts->pen_support && pen_data) {
 #if CHECK_PEN_DATA_CHECKSUM
-		if (nvt_ts_pen_data_checksum(&point_data[66], PEN_DATA_LEN)) {
+		if (nvt_ts_pen_data_checksum(pen_data, PEN_DATA_LEN)) {
 			// pen data packet checksum not match, skip it
 			goto XFER_ERROR;
 		}
 #endif // #if CHECK_PEN_DATA_CHECKSUM
 
 		// parse and handle pen report
-		pen_format_id = point_data[66];
 		if (pen_format_id != 0xFF) {
 			if (pen_format_id == 0x01) {
 				// report pen data
-				pen_x = (uint32_t)(point_data[67] << 8) + (uint32_t)(point_data[68]);
-				pen_y = (uint32_t)(point_data[69] << 8) + (uint32_t)(point_data[70]);
-				if ((pen_x > PEN_MAX_WIDTH) || (pen_y > PEN_MAX_HEIGHT))
-					goto XFER_ERROR;
+				pen_x = (uint32_t)(pen_data[1] << 8) + (uint32_t)(pen_data[2]);
+				pen_y = (uint32_t)(pen_data[3] << 8) + (uint32_t)(pen_data[4]);
+				if (pen_x > PEN_MAX_WIDTH)
+					pen_x = PEN_MAX_WIDTH;
+				if (pen_y > PEN_MAX_HEIGHT)
+					pen_y = PEN_MAX_HEIGHT;
 				pen_x = PEN_MAX_WIDTH - pen_x;
 				pen_y = PEN_MAX_HEIGHT - pen_y;
-				pen_pressure = (uint32_t)(point_data[71] << 8) + (uint32_t)(point_data[72]);
-				pen_tilt_x = (int32_t)point_data[73];
-				pen_tilt_y = (int32_t)point_data[74];
-				pen_distance = (uint32_t)(point_data[75] << 8) + (uint32_t)(point_data[76]);
-				pen_btn1 = (uint32_t)(point_data[77] & 0x01);
-				pen_btn2 = (uint32_t)((point_data[77] >> 1) & 0x01);
-				pen_battery = (uint32_t)point_data[78];
-//				printk("x=%d,y=%d,p=%d,tx=%d,ty=%d,d=%d,b1=%d,b2=%d,bat=%d\n", pen_x, pen_y, pen_pressure,
-//						pen_tilt_x, pen_tilt_y, pen_distance, pen_btn1, pen_btn2, pen_battery);
+				pen_pressure = (uint32_t)(pen_data[5] << 8) + (uint32_t)(pen_data[6]);
+				pen_tilt_x = (int8_t)pen_data[7];
+				pen_tilt_y = (int8_t)pen_data[8];
+				pen_distance = (uint32_t)(pen_data[9] << 8) + (uint32_t)(pen_data[10]);
+				pen_btn1 = (uint32_t)(pen_data[11] & 0x01);
+				pen_btn2 = (uint32_t)((pen_data[11] >> 1) & 0x01);
+				pen_battery = (uint32_t)pen_data[12];
 
 				input_report_abs(ts->pen_input_dev, ABS_X, pen_x);
 				input_report_abs(ts->pen_input_dev, ABS_Y, pen_y);
@@ -2633,8 +2667,8 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, !!pen_distance || !!pen_pressure);
 				input_report_key(ts->pen_input_dev, BTN_STYLUS, pen_btn1);
 				input_report_key(ts->pen_input_dev, BTN_STYLUS2, pen_btn2);
-				// TBD: pen battery event report
-				// NVT_LOG("pen_battery=%d\n", pen_battery);
+				input_sync(ts->pen_input_dev);
+				ts->prev_pen_active = 1;
 
 				// ioctl-DAA Buffering pen raw data
 				frame_time = (u16)jiffies_to_msecs(jiffies);
@@ -2662,34 +2696,19 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 
 			} else if (pen_format_id == 0xF0) {
 				// report Pen ID
-			} else {
-				// unhandled / idle pen state, clear pen inputs gracefully without error
-				input_report_abs(ts->pen_input_dev, ABS_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-				input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
-				input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
 			}
-		} else { // pen_format_id = 0xFF, i.e. no pen present
-			input_report_abs(ts->pen_input_dev, ABS_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_Y, 0);
+		} else if (ts->prev_pen_active) {
+			// pen lifted out of proximity, send clean release once
 			input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
 			input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
 			input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
 			input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
 			input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
 			input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+			input_sync(ts->pen_input_dev);
+			ts->prev_pen_active = 0;
 		}
-
-		input_sync(ts->pen_input_dev);
-	} /* if (ts->pen_support) */
+	} /* if (ts->pen_support && pen_data) */
 
 XFER_ERROR:
 

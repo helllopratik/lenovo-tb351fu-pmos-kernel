@@ -268,6 +268,7 @@ struct nvt_ts_data {
 #endif
 	/* --- bring-up diagnostics (touch under simpledrm) --- */
 	int prev_finger_cnt;
+	uint8_t prev_pen_active;
 	u64 diag_frames;            /* SPI 108-byte frames read successfully */
 	u64 diag_touch_frames;      /* frames carrying at least one active finger */
 	u64 diag_spi_errors;        /* failed CTP_SPI_READ attempts */
