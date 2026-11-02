@@ -1,0 +1,12 @@
+[Unit]
+Description=pmOS TopRGU watchdog feeder (auto-reboot trap)
+After=basic.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wd-feed.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+import fcntl, os, struct, time
+fd = os.open("/dev/spmpoke", os.O_RDONLY)
+def pack(a,v,mask,count): return bytearray(struct.pack("QQII",a,v,mask,count))
+def rd(a):
+    b=pack(a,0,0,0); fcntl.ioctl(fd,0xC0185301,b); return struct.unpack("QQII",bytes(b))[1]
+def wr(a,v):
+    fcntl.ioctl(fd,0xC0185302,pack(a,v,0,0))
+def snap(lo,hi,tag):
+    print("-- %s --"%tag)
+    for a in range(lo,hi+1,4): print("  0x%08x = 0x%08x"%(a,rd(a)))
+print("== SNAPSHOT (pre-write) ==")
+snap(0x10007000,0x1000701c,"conn_reg[1] bank")
+snap(0x10006000,0x10006028,"SPM bank")
+snap(0x18002600,0x1800261c,"connac 0x2600 window")
+print("0x1800701c = 0x%08x"%rd(0x1800701c))
+print("== WTEST1: 0x10007018 <- 0x88001000 ==")
+wr(0x10007018,0x88001000)
+print("  read-back now   : 0x%08x"%rd(0x10007018))
+time.sleep(0.8)
+print("  read-back +0.8s : 0x%08x"%rd(0x10007018))
+print("== WTEST2: 0x18002600 <- 0x1d1e liveness ==")
+wr(0x18002600,0x1d1e)
+print("  read-back now    : 0x%08x"%rd(0x18002600))
+time.sleep(0.5)
+print("  read-back +0.5s  : 0x%08x"%rd(0x18002600))
+time.sleep(1.5)
+print("  read-back +2.0s  : 0x%08x"%rd(0x18002600))
+print("== WTEST3: SPM 0x10006000 <- 0x0b160001 ==")
+wr(0x10006000,0x0b160001)
+print("  read-back now   : 0x%08x"%rd(0x10006000))
+time.sleep(0.8)
+print("  read-back +0.8s : 0x%08x"%rd(0x10006000))
+snap(0x10006000,0x10006028,"SPM after")
+snap(0x10007000,0x1000701c,"conn bank after")
+print("== 0x18007104 4x ==")
+for i in range(4):
+    print("  0x%08x"%rd(0x18007104)); time.sleep(0.3)

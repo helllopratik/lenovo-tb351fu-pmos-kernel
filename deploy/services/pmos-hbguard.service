@@ -1,0 +1,12 @@
+[Unit]
+Description=pmOS TopRGU raw-MMIO feeder + systemd-liveness direct-reset
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hbguard.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

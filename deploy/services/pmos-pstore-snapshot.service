@@ -1,0 +1,11 @@
+[Unit]
+Description=Save pstore crash traces after warm watchdog reset
+After=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pstore_snapshot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

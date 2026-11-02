@@ -1,0 +1,6 @@
+[Unit]
+Description=Flush journald buffers to persistent storage
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/journalctl --flush
