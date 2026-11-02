@@ -59,7 +59,7 @@
 #define DRIVER_MAJOR	1
 #define DRIVER_MINOR	2
 
-#define PMOSFB_VBLANK_HZ	90
+#define PMOSFB_VBLANK_HZ	60
 
 /*
  * Backlight via the DISP_PWM0 block. Layout follows the mt8183-style
@@ -375,10 +375,33 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
  */
 static void pmosfb_pace_present(struct pmosfb_device *sdev)
 {
-	/* Frame pacing is delivered to wlroots/Phosh by the synthetic vblank timer.
-	 * Sleeping inside atomic_update blocks the commit worker thread, stalls
-	 * the pipeline, and causes video/animation stutter. */
-	sdev->last_present = ktime_get();
+	ktime_t now, since, period;
+	u64 remain_us;
+
+	period = sdev->vblank_period;
+	if (ktime_to_ns(period) <= 0)
+		return;
+
+	now = ktime_get();
+	if (ktime_to_ns(sdev->last_present) == 0) {
+		sdev->last_present = now;
+		return;
+	}
+
+	since = ktime_sub(now, sdev->last_present);
+	if (ktime_to_ns(since) >= ktime_to_ns(period)) {
+		/* Frame arrived on or after expected time; update cadence anchor */
+		sdev->last_present = now;
+		return;
+	}
+
+	remain_us = (ktime_to_ns(period) - ktime_to_ns(since)) / NSEC_PER_USEC;
+	if (remain_us > 0 && remain_us < 20000)
+		usleep_range(remain_us, remain_us + 100);
+
+	/* Advance by one period so subsequent frames maintain accurate scanout lock
+	 * without accumulating sleep drift or inducing animation/video stutter */
+	sdev->last_present = ktime_add(sdev->last_present, period);
 }
 
 /*
@@ -492,21 +515,21 @@ static int pmosfb_connector_helper_get_modes(struct drm_connector *connector)
 	struct drm_display_mode *m90, *m60;
 	int count = 0;
 
-	/* 90Hz native panel mode (Preferred, Default) */
-	m90 = drm_mode_duplicate(connector->dev, &sdev->mode_90);
-	if (m90) {
-		m90->type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
-		drm_mode_set_name(m90);
-		drm_mode_probed_add(connector, m90);
+	/* 60Hz native panel mode (Preferred, Default matching bootloader hardware scanout) */
+	m60 = drm_mode_duplicate(connector->dev, &sdev->mode_60);
+	if (m60) {
+		m60->type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
+		drm_mode_set_name(m60);
+		drm_mode_probed_add(connector, m60);
 		count++;
 	}
 
-	/* 60Hz mode (Alternative / Battery-saver / Low CPU load) */
-	m60 = drm_mode_duplicate(connector->dev, &sdev->mode_60);
-	if (m60) {
-		m60->type |= DRM_MODE_TYPE_DRIVER;
-		drm_mode_set_name(m60);
-		drm_mode_probed_add(connector, m60);
+	/* 90Hz mode (Alternative) */
+	m90 = drm_mode_duplicate(connector->dev, &sdev->mode_90);
+	if (m90) {
+		m90->type |= DRM_MODE_TYPE_DRIVER;
+		drm_mode_set_name(m90);
+		drm_mode_probed_add(connector, m90);
 		count++;
 	}
 
@@ -704,7 +727,7 @@ static struct drm_display_mode pmosfb_mode_90hz(unsigned int width,
 		.height_mm = height_mm ? height_mm : 250,
 	};
 
-	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
+	mode.type |= DRM_MODE_TYPE_DRIVER;
 	drm_mode_set_name(&mode);
 
 	return mode;
@@ -733,7 +756,7 @@ static struct drm_display_mode pmosfb_mode_60hz(unsigned int width,
 		.height_mm = height_mm ? height_mm : 250,
 	};
 
-	mode.type |= DRM_MODE_TYPE_DRIVER;
+	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
 	drm_mode_set_name(&mode);
 
 	return mode;
@@ -818,7 +841,7 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 
 	sdev->mode_90 = pmosfb_mode_90hz(width, height, width_mm, height_mm);
 	sdev->mode_60 = pmosfb_mode_60hz(width, height, width_mm, height_mm);
-	sdev->mode = sdev->mode_90;
+	sdev->mode = sdev->mode_60;
 	sdev->format = format;
 	sdev->pitch = stride;
 
