@@ -152,6 +152,15 @@ The system automatically configures USB gadget networking on boot:
   - **Normal Operation**: When booting and running services, the reboot watchdog is completely disarmed so boot completes uninterrupted.
   - **Fatal Lockup**: If a kernel panic occurs or a task hangs in `D` state for >60s, the MediaTek TopRGU hardware watchdog triggers a clean warm restart after 5 seconds.
 
+### E. MediaTek MT6789 Audio DMA & AFE Agent Gatekeeping
+* **Hardware Reality**: On MT6789 (Helio G99 / MT8781), the MediaTek Audio Front End (AFE) memory interface channels (DL1, DL2..DL8, DL12) require asserting the `AFE_AGENT_ON` register bank (`0x11211b00` = `AFE_AGENT_ON`, `0x11211b04` = `AFE_AGENT_ON_SET`, `0x11211b08` = `AFE_AGENT_ON_CLR`) in order to fetch audio PCM data from DRAM over system bus.
+* **Problem**: Upstream `mt8186-afe-pcm.c` only toggled bit 0 of `AFE_DAC_CON0` (`0x11210010`). On MT6789, `AFE_DAC_CON0` bit 0 enables the audio AFE clock core, but the DMA bus master engine remains unclocked until bit `enable_shift` (bit 4 for DL1) is written to `AFE_AGENT_ON_SET`. Without this, `AFE_DL1_CUR` never advances past 0, causing ALSA PCM playback (`aplay`, `speaker-test`, `paplay`) to stall and fail with `-EIO` after a 10-second timeout.
+* **Fix**:
+  - Added definitions for `AFE_AGENT_ON`, `AFE_AGENT_ON_SET`, and `AFE_AGENT_ON_CLR` to `sound/soc/mediatek/mt8186/mt8186-reg.h`.
+  - Expanded `AFE_MAX_REGISTER` from `0x18bc` to `0x1c00` so regmap boundaries allow reading/writing `0x1b00..0x1b08`.
+  - Updated `mtk_memif_set_enable()` and `mtk_memif_set_disable()` in `sound/soc/mediatek/common/mtk-afe-fe-dai.c` to assert and clear agent channels.
+  - In the AW88395 smart amplifier codec driver, `0` represents 0 dB attenuation (full volume) and `720` (`AW88395_MUTE_VOL`) represents hardware mute. Configured ALSA UCM2 (`mt8186.conf` / `HiFi.conf`) to initialize all 8 amplifier volume registers to 0 dB attenuation at boot.
+
 ---
 
 ## 6. Switching Back to Android
