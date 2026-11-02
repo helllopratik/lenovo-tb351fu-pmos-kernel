@@ -45,10 +45,11 @@ chmod 755 /tmp/irfs_build/init
 
 (cd /tmp/irfs_build && find . | cpio -H newc -o) > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio"
 cp "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" "$ARTIFACTS_DIR/pmos_initramfs_latest.cpio"
-xz -9 --check=crc32 -c "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.xz"
+lz4 -l -9 -f "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.lz4"
+gzip -9 -c "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" > "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.gz"
 rm -rf /tmp/irfs_build
 
-echo "Initramfs created: $ARTIFACTS_DIR/pmos_initramfs_194.cpio ($(du -h "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" | cut -f1))"
+echo "Initramfs created: $ARTIFACTS_DIR/pmos_initramfs_194.cpio ($(du -h "$ARTIFACTS_DIR/pmos_initramfs_194.cpio" | cut -f1)), LZ4: $(du -h "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.lz4" | cut -f1)"
 
 echo "========================================================================"
 echo " 2. Compiling Linux Kernel (GKI 6.12, LLVM 20)"
@@ -65,32 +66,26 @@ lz4 -l -9 -f "$OUT_DIR/arch/arm64/boot/Image" "$ARTIFACTS_DIR/Image.lz4"
 python3 "$COMMON_DIR/tools/mkbootimg/mkbootimg.py" \
   --kernel "$ARTIFACTS_DIR/Image.lz4" \
   --header_version 4 --pagesize 4096 --os_version 17.0.0 --os_patch_level 2026-08 \
-  --output "$ARTIFACTS_DIR/boot_raw.img"
+  --output "$ARTIFACTS_DIR/boot_latest.img"
 
 python3 "$COMMON_DIR/external/avb/avbtool.py" add_hash_footer \
-  --image "$ARTIFACTS_DIR/boot_raw.img" \
+  --image "$ARTIFACTS_DIR/boot_latest.img" \
   --partition_size 67108864 --partition_name boot --algorithm SHA256_RSA4096 \
   --key "$COMMON_DIR/external/avb/test/data/testkey_rsa4096.pem" \
   --rollback_index 0 --rollback_index_location 1 \
-  --prop com.android.build.boot.os_version:17 \
-  --output "$ARTIFACTS_DIR/boot_blob.img"
+  --prop com.android.build.boot.os_version:17
 
-cp "$ARTIFACTS_DIR/boot_raw.img" "$ARTIFACTS_DIR/boot_latest.img"
-
-# Create init_boot.img (Header Version 4, 8MB partition size, ramdisk cpio.xz)
+# Create init_boot.img (Header Version 4, 8MB partition size, ramdisk cpio.lz4)
 python3 "$COMMON_DIR/tools/mkbootimg/mkbootimg.py" \
   --header_version 4 --pagesize 4096 \
-  --ramdisk "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.xz" \
-  --output "$ARTIFACTS_DIR/init_boot_raw.img"
+  --ramdisk "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.lz4" \
+  --output "$ARTIFACTS_DIR/init_boot_latest.img"
 
 python3 "$COMMON_DIR/external/avb/avbtool.py" add_hash_footer \
-  --image "$ARTIFACTS_DIR/init_boot_raw.img" \
+  --image "$ARTIFACTS_DIR/init_boot_latest.img" \
   --partition_size 8388608 --partition_name init_boot --algorithm SHA256_RSA4096 \
   --key "$COMMON_DIR/external/avb/test/data/testkey_rsa4096.pem" \
-  --rollback_index 0 --rollback_index_location 1 \
-  --output "$ARTIFACTS_DIR/init_boot_blob.img"
-
-cp "$ARTIFACTS_DIR/init_boot_raw.img" "$ARTIFACTS_DIR/init_boot_latest.img"
+  --rollback_index 0 --rollback_index_location 1
 
 # Create vbmeta.img (Verification Flags=3 Disabled) - FRESH every cycle
 python3 "$COMMON_DIR/external/avb/avbtool.py" make_vbmeta_image \
@@ -141,6 +136,7 @@ if adb get-state 1>/dev/null 2>&1; then
   # Flash Kernel & Initramfs to Slot B
   adb shell "su root sh -c 'dd if=/data/local/tmp/boot_latest.img of=/dev/block/by-name/boot_b bs=4194304 conv=fsync'"
   adb shell "su root sh -c 'dd if=/data/local/tmp/init_boot_latest.img of=/dev/block/by-name/init_boot_b bs=4194304 conv=fsync'"
+  adb shell "su root sh -c 'rm -f /data/local/tmp/boot_latest.img /data/local/tmp/init_boot_latest.img /data/local/tmp/vbmeta_latest.img'"
 
   echo "Verifying MD5 checksums on Slot B..."
   adb shell "su root sh -c 'md5sum /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vendor_boot_b /dev/block/by-name/dtbo_b /dev/block/by-name/vbmeta_b'"
