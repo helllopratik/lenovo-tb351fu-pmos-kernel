@@ -142,6 +142,28 @@ if adb get-state 1>/dev/null 2>&1; then
   adb shell "su -c 'md5sum /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vendor_boot_b /dev/block/by-name/dtbo_b /dev/block/by-name/vbmeta_b'"
   md5sum "$ARTIFACTS_DIR/boot_latest.img" "$ARTIFACTS_DIR/init_boot_latest.img" "$ARTIFACTS_DIR/vbmeta_latest.img"
   echo "SUCCESS! Flashed and verified exclusively on Slot B (NO reboot performed)."
+elif ssh -o BatchMode=yes -o ConnectTimeout=2 user@172.16.42.1 true 2>/dev/null; then
+  echo "Device connected in postmarketOS via SSH (172.16.42.1)..."
+  echo "Pushing images to device via SCP..."
+  scp -o BatchMode=yes "$ARTIFACTS_DIR/boot_latest.img" "$ARTIFACTS_DIR/init_boot_latest.img" "$ARTIFACTS_DIR/vbmeta_latest.img" user@172.16.42.1:/tmp/
+
+  echo "Ensuring /dev/block/by-name symlinks exist on target..."
+  ssh -o BatchMode=yes user@172.16.42.1 "sudo mkdir -p /dev/block/by-name && sudo ln -sf /dev/disk/by-partlabel/* /dev/block/by-name/"
+
+  echo "Flashing partitions to SLOT B ONLY via dd..."
+  ssh -o BatchMode=yes user@172.16.42.1 "
+    sudo dd if=/tmp/vbmeta_latest.img of=/dev/block/by-name/vbmeta_b bs=4096 conv=fsync
+    sudo dd if=/tmp/vbmeta_latest.img of=/dev/block/by-name/vbmeta_system_b bs=4096 conv=fsync
+    sudo dd if=/tmp/vbmeta_latest.img of=/dev/block/by-name/vbmeta_vendor_b bs=4096 conv=fsync
+    sudo dd if=/tmp/boot_latest.img of=/dev/block/by-name/boot_b bs=4194304 conv=fsync
+    sudo dd if=/tmp/init_boot_latest.img of=/dev/block/by-name/init_boot_b bs=4194304 conv=fsync
+    rm -f /tmp/boot_latest.img /tmp/init_boot_latest.img /tmp/vbmeta_latest.img
+  "
+
+  echo "Verifying MD5 checksums on Slot B..."
+  ssh -o BatchMode=yes user@172.16.42.1 "sudo md5sum /dev/block/by-name/boot_b /dev/block/by-name/init_boot_b /dev/block/by-name/vbmeta_b"
+  md5sum "$ARTIFACTS_DIR/boot_latest.img" "$ARTIFACTS_DIR/init_boot_latest.img" "$ARTIFACTS_DIR/vbmeta_latest.img"
+  echo "SUCCESS! Flashed and verified exclusively on Slot B via SSH (NO reboot performed)."
 else
-  echo "Note: Device not connected via ADB. Images are ready for manual fastboot or ADB flashing."
+  echo "Note: Device not connected via ADB or SSH. Images are ready for manual fastboot, ADB, or SSH flashing."
 fi

@@ -800,7 +800,7 @@ static int aw_dev_check_mode1_pll(struct aw_device *aw_dev)
 	for (i = 0; i < AW88395_DEV_SYSST_CHECK_MAX; i++) {
 		ret = aw_dev_get_iis_status(aw_dev);
 		if (ret < 0) {
-			dev_err(aw_dev->dev, "mode1 iis signal check error");
+			dev_dbg(aw_dev->dev, "mode1 iis signal check error");
 			usleep_range(AW88395_2000_US, AW88395_2000_US + 10);
 		} else {
 			return 0;
@@ -862,18 +862,22 @@ static int aw_dev_check_mode2_pll(struct aw_device *aw_dev)
 
 static int aw_dev_check_syspll(struct aw_device *aw_dev)
 {
-	int ret;
+	int ret, retry;
 
-	ret = aw_dev_check_mode1_pll(aw_dev);
-	if (ret) {
+	for (retry = 0; retry < 5; retry++) {
+		ret = aw_dev_check_mode1_pll(aw_dev);
+		if (!ret)
+			return 0;
+
 		dev_dbg(aw_dev->dev, "mode1 check iis failed try switch to mode2 check");
 		ret = aw_dev_check_mode2_pll(aw_dev);
-		if (ret) {
-			dev_err(aw_dev->dev, "mode2 check iis failed");
-			return ret;
-		}
+		if (!ret)
+			return 0;
+
+		msleep(10);
 	}
 
+	dev_err(aw_dev->dev, "mode2 check iis failed");
 	return ret;
 }
 

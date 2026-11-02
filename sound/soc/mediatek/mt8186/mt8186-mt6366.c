@@ -339,6 +339,22 @@ static const struct snd_soc_ops mt8186_rt5682s_i2s_ops = {
 	.hw_params = mt8186_rt5682s_i2s_hw_params,
 };
 
+static int mt8186_i2s3_hw_params(struct snd_pcm_substream *substream,
+				 struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int rate = params_rate(params);
+	unsigned int mclk_fs_ratio = 128;
+	unsigned int mclk_fs = rate * mclk_fs_ratio;
+
+	return snd_soc_dai_set_sysclk(cpu_dai, 0, mclk_fs, SND_SOC_CLOCK_OUT);
+}
+
+static const struct snd_soc_ops mt8186_i2s3_ops = {
+	.hw_params = mt8186_i2s3_hw_params,
+};
+
 static int __maybe_unused mt8186_mt6366_rt1019_rt5682s_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_component *cmpnt_afe =
@@ -884,6 +900,7 @@ static struct snd_soc_dai_link mt8186_mt6366_rt1019_rt5682s_dai_links[] = {
 		.dai_fmt = SND_SOC_DAIFMT_I2S |
 			   SND_SOC_DAIFMT_IB_IF |
 			   SND_SOC_DAIFMT_CBS_CFS,
+		.ops = &mt8186_i2s3_ops,
 		.dpcm_playback = 1,
 		.ignore_suspend = 1,
 		SND_SOC_DAILINK_REG(i2s3),
@@ -1273,6 +1290,7 @@ static int mt8186_mt6366_soc_card_probe(struct mtk_soc_card_data *soc_card_data,
 				dai_link->be_hw_params_fixup = mt8186_i2s_hw_params_24le_fixup;
 			else
 				dai_link->be_hw_params_fixup = mt8186_i2s_hw_params_32le_fixup;
+			dai_link->ops = &mt8186_i2s3_ops;
 		}
 	}
 
