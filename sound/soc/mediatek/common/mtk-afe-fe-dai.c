@@ -413,11 +413,8 @@ int mtk_memif_set_enable(struct mtk_base_afe *afe, int id)
 			 phys_buf_addr, end_addr, memif->dma_bytes);
 	}
 
-	/* On MT6789/MT8186 DMA hardware, AFE_AGENT_ON bit controls memory interface */
-	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON_SET,
-			       1, 1, memif->data->enable_shift);
-	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON,
-			       1, 1, memif->data->enable_shift);
+	/* On MT6789/MT8186 DMA hardware, AFE_AGENT_ON_SET bit controls memory interface */
+	mtk_regmap_write(afe->regmap, MTK_AFE_AGENT_ON_SET, BIT(memif->data->enable_shift));
 
 	return mtk_regmap_update_bits(afe->regmap, memif->data->enable_reg,
 				      1, 1, memif->data->enable_shift);
@@ -434,10 +431,8 @@ int mtk_memif_set_disable(struct mtk_base_afe *afe, int id)
 		return 0;
 	}
 
-	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON_CLR,
-			       1, 1, memif->data->enable_shift);
-	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON,
-			       1, 0, memif->data->enable_shift);
+	/* On MT6789/MT8186 DMA hardware, AFE_AGENT_ON_CLR bit controls memory interface */
+	mtk_regmap_write(afe->regmap, MTK_AFE_AGENT_ON_CLR, BIT(memif->data->enable_shift));
 
 	return mtk_regmap_update_bits(afe->regmap, memif->data->enable_reg,
 				      1, 0, memif->data->enable_shift);
