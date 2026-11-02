@@ -90,8 +90,6 @@ struct pmosfb_device {
 
 	/* display parameters */
 	struct drm_display_mode mode;
-	struct drm_display_mode mode_90;
-	struct drm_display_mode mode_60;
 	const struct drm_format_info *format;
 
 	/* backlight */
@@ -300,10 +298,9 @@ static const struct drm_plane_funcs pmosfb_primary_plane_funcs = {
 static enum drm_mode_status pmosfb_crtc_helper_mode_valid(struct drm_crtc *crtc,
 							  const struct drm_display_mode *mode)
 {
-	if (mode->hdisplay == 1200 && mode->vdisplay == 2000)
-		return MODE_OK;
+	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
 
-	return MODE_BAD;
+	return drm_crtc_helper_mode_valid_fixed(crtc, mode, &sdev->mode);
 }
 
 /*
@@ -375,33 +372,11 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
  */
 static void pmosfb_pace_present(struct pmosfb_device *sdev)
 {
-	ktime_t now, since, period;
-	u64 remain_us;
-
-	period = sdev->vblank_period;
-	if (ktime_to_ns(period) <= 0)
-		return;
-
-	now = ktime_get();
-	if (ktime_to_ns(sdev->last_present) == 0) {
-		sdev->last_present = now;
-		return;
-	}
-
-	since = ktime_sub(now, sdev->last_present);
-	if (ktime_to_ns(since) >= ktime_to_ns(period)) {
-		/* Frame arrived on or after expected time; update cadence anchor */
-		sdev->last_present = now;
-		return;
-	}
-
-	remain_us = (ktime_to_ns(period) - ktime_to_ns(since)) / NSEC_PER_USEC;
-	if (remain_us > 0 && remain_us < 20000)
-		usleep_range(remain_us, remain_us + 100);
-
-	/* Advance by one period so subsequent frames maintain accurate scanout lock
-	 * without accumulating sleep drift or inducing animation/video stutter */
-	sdev->last_present = ktime_add(sdev->last_present, period);
+	/* The synthetic vblank timer already delivers 60 Hz frame pacing to
+	 * Mutter/Phosh. Extra sleeping inside the commit worker stalls video
+	 * frames and causes playback lag. We update timestamp without sleeping.
+	 */
+	sdev->last_present = ktime_get();
 }
 
 /*
@@ -433,15 +408,6 @@ static void pmosfb_crtc_atomic_enable(struct drm_crtc *crtc,
 				      struct drm_atomic_state *state)
 {
 	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
-	int vrefresh = 90;
-
-	if (crtc_state && crtc_state->mode.clock) {
-		vrefresh = drm_mode_vrefresh(&crtc_state->mode);
-		if (vrefresh <= 0)
-			vrefresh = 90;
-	}
-	sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / vrefresh);
 
 	drm_crtc_vblank_on(crtc);
 	pmosfb_vblank_start(sdev);
@@ -470,28 +436,11 @@ static void pmosfb_crtc_disable_vblank(struct drm_crtc *crtc)
 {
 }
 
-static void pmosfb_crtc_atomic_flush(struct drm_crtc *crtc,
-				     struct drm_atomic_state *state)
-{
-	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
-	int vrefresh;
-
-	if (crtc_state && crtc_state->mode.clock) {
-		vrefresh = drm_mode_vrefresh(&crtc_state->mode);
-		if (vrefresh > 0) {
-			sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / vrefresh);
-			sdev->mode = crtc_state->mode;
-		}
-	}
-}
-
 static const struct drm_crtc_helper_funcs pmosfb_crtc_helper_funcs = {
 	.mode_valid = pmosfb_crtc_helper_mode_valid,
 	.atomic_check = pmosfb_crtc_atomic_check,
 	.atomic_enable = pmosfb_crtc_atomic_enable,
 	.atomic_disable = pmosfb_crtc_atomic_disable,
-	.atomic_flush = pmosfb_crtc_atomic_flush,
 };
 
 static const struct drm_crtc_funcs pmosfb_crtc_funcs = {
@@ -512,28 +461,8 @@ static const struct drm_encoder_funcs pmosfb_encoder_funcs = {
 static int pmosfb_connector_helper_get_modes(struct drm_connector *connector)
 {
 	struct pmosfb_device *sdev = pmosfb_device_of_dev(connector->dev);
-	struct drm_display_mode *m90, *m60;
-	int count = 0;
 
-	/* 60Hz native panel mode (Preferred, Default matching bootloader hardware scanout) */
-	m60 = drm_mode_duplicate(connector->dev, &sdev->mode_60);
-	if (m60) {
-		m60->type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
-		drm_mode_set_name(m60);
-		drm_mode_probed_add(connector, m60);
-		count++;
-	}
-
-	/* 90Hz mode (Alternative) */
-	m90 = drm_mode_duplicate(connector->dev, &sdev->mode_90);
-	if (m90) {
-		m90->type |= DRM_MODE_TYPE_DRIVER;
-		drm_mode_set_name(m90);
-		drm_mode_probed_add(connector, m90);
-		count++;
-	}
-
-	return count;
+	return drm_connector_helper_get_modes_fixed(connector, &sdev->mode);
 }
 
 static const struct drm_connector_helper_funcs pmosfb_connector_helper_funcs = {
@@ -704,56 +633,13 @@ static struct drm_driver pmosfb_driver = {
  * Platform driver
  */
 
-static struct drm_display_mode pmosfb_mode_90hz(unsigned int width,
-						unsigned int height,
-						unsigned int width_mm,
-						unsigned int height_mm)
+static struct drm_display_mode pmosfb_mode(unsigned int width,
+					   unsigned int height,
+					   unsigned int width_mm,
+					   unsigned int height_mm)
 {
-	/* Modeline extracted directly from stock Android MTK DRM DSI-1 state:
-	 * "1200x2000": 90 265446 1200 1282 1286 1368 2000 2026 2028 2156 0x48 0x0
-	 */
 	struct drm_display_mode mode = {
-		.clock = 265446,
-		.hdisplay = 1200,
-		.hsync_start = 1282,
-		.hsync_end = 1286,
-		.htotal = 1368,
-		.vdisplay = 2000,
-		.vsync_start = 2026,
-		.vsync_end = 2028,
-		.vtotal = 2156,
-		.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
-		.width_mm = width_mm ? width_mm : 150,
-		.height_mm = height_mm ? height_mm : 250,
-	};
-
-	mode.type |= DRM_MODE_TYPE_DRIVER;
-	drm_mode_set_name(&mode);
-
-	return mode;
-}
-
-static struct drm_display_mode pmosfb_mode_60hz(unsigned int width,
-						unsigned int height,
-						unsigned int width_mm,
-						unsigned int height_mm)
-{
-	/* 60Hz mode matching panel blanking geometry:
-	 * 1368 * 2156 * 60 = 176965 kHz
-	 */
-	struct drm_display_mode mode = {
-		.clock = 176965,
-		.hdisplay = 1200,
-		.hsync_start = 1282,
-		.hsync_end = 1286,
-		.htotal = 1368,
-		.vdisplay = 2000,
-		.vsync_start = 2026,
-		.vsync_end = 2028,
-		.vtotal = 2156,
-		.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
-		.width_mm = width_mm ? width_mm : 150,
-		.height_mm = height_mm ? height_mm : 250,
+		DRM_MODE_INIT(60, width, height, width_mm, height_mm)
 	};
 
 	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
@@ -839,9 +725,7 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 	width_mm = DRM_MODE_RES_MM(width, 96ul);
 	height_mm = DRM_MODE_RES_MM(height, 96ul);
 
-	sdev->mode_90 = pmosfb_mode_90hz(width, height, width_mm, height_mm);
-	sdev->mode_60 = pmosfb_mode_60hz(width, height, width_mm, height_mm);
-	sdev->mode = sdev->mode_60;
+	sdev->mode = pmosfb_mode(width, height, width_mm, height_mm);
 	sdev->format = format;
 	sdev->pitch = stride;
 
