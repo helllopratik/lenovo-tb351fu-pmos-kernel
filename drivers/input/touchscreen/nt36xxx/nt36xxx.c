@@ -132,15 +132,15 @@ struct workqueue_struct *nvt_fwu_wq;
 /* Bring-up knobs: allow forcing continuous event-buffer polling and an
  * experimental "continuous scan" kick, so the digitizer can produce frames
  * even when the DSI clock is idle (simpledrm / no V-Blank case). */
-static int nvt_poll_ms = 16;
+static int nvt_poll_ms = 0;
 module_param(nvt_poll_ms, int, 0644);
-MODULE_PARM_DESC(nvt_poll_ms, "Event-buffer polling interval in ms (0 = disable polling kthread)");
+MODULE_PARM_DESC(nvt_poll_ms, "Event-buffer polling interval in ms (0 = purely interrupt driven)");
 
 static int nvt_poll_report = 1;
 	module_param(nvt_poll_report, int, 0644);
 MODULE_PARM_DESC(nvt_poll_report, "Report touch input events from the poll kthread (1=on)");
 
-static int nvt_poll_exclusive = 1;
+static int nvt_poll_exclusive = 0;
 	module_param(nvt_poll_exclusive, int, 0644);
 MODULE_PARM_DESC(nvt_poll_exclusive,
 		 "Make the poll kthread the single consumer of the touch event "
@@ -555,7 +555,7 @@ Description:
 return:
 	n.a.
 *******************************************************/
-static void nvt_irq_enable(bool enable)
+void nvt_irq_enable(bool enable)
 {
 	struct irq_desc *desc;
 
@@ -1664,8 +1664,7 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 		"crcflag=0x%02X crcen=0x%02X chipver=0x%02X ", rv[0], rv[1], rv[2]);
 	n += scnprintf(kbuf + n, sizeof(kbuf) - n,
 		"dmaval=0x%02X txinfo=0x%02X autocopy=0x%02X ",
-		nvt_reg_rd_as_u8(0x3F7D0), nvt_reg_rd_as_u8(0x3F7F1),
-		nvt_reg_rd_as_u8(0x3F7E8));
+		0, 0, 0);
 	nvt_set_page(base);
 	mutex_unlock(&ts->lock);
 	if (gpio_is_valid(ts->irq_gpio) && gpio_is_valid(ts->reset_gpio))
@@ -2354,15 +2353,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	}
 #endif
 
-	/* Single-consumer guard: the poll kthread calls this with irq==0. When
-	 * nvt_poll_exclusive is set, let ONLY the poll thread read/report the
-	 * touch event buffer. The IRQ-driven invocation (irq != 0) returns
-	 * immediately, eliminating the IRQ+poll double-read that made touches
-	 * register one frame late (coordinate shown only on the next scan). */
-	if (nvt_poll_exclusive && irq != 0) {
-		return IRQ_HANDLED;
-	}
-
 	mutex_lock(&ts->lock);
 
 #if NVT_PM_WAIT_BUS_RESUME_COMPLETE
@@ -2376,13 +2366,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif /* NVT_PM_WAIT_BUS_RESUME_COMPLETE */
 
 	point_data[0] = 0x00;
-	if (nvt_poll_ms > 0) {
-		/* Polling path: the MCU page can be left at any address after a
-		 * skipped/complete firmware update (probe no longer sets the page),
-		 * so pin it to EVENT_BUF_ADDR before every read. Reading the wrong
-		 * page yields a FIXED set of coords with an incrementing counter. */
-		nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
-	}
+	nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
 	ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
 	if (ret < 0) {
 		ts->diag_spi_errors++;
@@ -2726,9 +2710,7 @@ static int nvt_ts_thread_func(void *data)
 					 "dma=%02X/%02X/%02X dead=%d recov=%llu\n",
 					 (ulong)(jiffies_to_msecs(now) / 1000UL),
 					 rv[0],
-					 nvt_reg_rd_as_u8(0x3F7D0),
-					 nvt_reg_rd_as_u8(0x3F7F1),
-					 nvt_reg_rd_as_u8(0x3F7E8),
+					 0, 0, 0,
 					 dead_ticks,
 					 (unsigned long long)ts->diag_recoveries);
 			nvt_set_page(base);
@@ -3207,6 +3189,30 @@ static int nvt_get_tp_info(char *buf, void *arg0)
         ts->panel_name, "T808AA", "NT36523N", ts->fw_ver);
 }
 #endif
+
+static void nvt_idle_check_func(struct work_struct *work)
+{
+	uint8_t point_data[POINT_DATA_LEN + 1] = {0};
+
+	if (!ts || !bTouchIsAwake)
+		goto reschedule;
+
+	/* If INT line is latched LOW (asserted) while no touch event is being
+	 * handled, the TDDI MCU event queue may be waiting for host servicing.
+	 * Perform a clean SPI drain read to release the INT line back to HIGH. */
+	if (gpio_is_valid(ts->irq_gpio) && gpio_get_value(ts->irq_gpio) == 0) {
+		NVT_LOG("INT latched LOW during idle, releasing via drain read\n");
+		mutex_lock(&ts->lock);
+		point_data[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
+		mutex_unlock(&ts->lock);
+	}
+
+reschedule:
+	if (nvt_fwu_wq)
+		queue_delayed_work(nvt_fwu_wq, &ts->idle_check_work, msecs_to_jiffies(5000));
+}
 /*******************************************************
 Description:
 	Novatek touchscreen driver probe function.
@@ -3755,8 +3761,8 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	 * reboot loops (MT65xx Preloader cycling on USB). */
 	nvt_crash_append("probe: SPI untouched this boot, chip reveal deferred\n");
 
-	if (!nvt_poll_exclusive)
-		nvt_irq_enable(true);
+	INIT_DELAYED_WORK(&ts->idle_check_work, nvt_idle_check_func);
+	nvt_irq_enable(true);
 
 	/* NO SPI access until the deferred firmware step has armed the MCU.
 	 * Reading a cold / half-booted chip (poll kthread, drain read, etc.)
@@ -3944,6 +3950,7 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	device_init_wakeup(&ts->client->dev, 0);
 #endif
 
+	cancel_delayed_work_sync(&ts->idle_check_work);
 	nvt_irq_enable(false);
 	free_irq(client->irq, ts);
 
@@ -4129,8 +4136,14 @@ if(!ts->gesture_mode) {
 	nvt_tx_auto_copy_mode();
 	nvt_sw_reset();
 
-	if (!nvt_poll_exclusive)
-		nvt_irq_enable(true);
+	/* Drain read before unmasking IRQ */
+	{
+		uint8_t drain[POINT_DATA_LEN + 1] = {0};
+		drain[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, drain, POINT_DATA_LEN + 1);
+	}
+	nvt_irq_enable(true);
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);
