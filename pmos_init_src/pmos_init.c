@@ -295,7 +295,10 @@ void _start(void)
 		klong("<3>PMOSINIT: FATAL: could not mount rootfs rc=", rc);
 	}
 
+	kmsg("<3>PMOSINIT: Boot failed or halted. Auto-rebooting in 5 seconds...\n");
+	sleep_s(5);
+	syscall4(142 /*reboot*/, 0xfee1dead, 672274793, 0x1234567, 0);
 	for (;;) {
-		sleep_s(30);
+		sleep_s(1);
 	}
 }
