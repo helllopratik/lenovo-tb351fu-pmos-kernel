@@ -384,6 +384,35 @@ int mtk_memif_set_enable(struct mtk_base_afe *afe, int id)
 	if (memif->data->fs_reg > 0)
 		regmap_update_bits(afe->regmap, memif->data->fs_reg, BIT(5), BIT(5));
 
+	/* Ensure DMA buffer address and end boundaries are properly programmed directly to hardware */
+	if (memif->dma_addr) {
+		int msb_at_bit33 = upper_32_bits(memif->dma_addr) ? 1 : 0;
+		unsigned int phys_buf_addr = lower_32_bits(memif->dma_addr);
+		unsigned int phys_buf_addr_upper_32 = upper_32_bits(memif->dma_addr);
+		unsigned int end_addr = phys_buf_addr + memif->dma_bytes - 1;
+
+		mtk_regmap_write(afe->regmap, memif->data->reg_ofs_base, phys_buf_addr);
+		if (memif->data->reg_ofs_end)
+			mtk_regmap_write(afe->regmap, memif->data->reg_ofs_end, end_addr);
+		else
+			mtk_regmap_write(afe->regmap, memif->data->reg_ofs_base + AFE_BASE_END_OFFSET, end_addr);
+
+		if (memif->data->reg_ofs_base_msb) {
+			mtk_regmap_write(afe->regmap, memif->data->reg_ofs_base_msb, phys_buf_addr_upper_32);
+			mtk_regmap_write(afe->regmap, memif->data->reg_ofs_end_msb, phys_buf_addr_upper_32);
+		}
+		if (memif->data->msb_reg)
+			mtk_regmap_update_bits(afe->regmap, memif->data->msb_reg,
+					       1, msb_at_bit33, memif->data->msb_shift);
+		if (memif->data->msb_end_reg)
+			mtk_regmap_update_bits(afe->regmap, memif->data->msb_end_reg,
+					       1, msb_at_bit33, memif->data->msb_end_shift);
+
+		dev_info(afe->dev, "%s(), memif %d (%s) dma base 0x%x end 0x%x bytes %zu\n",
+			 __func__, id, memif->data->name ? memif->data->name : "unknown",
+			 phys_buf_addr, end_addr, memif->dma_bytes);
+	}
+
 	/* On MT6789/MT8186 DMA hardware, AFE_AGENT_ON bit controls memory interface */
 	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON_SET,
 			       1, 1, memif->data->enable_shift);

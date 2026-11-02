@@ -2409,19 +2409,14 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_DAC_CON0:
 	case AFE_DL1_CUR_MSB:
 	case AFE_DL1_CUR:
-	case AFE_DL1_END:
 	case AFE_DL2_CUR_MSB:
 	case AFE_DL2_CUR:
-	case AFE_DL2_END:
 	case AFE_DL3_CUR_MSB:
 	case AFE_DL3_CUR:
-	case AFE_DL3_END:
 	case AFE_DL4_CUR_MSB:
 	case AFE_DL4_CUR:
-	case AFE_DL4_END:
 	case AFE_DL12_CUR_MSB:
 	case AFE_DL12_CUR:
-	case AFE_DL12_END:
 	case AFE_ADDA_SRC_DEBUG_MON0:
 	case AFE_ADDA_SRC_DEBUG_MON1:
 	case AFE_ADDA_UL_SRC_MON0:
@@ -2431,26 +2426,21 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_SECURE_CON1:
 	case AFE_VUL_CUR_MSB:
 	case AFE_VUL_CUR:
-	case AFE_VUL_END:
 	case AFE_SIDETONE_MON:
 	case AFE_SIDETONE_CON0:
 	case AFE_SIDETONE_COEFF:
 	case AFE_VUL2_CUR_MSB:
 	case AFE_VUL2_CUR:
-	case AFE_VUL2_END:
 	case AFE_VUL3_CUR_MSB:
 	case AFE_VUL3_CUR:
-	case AFE_VUL3_END:
 	case AFE_I2S_MON:
 	case AFE_DAC_MON:
 	case AFE_IRQ0_MCU_CNT_MON:
 	case AFE_IRQ6_MCU_CNT_MON:
 	case AFE_VUL4_CUR_MSB:
 	case AFE_VUL4_CUR:
-	case AFE_VUL4_END:
 	case AFE_VUL12_CUR_MSB:
 	case AFE_VUL12_CUR:
-	case AFE_VUL12_END:
 	case AFE_IRQ3_MCU_CNT_MON:
 	case AFE_IRQ4_MCU_CNT_MON:
 	case AFE_IRQ_MCU_STATUS:
@@ -2498,22 +2488,17 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_ADDA6_MTKAIF_MON1:
 	case AFE_AWB_CUR_MSB:
 	case AFE_AWB_CUR:
-	case AFE_AWB_END:
 	case AFE_AWB2_CUR_MSB:
 	case AFE_AWB2_CUR:
-	case AFE_AWB2_END:
 	case AFE_DAI_CUR_MSB:
 	case AFE_DAI_CUR:
-	case AFE_DAI_END:
 	case AFE_DAI2_CUR_MSB:
 	case AFE_DAI2_CUR:
-	case AFE_DAI2_END:
 	case AFE_ADDA6_SRC_DEBUG_MON0:
 	case AFE_ADD6A_UL_SRC_MON0:
 	case AFE_ADDA6_UL_SRC_MON1:
 	case AFE_MOD_DAI_CUR_MSB:
 	case AFE_MOD_DAI_CUR:
-	case AFE_MOD_DAI_END:
 	case AFE_AWB_RCH_MON:
 	case AFE_AWB_LCH_MON:
 	case AFE_VUL_RCH_MON:
@@ -2557,10 +2542,8 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_DL8_LCH_MON:
 	case AFE_VUL5_CUR_MSB:
 	case AFE_VUL5_CUR:
-	case AFE_VUL5_END:
 	case AFE_VUL6_CUR_MSB:
 	case AFE_VUL6_CUR:
-	case AFE_VUL6_END:
 	case AFE_ADDA_DL_SDM_FIFO_MON:
 	case AFE_ADDA_DL_SRC_LCH_MON:
 	case AFE_ADDA_DL_SRC_RCH_MON:
@@ -2604,16 +2587,12 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_GENERAL2_ASRC_2CH_CON13:
 	case AFE_DL5_CUR_MSB:
 	case AFE_DL5_CUR:
-	case AFE_DL5_END:
 	case AFE_DL6_CUR_MSB:
 	case AFE_DL6_CUR:
-	case AFE_DL6_END:
 	case AFE_DL7_CUR_MSB:
 	case AFE_DL7_CUR:
-	case AFE_DL7_END:
 	case AFE_DL8_CUR_MSB:
 	case AFE_DL8_CUR:
-	case AFE_DL8_END:
 	case AFE_PROT_SIDEBAND_MON:
 	case AFE_DOMAIN_SIDEBAND0_MON:
 	case AFE_DOMAIN_SIDEBAND1_MON:
