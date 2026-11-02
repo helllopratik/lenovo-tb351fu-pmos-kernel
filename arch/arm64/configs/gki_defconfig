@@ -77,7 +77,7 @@ CONFIG_SETEND_EMULATION=y
 CONFIG_RANDOMIZE_BASE=y
 # CONFIG_RANDOMIZE_MODULE_REGION_FULL is not set
 CONFIG_UNWIND_PATCH_PAC_INTO_SCS=y
-CONFIG_CMDLINE="console=tty0 fbcon=map:0 fbcon=rotate:2 pmos.boot=/dev/mmcblk0p1 pmos.root=/dev/mmcblk0p2 root=/dev/mmcblk0p2 rootwait rw rdinit=/init clk_ignore_unused pd_ignore_unused ignore_loglevel debug loglevel=8"
+CONFIG_CMDLINE="console=tty0 fbcon=map:0 fbcon=rotate:2 pmos.boot=/dev/mmcblk0p1 pmos.root=/dev/mmcblk0p2 root=/dev/mmcblk0p2 rootwait rw rdinit=/init clk_ignore_unused pd_ignore_unused ignore_loglevel debug loglevel=8 panic=5 panic_on_oops=1 hung_task_panic=1 hung_task_timeout_secs=60"
 CONFIG_CMDLINE_FORCE=y
 CONFIG_USB_MUSB_HDRC=y
 CONFIG_USB_MUSB_MEDIATEK=y
