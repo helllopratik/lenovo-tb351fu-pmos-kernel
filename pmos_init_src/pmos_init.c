@@ -287,9 +287,12 @@ void _start(void)
 			syscall3(51 /*chroot*/, (long)".", 0, 0);
 
 			kmsg("<3>PMOSINIT: executing /sbin/init (Phosh / OpenRC)...\n");
-			syscall3(221 /*execve*/, (long)"/sbin/init", (long)argv, (long)env);
-			syscall3(221 /*execve*/, (long)"/usr/lib/systemd/systemd", (long)argv, (long)env);
-			syscall3(221 /*execve*/, (long)"/init", (long)argv, (long)env);
+			long rc1 = syscall3(221 /*execve*/, (long)"/sbin/init", (long)argv, (long)env);
+			klong("<3>PMOSINIT: /sbin/init execve failed rc=", rc1);
+			long rc2 = syscall3(221 /*execve*/, (long)"/usr/lib/systemd/systemd", (long)argv, (long)env);
+			klong("<3>PMOSINIT: /usr/lib/systemd/systemd execve failed rc=", rc2);
+			long rc3 = syscall3(221 /*execve*/, (long)"/init", (long)argv, (long)env);
+			klong("<3>PMOSINIT: /init execve failed rc=", rc3);
 		}
 	} else {
 		klong("<3>PMOSINIT: FATAL: could not mount rootfs rc=", rc);
