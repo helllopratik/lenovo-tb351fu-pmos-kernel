@@ -96,13 +96,19 @@ snd_pcm_uframes_t mtk_afe_pcm_pointer(struct snd_soc_component *component,
 		goto POINTER_RETURN_FRAMES;
 	}
 
-	ret = regmap_read(regmap, reg_ofs_base, &hw_base);
-	if (ret || hw_base == 0) {
-		pcm_ptr_bytes = 0;
-		goto POINTER_RETURN_FRAMES;
+	if (memif->dma_addr) {
+		hw_base = lower_32_bits(memif->dma_addr);
+	} else {
+		ret = regmap_read(regmap, reg_ofs_base, &hw_base);
+		if (ret || hw_base == 0) {
+			pcm_ptr_bytes = 0;
+			goto POINTER_RETURN_FRAMES;
+		}
 	}
 
 	if (hw_ptr < hw_base)
+		pcm_ptr_bytes = 0;
+	else if (memif->dma_bytes && (hw_ptr - hw_base >= memif->dma_bytes))
 		pcm_ptr_bytes = 0;
 	else
 		pcm_ptr_bytes = hw_ptr - hw_base;
