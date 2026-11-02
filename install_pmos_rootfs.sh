@@ -140,6 +140,26 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
 mkdir -p "$PAYLOAD_DIR/usr/lib/modules/extra"
 tar -xf "$DEPLOY_DIR/modules.tar.xz" -C "$PAYLOAD_DIR/usr/lib/modules/extra"
 
+# Extract proprietary vendor firmware into usr/lib/firmware
+if [ -f "$DEPLOY_DIR/firmware.tar.xz" ]; then
+  mkdir -p "$PAYLOAD_DIR/usr/lib/firmware"
+  tar -xf "$DEPLOY_DIR/firmware.tar.xz" -C "$PAYLOAD_DIR/usr/lib/firmware"
+  # Also create convenience symlink for aw88395_acf.bin
+  if [ -f "$PAYLOAD_DIR/usr/lib/firmware/aw883xx_acf.bin" ]; then
+    ln -sf aw883xx_acf.bin "$PAYLOAD_DIR/usr/lib/firmware/aw88395_acf.bin"
+  fi
+  # Link /vendor/firmware and /etc/firmware
+  mkdir -p "$PAYLOAD_DIR/vendor" "$PAYLOAD_DIR/etc"
+  ln -sf /usr/lib/firmware "$PAYLOAD_DIR/vendor/firmware"
+  ln -sf /usr/lib/firmware "$PAYLOAD_DIR/etc/firmware"
+fi
+
+# Copy ALSA UCM2 configurations for MT8186 audio
+if [ -d "$DEPLOY_DIR/configs/ucm2" ]; then
+  mkdir -p "$PAYLOAD_DIR/usr/share/alsa/ucm2"
+  cp -a "$DEPLOY_DIR/configs/ucm2/"* "$PAYLOAD_DIR/usr/share/alsa/ucm2/"
+fi
+
 # Copy local bin scripts
 cp -a "$DEPLOY_DIR/scripts/"* "$PAYLOAD_DIR/usr/local/bin/"
 chmod 755 "$PAYLOAD_DIR/usr/local/bin/"*
@@ -157,6 +177,14 @@ for s in "$DEPLOY_DIR/services/"*.service; do
   cp "$s" "$PAYLOAD_DIR/etc/systemd/system/$sname"
   ln -sf "/etc/systemd/system/$sname" "$PAYLOAD_DIR/etc/systemd/system/multi-user.target.wants/$sname"
 done
+
+# Copy service drop-in overrides (e.g. upower.service.d)
+if [ -d "$DEPLOY_DIR/services/upower.service.d" ]; then
+  mkdir -p "$PAYLOAD_DIR/etc/systemd/system/upower.service.d"
+  cp -a "$DEPLOY_DIR/services/upower.service.d/"* "$PAYLOAD_DIR/etc/systemd/system/upower.service.d/"
+  mkdir -p "$PAYLOAD_DIR/etc/systemd/system/graphical.target.wants"
+  ln -sf "/usr/lib/systemd/system/upower.service" "$PAYLOAD_DIR/etc/systemd/system/graphical.target.wants/upower.service"
+fi
 
 # Copy configurations
 cp "$DEPLOY_DIR/configs/70-touchscreen-pen.rules" "$PAYLOAD_DIR/etc/udev/rules.d/"
@@ -204,6 +232,10 @@ adb shell "su -c '
   echo \"Applying customization payload...\"
   tar -xzf /data/local/tmp/pmos_payload.tar.gz -C /data/local/tmp/chk
   rm -f /data/local/tmp/pmos_payload.tar.gz
+
+  echo \"Normalizing system directory ownership...\"
+  chown 0:0 /data/local/tmp/chk /data/local/tmp/chk/etc /data/local/tmp/chk/usr /data/local/tmp/chk/var /data/local/tmp/chk/root 2>/dev/null || true
+  chmod 755 /data/local/tmp/chk /data/local/tmp/chk/etc /data/local/tmp/chk/usr 2>/dev/null || true
 
   echo \"Enforcing merged /usr symlink invariants...\"
   # CRITICAL: /lib, /bin, and /sbin MUST be symbolic links into /usr

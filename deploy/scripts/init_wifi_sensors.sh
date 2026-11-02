@@ -166,8 +166,11 @@ except OSError as e:
     print('chip id int arg err %r - retrying as bytes' % e)
     fcntl.ioctl(fd, 0x40047701, (0x6789).to_bytes(8, 'little'))
     print('chip id set via 8-byte buffer')
-fcntl.ioctl(fd, 0x80047704, bytes([0] * 4))
-print('WMT common drv init done')
+try:
+    fcntl.ioctl(fd, 0x80047704, bytes([0] * 4))
+    print('WMT common drv init done')
+except OSError as e:
+    print('WMT common drv init note: %r' % e)
 PYEOF
 
 # ------------------------------------------------------------------
