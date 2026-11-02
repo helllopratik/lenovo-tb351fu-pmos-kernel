@@ -877,8 +877,8 @@ static int aw_dev_check_syspll(struct aw_device *aw_dev)
 		msleep(10);
 	}
 
-	dev_err(aw_dev->dev, "mode2 check iis failed");
-	return ret;
+	dev_warn(aw_dev->dev, "mode2 check iis failed, continuing startup anyway\n");
+	return 0;
 }
 
 static int aw_dev_check_sysst(struct aw_device *aw_dev)
@@ -903,7 +903,8 @@ static int aw_dev_check_sysst(struct aw_device *aw_dev)
 		}
 	}
 
-	return -EPERM;
+	dev_warn(aw_dev->dev, "check sysst timed out, continuing startup anyway\n");
+	return 0;
 }
 
 static int aw_dev_check_sysint(struct aw_device *aw_dev)

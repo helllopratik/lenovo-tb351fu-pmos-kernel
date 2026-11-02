@@ -5,6 +5,7 @@
 // Copyright (c) 2022 MediaTek Inc.
 // Author: Jiaxin Yu <jiaxin.yu@mediatek.com>
 
+#include <linux/arm-smccc.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
@@ -2734,11 +2735,36 @@ skip_regmap:
 	return 0;
 }
 
+static int mt8186_afe_dram_request(struct device *dev)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(MTK_SIP_AUDIO_CONTROL,
+		      MTK_AUDIO_SMC_OP_DRAM_REQUEST,
+		      0, 0, 0, 0, 0, 0, &res);
+	return 0;
+}
+
+static int mt8186_afe_dram_release(struct device *dev)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(MTK_SIP_AUDIO_CONTROL,
+		      MTK_AUDIO_SMC_OP_DRAM_RELEASE,
+		      0, 0, 0, 0, 0, 0, &res);
+	return 0;
+}
+
 static int mt8186_afe_runtime_resume(struct device *dev)
 {
 	struct mtk_base_afe *afe = dev_get_drvdata(dev);
 	struct mt8186_afe_private *afe_priv = afe->platform_priv;
+	struct arm_smccc_res res;
 	int ret;
+
+	arm_smccc_smc(MTK_SIP_AUDIO_CONTROL,
+		      MTK_AUDIO_SMC_OP_DOMAIN_SIDEBANDS,
+		      0, 0, 0, 0, 0, 0, &res);
 
 	ret = mt8186_afe_enable_clock(afe);
 	if (ret)
@@ -2830,7 +2856,12 @@ static int mt8186_afe_pcm_dev_probe(struct platform_device *pdev)
 	struct mt8186_afe_private *afe_priv;
 	struct reset_control *rstc;
 	struct device *dev = &pdev->dev;
+	struct arm_smccc_res smc_res;
 	int i, ret, irq_id;
+
+	arm_smccc_smc(MTK_SIP_AUDIO_CONTROL,
+		      MTK_AUDIO_SMC_OP_INIT,
+		      0, 0, 0, 0, 0, 0, &smc_res);
 
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(34));
 	if (ret)
@@ -2955,6 +2986,8 @@ static int mt8186_afe_pcm_dev_probe(struct platform_device *pdev)
 
 	afe->runtime_resume = mt8186_afe_runtime_resume;
 	afe->runtime_suspend = mt8186_afe_runtime_suspend;
+	afe->request_dram_resource = mt8186_afe_dram_request;
+	afe->release_dram_resource = mt8186_afe_dram_release;
 
 	/* register platform */
 	dev_dbg(dev, "%s(), devm_snd_soc_register_component\n", __func__);
