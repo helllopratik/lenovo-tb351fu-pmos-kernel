@@ -1,0 +1,13 @@
+[Unit]
+Description=pmOS USB Gadget Networking and Serial Console
+DefaultDependencies=no
+After=sys-kernel-config.mount
+Before=basic.target network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/pmos-usb-setup.sh
+
+[Install]
+WantedBy=sysinit.target

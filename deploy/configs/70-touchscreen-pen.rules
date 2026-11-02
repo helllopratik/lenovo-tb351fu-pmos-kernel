@@ -1,0 +1,3 @@
+# Lenovo Tab Plus (TB351FU) Pen Digitizer TouchScreen mapping
+# Parity with stock Android /system/usr/idc/NVTCapacitivePen.idc (touch.deviceType = touchScreen)
+ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="NVTCapacitivePen", ENV{ID_INPUT_TOUCHSCREEN}="1"

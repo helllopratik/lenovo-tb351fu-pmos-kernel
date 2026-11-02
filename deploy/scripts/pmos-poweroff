@@ -1,0 +1,5 @@
+#!/bin/sh
+echo "Immediate hardware power off..."
+sync
+echo 1 > /proc/sys/kernel/sysrq
+echo o > /proc/sysrq-trigger || systemctl poweroff -i
