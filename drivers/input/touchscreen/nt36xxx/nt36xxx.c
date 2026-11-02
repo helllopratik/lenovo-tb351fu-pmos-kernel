@@ -686,21 +686,12 @@ return:
 int32_t nvt_set_page(uint32_t addr)
 {
 	uint8_t buf[4] = {0};
-	uint32_t page = addr & ~0x7FUL;
-
-	if (ts && ts->current_page == page)
-		return 0;
 
 	buf[0] = 0xFF;	//set index/page/addr command
 	buf[1] = (addr >> 15) & 0xFF;
 	buf[2] = (addr >> 7) & 0xFF;
 
-	if (CTP_SPI_WRITE(ts->client, buf, 3))
-		return -1;
-
-	if (ts)
-		ts->current_page = page;
-	return 0;
+	return CTP_SPI_WRITE(ts->client, buf, 3);
 }
 
 /*******************************************************
@@ -2712,45 +2703,40 @@ static int nvt_ts_thread_func(void *data)
 			u8 rv[1] = {0};
 			unsigned int base = nvt_poll_base ? nvt_poll_base
 							   : ts->mmap->EVENT_BUF_ADDR;
-			bool dead = false;
 
 			nvt_crash_last_tick = now;
 			mutex_lock(&ts->lock);
 			nvt_reg_rd(base + 0x60, rv, 1);
 
 			/*
-			 * Watchdog: Detect genuine SPI errors OR firmware halted out of NORMAL_RUN.
-			 * Idle periods without user touch input are normal with rv[0] == 0xA3.
-			 * If rv[0] drops to 0xFE/0xFD/0x00, the TDDI firmware app has halted.
+			 * Watchdog: ONLY monitor genuine SPI bus errors.
+			 * Idle periods without user touch input are completely normal.
+			 * Never call nvt_bootloader_reset() or re-flash firmware, as NT36523N
+			 * is a TDDI chip (touch + display integration); resetting it disrupts
+			 * the panel glass scanout, corrupting DSC slices into black patches.
 			 */
-			if (ts->diag_spi_errors > prev_spi_errors || (rv[0] != 0xA3 && rv[0] != 0x1A)) {
+			if (ts->diag_spi_errors > prev_spi_errors) {
 				dead_ticks++;
-				dead = true;
 			} else {
 				dead_ticks = 0;
 			}
 			prev_spi_errors = ts->diag_spi_errors;
 
 			nvt_crash_append("NVT diag boot=%lus reset=0x%02X "
-					 "dma=%02X/%02X/%02X dead=%d/%d recov=%llu\n",
+					 "dma=%02X/%02X/%02X dead=%d recov=%llu\n",
 					 (ulong)(jiffies_to_msecs(now) / 1000UL),
 					 rv[0],
 					 nvt_reg_rd_as_u8(0x3F7D0),
 					 nvt_reg_rd_as_u8(0x3F7F1),
 					 nvt_reg_rd_as_u8(0x3F7E8),
-					 dead_ticks, dead,
+					 dead_ticks,
 					 (unsigned long long)ts->diag_recoveries);
 			nvt_set_page(base);
 
 			if (dead_ticks >= 2) {
-				NVT_LOG("watchdog: TDDI firmware halted (reset=0x%02X), auto-reloading...\n", rv[0]);
+				NVT_LOG("watchdog: re-asserting event page base=0x%06X (rv=0x%02X)\n", base, rv[0]);
 				dead_ticks = 0;
-				prev_spi_errors = 0;
-				ts->diag_recoveries++;
-				nvt_bootloader_reset();
-				msleep(10);
-				nvt_update_firmware(boot_update_firmware_name);
-				ts->current_page = 0xFFFFFFFF;
+				prev_spi_errors = ts->diag_spi_errors;
 				nvt_set_page(base);
 			}
 			mutex_unlock(&ts->lock);
