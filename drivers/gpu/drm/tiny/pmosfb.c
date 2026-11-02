@@ -300,10 +300,7 @@ static const struct drm_plane_funcs pmosfb_primary_plane_funcs = {
 static enum drm_mode_status pmosfb_crtc_helper_mode_valid(struct drm_crtc *crtc,
 							  const struct drm_display_mode *mode)
 {
-	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
-
-	if (drm_mode_match(mode, &sdev->mode_90, DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK) ||
-	    drm_mode_match(mode, &sdev->mode_60, DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK))
+	if (mode->hdisplay == 1200 && mode->vdisplay == 2000)
 		return MODE_OK;
 
 	return MODE_BAD;
@@ -378,26 +375,9 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
  */
 static void pmosfb_pace_present(struct pmosfb_device *sdev)
 {
-	ktime_t now, since, period;
-	u64 remain_us;
-
-	period = sdev->vblank_period;
-	if (ktime_to_ns(period) <= 0)
-		return;
-	if (ktime_to_ns(sdev->last_present) == 0) {
-		sdev->last_present = ktime_get();
-		return;
-	}
-
-	now = ktime_get();
-	since = ktime_sub(now, sdev->last_present);
-	if (ktime_to_ns(since) >= ktime_to_ns(period))
-		goto out;
-
-	remain_us = (ktime_to_ns(period) - ktime_to_ns(since)) / NSEC_PER_USEC;
-	if (remain_us > 0 && remain_us < 20000)
-		usleep_range(remain_us, remain_us + 500);
-out:
+	/* Frame pacing is delivered to wlroots/Phosh by the synthetic vblank timer.
+	 * Sleeping inside atomic_update blocks the commit worker thread, stalls
+	 * the pipeline, and causes video/animation stutter. */
 	sdev->last_present = ktime_get();
 }
 
@@ -467,11 +447,28 @@ static void pmosfb_crtc_disable_vblank(struct drm_crtc *crtc)
 {
 }
 
+static void pmosfb_crtc_atomic_flush(struct drm_crtc *crtc,
+				     struct drm_atomic_state *state)
+{
+	struct pmosfb_device *sdev = pmosfb_device_of_dev(crtc->dev);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	int vrefresh;
+
+	if (crtc_state && crtc_state->mode.clock) {
+		vrefresh = drm_mode_vrefresh(&crtc_state->mode);
+		if (vrefresh > 0) {
+			sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / vrefresh);
+			sdev->mode = crtc_state->mode;
+		}
+	}
+}
+
 static const struct drm_crtc_helper_funcs pmosfb_crtc_helper_funcs = {
 	.mode_valid = pmosfb_crtc_helper_mode_valid,
 	.atomic_check = pmosfb_crtc_atomic_check,
 	.atomic_enable = pmosfb_crtc_atomic_enable,
 	.atomic_disable = pmosfb_crtc_atomic_disable,
+	.atomic_flush = pmosfb_crtc_atomic_flush,
 };
 
 static const struct drm_crtc_funcs pmosfb_crtc_funcs = {
