@@ -2905,7 +2905,12 @@ enum {
 #define ETDM_0_3_COWORK_CON1				0x18b4
 #define ETDM_0_3_COWORK_CON3				0x18bc
 
-#define AFE_MAX_REGISTER				ETDM_0_3_COWORK_CON3
+/* MT6789 AFE Agent registers */
+#define AFE_AGENT_ON					0x1b00
+#define AFE_AGENT_ON_SET				0x1b04
+#define AFE_AGENT_ON_CLR				0x1b08
+
+#define AFE_MAX_REGISTER				0x1c00
 
 #define AFE_IRQ_STATUS_BITS				0x87FFFFFF
 #define AFE_IRQ_CNT_SHIFT				0

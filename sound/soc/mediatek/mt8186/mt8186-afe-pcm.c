@@ -2621,6 +2621,9 @@ static bool mt8186_is_volatile_reg(struct device *dev, unsigned int reg)
 	case AFE_DOMAIN_SIDEBAND3_MON:
 	case AFE_APLL1_TUNER_CFG:	/* [20:31] is monitor */
 	case AFE_APLL2_TUNER_CFG:	/* [20:31] is monitor */
+	case AFE_AGENT_ON:
+	case AFE_AGENT_ON_SET:
+	case AFE_AGENT_ON_CLR:
 		return true;
 	default:
 		return false;

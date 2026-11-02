@@ -14,6 +14,10 @@
 #define MTK_STREAM_NUM (SNDRV_PCM_STREAM_LAST + 1)
 #define MTK_SIP_AUDIO_CONTROL MTK_SIP_SMC_CMD(0x517)
 
+#define MTK_AFE_AGENT_ON		0x1b00
+#define MTK_AFE_AGENT_ON_SET		0x1b04
+#define MTK_AFE_AGENT_ON_CLR		0x1b08
+
 /* SMC CALL Operations */
 enum mtk_audio_smc_call_op {
 	MTK_AUDIO_SMC_OP_INIT = 0,
