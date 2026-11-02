@@ -380,6 +380,10 @@ int mtk_memif_set_enable(struct mtk_base_afe *afe, int id)
 		return 0;
 	}
 
+	/* Ensure memif operates in normal DRAM mode (bit 5 in CON0) */
+	if (memif->data->fs_reg > 0)
+		regmap_update_bits(afe->regmap, memif->data->fs_reg, BIT(5), BIT(5));
+
 	/* On MT6789/MT8186 DMA hardware, AFE_AGENT_ON bit controls memory interface */
 	mtk_regmap_update_bits(afe->regmap, MTK_AFE_AGENT_ON_SET,
 			       1, 1, memif->data->enable_shift);

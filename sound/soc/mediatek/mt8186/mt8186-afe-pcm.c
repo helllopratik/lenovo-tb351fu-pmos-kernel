@@ -2800,6 +2800,23 @@ static int mt8186_afe_runtime_resume(struct device *dev)
 	/* unmask all AFE IRQs to MCU */
 	regmap_write(afe->regmap, AFE_IRQ_MCU_EN, AFE_IRQ_STATUS_BITS);
 
+	/* configure all AFE memifs for normal DRAM mode (bit 5) matching MT6789 */
+	{
+		static const int normal_mode_regs[] = {
+			AFE_DL1_CON0, AFE_DL2_CON0, AFE_DL3_CON0, AFE_DL4_CON0,
+			AFE_DL5_CON0, AFE_DL6_CON0, AFE_DL7_CON0, AFE_DL8_CON0,
+			AFE_DL12_CON0,
+			AFE_AWB_CON0, AFE_AWB2_CON0,
+			AFE_VUL_CON0, AFE_VUL2_CON0, AFE_VUL3_CON0, AFE_VUL4_CON0,
+			AFE_VUL5_CON0, AFE_VUL6_CON0, AFE_VUL12_CON0,
+			AFE_DAI_CON0, AFE_DAI2_CON0, AFE_MOD_DAI_CON0,
+		};
+		int i;
+
+		for (i = 0; i < ARRAY_SIZE(normal_mode_regs); i++)
+			regmap_update_bits(afe->regmap, normal_mode_regs[i], BIT(5), BIT(5));
+	}
+
 skip_regmap:
 	return 0;
 }

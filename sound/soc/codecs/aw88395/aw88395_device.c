@@ -1442,27 +1442,33 @@ int aw88395_dev_start(struct aw_device *aw_dev)
 		/* dsp bypass */
 		aw_dev_dsp_enable(aw_dev, false);
 		ret = aw_dev_dsp_fw_check(aw_dev);
-		if (ret)
-			goto dev_dsp_fw_check_fail;
+		if (ret) {
+			dev_warn(aw_dev->dev, "dsp fw check failed (%d), fallback to bypass", ret);
+			goto dsp_fallback_bypass;
+		}
 
 		aw_dev_update_cali_re(&aw_dev->cali_desc);
 
 		if (aw_dev->dsp_crc_st != AW88395_DSP_CRC_OK) {
 			ret = aw_dev_dsp_check_crc32(aw_dev);
 			if (ret) {
-				dev_err(aw_dev->dev, "dsp crc check failed");
-				goto crc_check_fail;
+				dev_warn(aw_dev->dev, "dsp crc check failed (%d), fallback to bypass", ret);
+				goto dsp_fallback_bypass;
 			}
 		}
 
 		ret = aw_dev_dsp_check(aw_dev);
 		if (ret) {
-			dev_err(aw_dev->dev, "dsp status check failed");
-			goto dsp_check_fail;
+			dev_warn(aw_dev->dev, "dsp status check failed (%d), fallback to bypass", ret);
+			goto dsp_fallback_bypass;
 		}
 	} else {
 		dev_dbg(aw_dev->dev, "start pa with dsp bypass");
 	}
+
+dsp_fallback_bypass:
+	if (ret)
+		aw_dev_dsp_enable(aw_dev, false);
 
 	/* enable tx feedback */
 	aw_dev_i2s_tx_enable(aw_dev, true);
@@ -1475,10 +1481,6 @@ int aw88395_dev_start(struct aw_device *aw_dev)
 
 	return 0;
 
-dsp_check_fail:
-crc_check_fail:
-	aw_dev_dsp_enable(aw_dev, false);
-dev_dsp_fw_check_fail:
 sysst_check_fail:
 	aw_dev_clear_int_status(aw_dev);
 	aw_dev_amppd(aw_dev, true);
