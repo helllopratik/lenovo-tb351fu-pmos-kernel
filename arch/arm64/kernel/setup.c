@@ -660,7 +660,7 @@ static const struct proc_ops pmos_cancel_proc_ops = {
 	.proc_write = pmos_cancel_proc_write,
 };
 
-static int pmos_reboot_thread(void *data)
+static int __maybe_unused pmos_reboot_thread(void *data)
 {
 	int rem;
 	for (rem = 120; rem > 0; rem -= 5) {
@@ -687,8 +687,8 @@ static int __init pmos_reboot_init(void)
 	register_restart_handler(&pmos_restart_nb);
 	pr_info("PMOSRST: Registered priority 255 TopRGU instant hardware restart handler\n");
 	proc_create("pmos_cancel", 0666, NULL, &pmos_cancel_proc_ops);
-	kthread_run(pmos_reboot_thread, NULL, "pmos_reboot");
-	pr_emerg("PMOSCAPTURE: 120s warm auto-restart kthread active (cancel with /proc/pmos_cancel)\n");
+	/* kthread_run(pmos_reboot_thread, NULL, "pmos_reboot"); - disabled to allow continuous postmarketOS session */
+	pr_emerg("PMOSCAPTURE: warm restart kthread disabled (postmarketOS running continuously)\n");
 	return 0;
 }
 late_initcall(pmos_reboot_init);

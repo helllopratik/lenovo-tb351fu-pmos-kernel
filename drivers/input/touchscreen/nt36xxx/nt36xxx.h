@@ -71,7 +71,7 @@
 //---INT trigger mode---
 //#define IRQ_TYPE_EDGE_RISING 1
 //#define IRQ_TYPE_EDGE_FALLING 2
-#define INT_TRIGGER_TYPE IRQ_TYPE_EDGE_RISING
+#define INT_TRIGGER_TYPE IRQ_TYPE_EDGE_BOTH
 
 //---bus transfer length---
 #define BUS_TRANSFER_LENGTH  256
@@ -192,6 +192,7 @@ struct nvt_ts_data {
 	struct input_dev *input_dev;
 	struct delayed_work nvt_fwu_work;
 	struct delayed_work poll_work;
+	struct delayed_work idle_check_work;
 	struct task_struct *poll_task;
 	uint16_t addr;
 	int8_t phys[32];
@@ -268,6 +269,7 @@ struct nvt_ts_data {
 #endif
 	/* --- bring-up diagnostics (touch under simpledrm) --- */
 	int prev_finger_cnt;
+	uint8_t prev_pen_active;
 	u64 diag_frames;            /* SPI 108-byte frames read successfully */
 	u64 diag_touch_frames;      /* frames carrying at least one active finger */
 	u64 diag_spi_errors;        /* failed CTP_SPI_READ attempts */
@@ -381,6 +383,7 @@ void nvt_crash_append(const char *fmt, ...);
 void nvt_poll_start(struct nvt_ts_data *ts_data);
 void nvt_identify_chip(void);
 void nvt_hw_reset_pulse(void);
+void nvt_irq_enable(bool enable);
 void nvt_dbg_probe(int which);
 extern char *mp_update_firmware_name;
 #ifndef KEY_STYLUS

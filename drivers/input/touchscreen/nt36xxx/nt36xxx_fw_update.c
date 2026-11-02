@@ -1575,6 +1575,15 @@ void Boot_Update_Firmware(struct work_struct *work)
 		nvt_sw_reset();
 		msleep(100);
 	}
+	/* Drain read: clear any pending interrupt on the TDDI so INT de-asserts to 1 */
+	{
+		uint8_t drain[POINT_DATA_LEN + 1] = {0};
+		drain[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, drain, POINT_DATA_LEN + 1);
+	}
+	nvt_irq_enable(true);
+	queue_delayed_work(nvt_fwu_wq, &ts->idle_check_work, msecs_to_jiffies(5000));
 	nvt_poll_start(ts);
 	msleep(20);
 	nvt_force_continuous_scan();
