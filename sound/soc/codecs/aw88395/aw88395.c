@@ -39,8 +39,9 @@ static void aw88395_start_pa(struct aw88395 *aw88395)
 			ret = aw88395_dev_fw_update(aw88395->aw_pa, AW88395_DSP_FW_UPDATE_ON, true);
 			if (ret < 0) {
 				dev_err(aw88395->aw_pa->dev, "fw update failed");
-				continue;
 			}
+			msleep(20);
+			continue;
 		} else {
 			dev_info(aw88395->aw_pa->dev, "start success\n");
 			break;
@@ -82,7 +83,7 @@ static void aw88395_start(struct aw88395 *aw88395, bool sync_start)
 	else
 		queue_delayed_work(system_wq,
 			&aw88395->start_work,
-			AW88395_START_WORK_DELAY_MS);
+			msecs_to_jiffies(AW88395_START_WORK_DELAY_MS));
 }
 
 static struct snd_soc_dai_driver aw88395_dai[] = {
@@ -375,10 +376,11 @@ static int aw88395_playback_event(struct snd_soc_dapm_widget *w,
 
 	mutex_lock(&aw88395->lock);
 	switch (event) {
-	case SND_SOC_DAPM_PRE_PMU:
+	case SND_SOC_DAPM_POST_PMU:
 		aw88395_start(aw88395, AW88395_ASYNC_START);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		cancel_delayed_work_sync(&aw88395->start_work);
 		aw88395_dev_stop(aw88395->aw_pa);
 		break;
 	default:
@@ -393,7 +395,7 @@ static const struct snd_soc_dapm_widget aw88395_dapm_widgets[] = {
 	 /* playback */
 	SND_SOC_DAPM_AIF_IN_E("AIF_RX", "Speaker_Playback", 0, 0, 0, 0,
 					aw88395_playback_event,
-					SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+					SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_OUTPUT("DAC Output"),
 
 	/* capture */
