@@ -192,6 +192,12 @@ cp "$DEPLOY_DIR/configs/phoc.ini" "$PAYLOAD_DIR/etc/phosh/phoc.ini"
 cp "$DEPLOY_DIR/configs/99-panic.conf" "$PAYLOAD_DIR/etc/sysctl.d/99-panic.conf"
 cp "$DEPLOY_DIR/configs/watchdog.conf" "$PAYLOAD_DIR/etc/systemd/system.conf.d/watchdog.conf"
 
+# Copy ALSA UCM2 audio configurations
+if [ -d "$DEPLOY_DIR/configs/ucm2" ]; then
+  mkdir -p "$PAYLOAD_DIR/usr/share/alsa/ucm2"
+  cp -a "$DEPLOY_DIR/configs/ucm2/"* "$PAYLOAD_DIR/usr/share/alsa/ucm2/"
+fi
+
 PAYLOAD_TAR="$TMP_DIR/pmos_payload.tar.gz"
 tar -czf "$PAYLOAD_TAR" -C "$PAYLOAD_DIR" .
 echo "Customization payload ready: $(ls -lh "$PAYLOAD_TAR" | awk '{print $5}')"
