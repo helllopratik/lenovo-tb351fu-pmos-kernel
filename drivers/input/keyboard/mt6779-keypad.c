@@ -36,6 +36,7 @@ struct mt6779_keypad {
 	void (*calc_row_col)(unsigned int key,
 			     unsigned int *row, unsigned int *col);
 	DECLARE_BITMAP(keymap_state, MTK_KPD_NUM_BITS);
+	struct delayed_work check_work;
 };
 
 static const struct regmap_config mt6779_keypad_regmap_cfg = {
@@ -45,9 +46,8 @@ static const struct regmap_config mt6779_keypad_regmap_cfg = {
 	.max_register = 36,
 };
 
-static irqreturn_t mt6779_keypad_irq_handler(int irq, void *dev_id)
+static void mt6779_keypad_report(struct mt6779_keypad *keypad)
 {
-	struct mt6779_keypad *keypad = dev_id;
 	const unsigned short *keycode = keypad->input_dev->keycode;
 	DECLARE_BITMAP(new_state, MTK_KPD_NUM_BITS);
 	DECLARE_BITMAP(change, MTK_KPD_NUM_BITS);
@@ -88,8 +88,62 @@ static irqreturn_t mt6779_keypad_irq_handler(int irq, void *dev_id)
 	}
 
 	bitmap_copy(keypad->keymap_state, new_state, MTK_KPD_NUM_BITS);
+}
+
+/* 1: not pressed, 0: pressed */
+static bool mt6779_keypad_any_pressed(struct mt6779_keypad *keypad)
+{
+	unsigned int bit_nr;
+
+	for (bit_nr = 0; bit_nr < MTK_KPD_NUM_BITS; bit_nr++) {
+		if (bit_nr % 32 >= 16)
+			continue;
+		if (!test_bit(bit_nr, keypad->keymap_state))
+			return true;
+	}
+
+	return false;
+}
+
+static void mt6779_keypad_check_work(struct work_struct *work)
+{
+	struct mt6779_keypad *keypad =
+		container_of(to_delayed_work(work), struct mt6779_keypad,
+			     check_work);
+
+	mt6779_keypad_report(keypad);
+
+	/*
+	 * The keypad controller does not reliably raise an interrupt for
+	 * every key transition, and an interrupt can fire before the
+	 * key-status registers reflect the debounced state.  Keep polling
+	 * while a key is down so a release is never missed: a stuck key
+	 * would otherwise make the compositor auto-repeat it forever.
+	 */
+	if (mt6779_keypad_any_pressed(keypad))
+		queue_delayed_work(system_wq, &keypad->check_work,
+				   msecs_to_jiffies(20));
+}
+
+static irqreturn_t mt6779_keypad_irq_handler(int irq, void *dev_id)
+{
+	struct mt6779_keypad *keypad = dev_id;
+
+	/*
+	 * Let the key matrix settle after the edge before reading the
+	 * status registers (the hardware debounce is 16 ms).
+	 */
+	mod_delayed_work(system_wq, &keypad->check_work,
+			 msecs_to_jiffies(20));
 
 	return IRQ_HANDLED;
+}
+
+static void mt6779_keypad_cancel_work(void *data)
+{
+	struct mt6779_keypad *keypad = data;
+
+	cancel_delayed_work_sync(&keypad->check_work);
 }
 
 static void mt6779_keypad_calc_row_col_single(unsigned int key,
@@ -135,6 +189,7 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 	}
 
 	bitmap_fill(keypad->keymap_state, MTK_KPD_NUM_BITS);
+	INIT_DELAYED_WORK(&keypad->check_work, mt6779_keypad_check_work);
 
 	keypad->input_dev = devm_input_allocate_device(&pdev->dev);
 	if (!keypad->input_dev) {
@@ -235,6 +290,11 @@ static int mt6779_keypad_pdrv_probe(struct platform_device *pdev)
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
+
+	error = devm_add_action_or_reset(&pdev->dev,
+					 mt6779_keypad_cancel_work, keypad);
+	if (error)
+		return error;
 
 	error = devm_request_threaded_irq(&pdev->dev, irq,
 					  NULL, mt6779_keypad_irq_handler,
