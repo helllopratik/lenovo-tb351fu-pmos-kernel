@@ -1,0 +1,34 @@
+--- a/src/lockscreen.c
++++ b/src/lockscreen.c
+@@ -432,12 +432,29 @@
+                            PhoshOskManager *osk)
+ {
+   PhoshLockscreenPrivate *priv;
++  gboolean had_focus;
+ 
+   g_assert (PHOSH_IS_LOCKSCREEN (self));
+   priv = phosh_lockscreen_get_instance_private (self);
+ 
+-  if (!phosh_osk_manager_get_visible (osk))
+-    g_object_set (priv->entry_pin, "im-module", "gtk-im-context-none", NULL);
++  if (phosh_osk_manager_get_visible (osk))
++    return;
++
++  /* Switching the IM module resets the entry's Wayland IM context.  That
++   * emits ::retrieve-surrounding, whose GtkEntry handler calls
++   * gtk_im_context_set_surrounding() and re-enters the multicontext's
++   * get_slave() while the switch is still in progress.  With the Wayland
++   * IM context active this recurses until the stack overflows and phosh
++   * crashes.  Focus the entry out first so the Wayland IM context is
++   * disabled before we switch modules. */
++  had_focus = gtk_widget_has_focus (priv->entry_pin);
++  if (had_focus)
++    gtk_widget_grab_focus (priv->btn_keyboard);
++
++  g_object_set (priv->entry_pin, "im-module", "gtk-im-context-none", NULL);
++
++  if (had_focus)
++    gtk_entry_grab_focus_without_selecting (GTK_ENTRY (priv->entry_pin));
+ }
+ 
+ 

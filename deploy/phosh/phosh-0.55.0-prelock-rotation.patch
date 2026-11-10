@@ -1,0 +1,28 @@
+--- a/src/rotation-manager.c
++++ b/src/rotation-manager.c
+@@ -268,8 +268,14 @@
+     g_debug ("Forcing portrait transform: %d", transform);
+   } else {
+     if (self->prelock_transform == -1) {
+-      g_warning ("Prelock transform invalid");
+-      self->prelock_transform = PHOSH_MONITOR_TRANSFORM_NORMAL;
++      /*
++       * The session can start (or the shell can be restarted) unlocked
++       * before the rotation manager knows its monitor. In that case no
++       * prelock transform was saved; keep the compositor's configured
++       * transform instead of forcing the panel back to normal.
++       */
++      g_debug ("No prelock transform saved, keeping current transform");
++      return;
+     }
+     g_debug ("Restoring transform %d", self->prelock_transform);
+     transform = self->prelock_transform;
+@@ -601,6 +607,8 @@
+ phosh_rotation_manager_init (PhoshRotationManager *self)
+ {
+   self->cancel = g_cancellable_new ();
++  /* No prelock transform has been saved yet (0 is a valid transform). */
++  self->prelock_transform = -1;
+ }
+ 
+ 

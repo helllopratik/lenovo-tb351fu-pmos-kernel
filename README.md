@@ -68,7 +68,7 @@ Boot the tablet into Android (Slot A), ensure USB debugging is enabled and autho
    *(Prevents dynamic linker breakage; see Pitfalls below).*
 6. Installs all hardware modules into `/usr/lib/modules/extra/`.
 7. Installs and enables systemd bring-up services for Bluetooth, USB networking, and hardware peripherals.
-8. Configures Phosh display to native 60Hz mode (`scale = 2`, `rotate = normal`).
+8. Configures Phosh display to native 60Hz portrait 180° mode (`scale = 2`, `rotate = 180`). The unlock-time rotation reset needs the patched phosh build in `deploy/phosh/`; see that directory's README.
 9. Disables the non-existent EFI `/boot` entry in `/etc/fstab` to eliminate 90s boot stalls.
 10. Executes a preflight sanity check (`chroot ... systemd --version`) to confirm userspace binary integrity before completing.
 
@@ -136,7 +136,7 @@ The system automatically configures USB gadget networking on boot:
 * **Hardware Reality**: The NT36523N TDDI panel integrates both display driver and touch controller into a single chip.
 * **Problem**: Running touch background polling threads or attempting 90Hz modeline overrides causes bus contention over SPI2 during display scanout, creating horizontal line artifacts and pixel glitches.
 * **Fix**:
-  - Keep display locked to native **60Hz** in DRM driver and `/etc/phosh/phoc.ini` (`scale = 2`).
+  - Keep display locked to native **60Hz** in DRM driver and `/etc/phosh/phoc.ini` (`scale = 2`, `rotate = 180`).
   - Rely purely on hardware interrupt-driven touch handling without continuous scan polling.
 
 ### C. Ramdisk Compression (`lz4 -l -9`)
