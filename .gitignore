@@ -39,6 +39,7 @@
 *.o
 *.o.*
 *.patch
+!deploy/phosh/*.patch
 *.rmeta
 *.rpm
 *.rsi
