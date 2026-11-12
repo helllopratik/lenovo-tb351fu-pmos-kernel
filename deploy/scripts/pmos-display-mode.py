@@ -136,15 +136,18 @@ def open_inputs():
 
 
 def drain(fd):
+    """Read pending events; return byte count, or None if the node died."""
+    total = 0
     while True:
         try:
             data = os.read(fd, INPUT_EVENT.size * 64)
         except BlockingIOError:
-            return
+            return total
         except OSError:
-            return
+            return None
         if not data:
-            return
+            return None
+        total += len(data)
 
 
 def read_mode():
@@ -193,7 +196,10 @@ def main():
         log("no touch/pen input nodes; adaptive will rely on the framebuffer")
 
     last_activity = time.monotonic()
-    last_pen = 0.0
+    # None means no stylus event has been seen yet.  Using 0.0 here would
+    # apply PEN_GRACE from boot, holding 90 Hz for the first five minutes
+    # of uptime even though the screen is static.
+    last_pen = None
     current_hz = None
     last_mtime_check = 0.0
     last_force_reload = 0.0
@@ -230,12 +236,34 @@ def main():
                     except OSError:
                         pass
                 inputs = open_inputs()
+            dead = False
             for fd in ready:
                 kind = inputs.get(fd, ("touch", "?"))[0]
-                drain(fd)
-                last_activity = now
-                if kind == "pen":
-                    last_pen = now
+                count = drain(fd)
+                if count is None:
+                    # A disconnected node reports EOF/ENODEV and select
+                    # keeps marking it readable.  Drop it instead of
+                    # treating that as endless input activity.
+                    dead = True
+                    inputs.pop(fd, None)
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                    continue
+                if count:
+                    last_activity = now
+                    if kind == "pen":
+                        last_pen = now
+            if dead:
+                log("input node disappeared; rebuilding input watch")
+                time.sleep(1.0)
+                for fd in list(inputs):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                inputs = open_inputs()
         else:
             time.sleep(POLL)
 
@@ -254,7 +282,8 @@ def main():
         elif fb_mm is None:
             target = 90
         elif ((now - last_activity) < STATIC_TIMEOUT
-              or (now - last_pen) < PEN_GRACE):
+              or (last_pen is not None
+                  and (now - last_pen) < PEN_GRACE)):
             target = 90
         else:
             target = 60
