@@ -1,0 +1,20 @@
+- name: Display
+  weight: 15
+  sections:
+    - name: Refresh rate
+      weight: 0
+      settings:
+        - name: Panel refresh rate
+          help: |-
+            60 Hz: lower power.
+            90 Hz: pen pressure and tilt.
+            Auto: switches with activity.
+          type: choice
+          backend: gsettings
+          gtype: string
+          key: org.postmarketos.Display.refresh-mode
+          default: "90"
+          map:
+            60 Hz: "60"
+            90 Hz: "90"
+            Auto: "adaptive"
