@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.postmarketos.Display" path="/org/postmarketos/Display/">
+    <key name="refresh-mode" type="s">
+      <default>'90'</default>
+      <summary>Panel refresh mode</summary>
+      <description>
+        One of "60", "90" or "adaptive". 60 Hz saves power but the NT36523
+        reports the stylus as a finger at 60 Hz, so pressure and tilt are
+        unavailable. 90 Hz is required for the native stylus mode. Adaptive
+        uses 90 Hz while the screen is changing or input is arriving and
+        drops to 60 Hz after a period of a static screen; it also holds
+        90 Hz for several minutes after stylus use.
+      </description>
+    </key>
+  </schema>
+</schemalist>

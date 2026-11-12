@@ -1,0 +1,13 @@
+[Unit]
+Description=pmOS panel refresh mode (60/90/adaptive via pmosfb)
+After=systemd-modules-load.service
+ConditionPathExists=/sys/module/pmosfb/parameters/refresh_hz
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pmos-display-mode.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

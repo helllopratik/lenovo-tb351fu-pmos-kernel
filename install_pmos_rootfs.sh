@@ -7,8 +7,8 @@
 # (/data/pmos/rootfs.img) for dual-booting alongside Android.
 #
 # Preserves merged /usr symlinks, deploys out-of-tree hardware modules, installs
-# Wi-Fi / Bluetooth bring-up services, locks display to native 60Hz, and verifies
-# systemd executable integrity inside chroot before completion.
+# Wi-Fi / Bluetooth bring-up services, installs the 60/90/adaptive display mode
+# panel, and verifies systemd executable integrity inside chroot before completion.
 # ==============================================================================
 set -euo pipefail
 
@@ -134,6 +134,8 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
          "$PAYLOAD_DIR/etc/phosh" \
          "$PAYLOAD_DIR/etc/sysctl.d" \
          "$PAYLOAD_DIR/etc/systemd/system.conf.d" \
+         "$PAYLOAD_DIR/usr/share/glib-2.0/schemas" \
+         "$PAYLOAD_DIR/usr/share/postmarketos-tweaks" \
          "$PAYLOAD_DIR/data_host"
 
 # Extract out-of-tree hardware modules into usr/lib/modules/extra
@@ -191,6 +193,13 @@ cp "$DEPLOY_DIR/configs/70-touchscreen-pen.rules" "$PAYLOAD_DIR/etc/udev/rules.d
 cp "$DEPLOY_DIR/configs/phoc.ini" "$PAYLOAD_DIR/etc/phosh/phoc.ini"
 cp "$DEPLOY_DIR/configs/99-panic.conf" "$PAYLOAD_DIR/etc/sysctl.d/99-panic.conf"
 cp "$DEPLOY_DIR/configs/watchdog.conf" "$PAYLOAD_DIR/etc/systemd/system.conf.d/watchdog.conf"
+
+# Display mode: GSettings schema + Mobile Settings (phosh-mobile-settings)
+# YAML panel.  The daemon applies 60/90/adaptive to pmosfb.refresh_hz.
+cp "$DEPLOY_DIR/configs/org.postmarketos.Display.gschema.xml" \
+   "$PAYLOAD_DIR/usr/share/glib-2.0/schemas/"
+cp "$DEPLOY_DIR/configs/postmarketos-tweaks/display.yml" \
+   "$PAYLOAD_DIR/usr/share/postmarketos-tweaks/"
 
 # Copy ALSA UCM2 audio configurations
 if [ -d "$DEPLOY_DIR/configs/ucm2" ]; then
@@ -283,6 +292,13 @@ adb shell "su -c '
   # Preflight check: systemd execution
   chroot /data/local/tmp/chk /usr/lib/systemd/systemd --version | head -n 1
   chroot /data/local/tmp/chk /bin/busybox --help | head -n 1
+
+  echo \"Compiling GSettings schemas...\"
+  if [ -x /data/local/tmp/chk/usr/bin/glib-compile-schemas ]; then
+    chroot /data/local/tmp/chk /usr/bin/glib-compile-schemas /usr/share/glib-2.0/schemas
+  else
+    echo \"WARNING: glib-compile-schemas missing; Display settings panel may not register\"
+  fi
 
   echo \"Unmounting and syncing...\"
   umount /data/local/tmp/chk
