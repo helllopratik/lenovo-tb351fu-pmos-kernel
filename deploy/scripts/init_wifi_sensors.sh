@@ -339,6 +339,16 @@ fi
 
 # 8. SensorHub / SCP disabled to protect SPI2 touch bus
 kp "SensorHub / SCP modules disabled to prevent SPI2 timeouts"
-# 9. Normal touch mode default
+# 9. Active pen / game mode: MATCH STOCK NO-PEN STEADY STATE.
+#    Stock init.stylus.rc writes support_pen=1 then game_mode=1 at boot,
+#    but Lenovo PalmGuard immediately drops game_mode to 0 while no pen
+#    is connected and keeps support_pen=1 for the whole uptime.  We have
+#    no PalmGuard, so write that steady state directly (1/0).  Our old
+#    0/0 default was non-stock.  The "1/1 kills touch after 20 s" note
+#    came from the wrong 123-byte read; this kernel reads 109 bytes and
+#    parses the pen packet at offset 66 like stock Android.
+if [ -e /proc/support_pen ]; then echo 1 > /proc/support_pen 2>/dev/null; fi
 if [ -e /proc/game_mode ]; then echo 0 > /proc/game_mode 2>/dev/null; fi
-if [ -e /proc/support_pen ]; then echo 0 > /proc/support_pen 2>/dev/null; fi
+if [ -e /sys/bus/spi/devices/spi2.0/power/control ]; then
+    echo on > /sys/bus/spi/devices/spi2.0/power/control 2>/dev/null
+fi

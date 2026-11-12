@@ -424,6 +424,7 @@ static int32_t __maybe_unused nvt_verify_sram(const u8 *fwdata, size_t fwsize)
 	uint32_t BIN_addr = 0;
 	uint32_t size = 0;
 	uint32_t total_bad = 0;
+	uint32_t bad_logged = 0;
 	int32_t ret = 0;
 
 	rbuf = kzalloc(NVT_READ_LEN + 1, GFP_KERNEL);
@@ -455,8 +456,14 @@ static int32_t __maybe_unused nvt_verify_sram(const u8 *fwdata, size_t fwsize)
 					uint32_t in = off + remain;
 					uint32_t h2 = in & 0x7FF;
 					uint32_t h4 = in & 0xFFF;
-					nvt_crash_append("VBD p%u i0x%X o%u h2=%u h4=%u\n",
-						list, in, in, h2, h4);
+					/* Log only the first few mismatches: a
+					 * failed verify used to write one line per
+					 * bad byte (2.4M lines / 85 MB). */
+					if (bad_logged < 8) {
+						nvt_crash_append("VBD p%u i0x%X o%u h2=%u h4=%u\n",
+							list, in, in, h2, h4);
+						bad_logged++;
+					}
 					total_bad++;
 				}
 			}
@@ -1575,6 +1582,17 @@ void Boot_Update_Firmware(struct work_struct *work)
 		nvt_sw_reset();
 		msleep(100);
 	}
+	/* Drain read: release any pending event so INT starts de-asserted,
+	 * then start the 5 s idle-latch check.  The IRQ itself was armed at
+	 * the end of probe (nvt_irq_enable(true)). */
+	{
+		uint8_t drain[POINT_DATA_LEN + 1] = {0};
+		drain[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, drain, POINT_DATA_LEN + 1);
+	}
+	queue_delayed_work(nvt_fwu_wq, &ts->idle_check_work,
+			   msecs_to_jiffies(5000));
 	nvt_poll_start(ts);
 	msleep(20);
 	nvt_force_continuous_scan();

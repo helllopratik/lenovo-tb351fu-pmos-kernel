@@ -1,0 +1,12 @@
+[Unit]
+Description=Set panel refresh rate to 90 Hz (pmosfb)
+ConditionPathExists=/sys/module/pmosfb/parameters/refresh_hz
+Before=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pmos-refresh-90.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

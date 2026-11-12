@@ -82,6 +82,7 @@ static struct lenovo_pen_info pen_buffer[LENOVO_MAX_BUFFER];
 static unsigned char pen_report_num;
 static unsigned char pen_frame_no;
 static unsigned char pen_buffer_wp;
+static int nvt_pen_dbg_count;	/* one-shot raw pen-frame logging */
 
 char *boot_update_firmware_name = NULL;
 EXPORT_SYMBOL_GPL(boot_update_firmware_name);
@@ -132,7 +133,10 @@ struct workqueue_struct *nvt_fwu_wq;
 /* Bring-up knobs: allow forcing continuous event-buffer polling and an
  * experimental "continuous scan" kick, so the digitizer can produce frames
  * even when the DSI clock is idle (simpledrm / no V-Blank case). */
-static int nvt_poll_ms = 16;
+/* Verified IRQ-driven configuration (commits 983eaf008 / e5b9a8b42): the
+ * TDDI is serviced by its real EINT handler, exactly like stock Android.
+ * The 16 ms poll kthread is kept only as an opt-in debugging path. */
+static int nvt_poll_ms = 0;
 module_param(nvt_poll_ms, int, 0644);
 MODULE_PARM_DESC(nvt_poll_ms, "Event-buffer polling interval in ms (0 = disable polling kthread)");
 
@@ -140,7 +144,7 @@ static int nvt_poll_report = 1;
 	module_param(nvt_poll_report, int, 0644);
 MODULE_PARM_DESC(nvt_poll_report, "Report touch input events from the poll kthread (1=on)");
 
-static int nvt_poll_exclusive = 1;
+static int nvt_poll_exclusive = 0;
 	module_param(nvt_poll_exclusive, int, 0644);
 MODULE_PARM_DESC(nvt_poll_exclusive,
 		 "Make the poll kthread the single consumer of the touch event "
@@ -686,11 +690,12 @@ return:
 int32_t nvt_set_page(uint32_t addr)
 {
 	uint8_t buf[4] = {0};
-	uint32_t page = addr & ~0x7FUL;
 
-	if (ts && ts->current_page == page)
-		return 0;
-
+	/* Never cache the MCU page.  nvt_write_addr() and chip-internal
+	 * resets change the page behind our back; a stale cache then makes
+	 * every event-buffer read land on the wrong page (observed as
+	 * 0xFE/0xFF garbage after /proc/nvt_fw_control use).  The three
+	 * extra SPI bytes per frame are negligible at 60 Hz. */
 	buf[0] = 0xFF;	//set index/page/addr command
 	buf[1] = (addr >> 15) & 0xFF;
 	buf[2] = (addr >> 7) & 0xFF;
@@ -699,7 +704,7 @@ int32_t nvt_set_page(uint32_t addr)
 		return -1;
 
 	if (ts)
-		ts->current_page = page;
+		ts->current_page = addr & ~0x7FUL;
 	return 0;
 }
 
@@ -1671,10 +1676,9 @@ static ssize_t nvt_diag_proc_read(struct file *file, char __user *buff,
 	nvt_reg_rd(0x3F134, rv, 3);
 	n += scnprintf(kbuf + n, sizeof(kbuf) - n,
 		"crcflag=0x%02X crcen=0x%02X chipver=0x%02X ", rv[0], rv[1], rv[2]);
-	n += scnprintf(kbuf + n, sizeof(kbuf) - n,
-		"dmaval=0x%02X txinfo=0x%02X autocopy=0x%02X ",
-		nvt_reg_rd_as_u8(0x3F7D0), nvt_reg_rd_as_u8(0x3F7F1),
-		nvt_reg_rd_as_u8(0x3F7E8));
+	/* 0x3F7xx are bootloader SPI-DMA / auto-copy registers.  Reading
+	 * them while normal scan is active corrupts the TDDI auto-copy
+	 * path, so /proc/nvt_diag must never touch them. */
 	nvt_set_page(base);
 	mutex_unlock(&ts->lock);
 	if (gpio_is_valid(ts->irq_gpio) && gpio_is_valid(ts->reset_gpio))
@@ -2293,11 +2297,15 @@ int32_t nvt_check_stylus_state(uint8_t input_id, uint8_t *data)
 	if ((input_id == DATA_PROTOCOL) && (func_type == FUNCPAGE_STYLUS)) {
 		ret = stylus_state;
 		if (stylus_state == DETECT_PEN) {
-			NVT_LOG("Enter stylus mode\n");
-			input_report_key(ts->input_dev, KEY_STYLUS, 1);
-			input_sync(ts->input_dev);
-			input_report_key(ts->input_dev, KEY_STYLUS, 0);
-			input_sync(ts->input_dev);
+			if (!ts->fw_pen_state) {
+				NVT_LOG("Enter stylus mode: %02X %02X %02X %02X %02X %02X\n",
+					data[1], data[2], data[3], data[4], data[5], data[6]);
+				input_report_key(ts->input_dev, KEY_STYLUS, 1);
+				input_sync(ts->input_dev);
+				input_report_key(ts->input_dev, KEY_STYLUS, 0);
+				input_sync(ts->input_dev);
+			}
+			ts->fw_pen_state = 1;
 			ret = 0; /* do not drop touch packets */
 		} else if(stylus_state == ENTER_PEN_MODE) {
 			ts->fw_pen_state = 1;
@@ -2334,6 +2342,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif /* MT_PROTOCOL_B */
 	int32_t i = 0;
 	int32_t finger_cnt = 0;
+	uint8_t *pen_data = NULL;
 	uint8_t pen_format_id = 0;
 	uint32_t pen_x = 0;
 	uint32_t pen_y = 0;
@@ -2344,6 +2353,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	uint32_t pen_btn1 = 0;
 	uint32_t pen_btn2 = 0;
 	uint32_t pen_battery = 0;
+	bool pen_is_touching = false;
+	bool pen_is_active = false;
 	u16 frame_time	= 0;
 	struct lenovo_pen_info *ppen_info;
 
@@ -2386,14 +2397,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		 * page yields a FIXED set of coords with an incrementing counter. */
 		nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
 	}
-#if NVT_SUPER_RESOLUTION_N
+	/* Match the stock Android super-resolution path exactly: 108 data
+	 * bytes plus the read-command byte.  The pen packet lives inside
+	 * point_data[66..79], NOT after byte 108.  Reading 123 bytes here
+	 * made the NT36523 stop scanning fingers once support_pen=1. */
 	ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#else /* #if NVT_SUPER_RESOLUTION_N */
-	if (ts->pen_support)
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + PEN_DATA_LEN + 1);
-	else
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#endif /* #if NVT_SUPER_RESOLUTION_N */
 	if (ret < 0) {
 		ts->diag_spi_errors++;
 		if (time_after(jiffies, ts->diag_last_err_jiffies + HZ / 4))
@@ -2404,41 +2412,10 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	nvt_diag_update(point_data);
 
-	/* TDDI fault detection: NT36523N firmware outputs 0xFD or 0xFE across
-	 * point_data[1..6] when an internal MCU crash or ESD fault occurs.
-	 * In simpledrm/pmosfb there is no DSI VBLANK sync, so transient panel
-	 * noise or baseline recalibration can trigger a fault. Without host
-	 * re-download, the MCU cannot restart on its own because its internal
-	 * ROM flash only holds bootloader.
-	 */
-	{
-		bool is_fault = true;
-		int fi;
-		for (fi = 1; fi <= 6; fi++) {
-			if (point_data[fi] != 0xFD && point_data[fi] != 0xFE) {
-				is_fault = false;
-				break;
-			}
-		}
-		if (is_fault) {
-			ts->diag_fault_count++;
-			if (ts->diag_fault_count >= 12) { /* ~200ms of consecutive fault */
-				NVT_ERR("NT36523N TDDI fault 0x%02X detected, auto-reloading firmware...\n",
-					point_data[1]);
-				ts->diag_fault_count = 0;
-				ts->diag_recoveries++;
-				nvt_bootloader_reset();
-				msleep(10);
-				nvt_update_firmware(boot_update_firmware_name);
-				ts->current_page = 0xFFFFFFFF;
-				nvt_set_page(nvt_poll_base ? nvt_poll_base : ts->mmap->EVENT_BUF_ADDR);
-				mutex_unlock(&ts->lock);
-				return IRQ_HANDLED;
-			}
-		} else {
-			ts->diag_fault_count = 0;
-		}
-	}
+	/* No 0xFD/0xFE auto-reload here. Those bytes also occur in ordinary
+	 * pen-mode frames, and reloading the firmware on them caused random
+	 * digitizer resets. Genuine halts are handled by the poll-thread
+	 * watchdog, which checks the actual reset state register. */
 
 #if 0
 	if (nvt_fw_recovery(point_data)) {
@@ -2476,6 +2453,52 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		return IRQ_HANDLED;
 	}
 #endif
+	if (ts->pen_support) {
+		/* Stock Android (NVT_SUPER_RESOLUTION_N=10) parses the pen
+		 * packet at point_data[66], inside the same 109-byte read. */
+		pen_data = &point_data[66];
+		pen_format_id = pen_data[0];
+		if (pen_format_id != 0xFF && nvt_pen_dbg_count < 8) {
+			nvt_pen_dbg_count++;
+			NVT_LOG("pen dbg fmt=%02X raw60=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+				pen_format_id,
+				point_data[60], point_data[61], point_data[62], point_data[63],
+				point_data[64], point_data[65], point_data[66], point_data[67],
+				point_data[68], point_data[69], point_data[70], point_data[71],
+				point_data[72], point_data[73], point_data[74], point_data[75],
+				point_data[76], point_data[77], point_data[78], point_data[79]);
+		}
+		if (pen_format_id == 0x01) {
+			pen_pressure = (uint32_t)(pen_data[5] << 8) + (uint32_t)(pen_data[6]);
+			pen_is_touching = (pen_pressure > 0);
+		}
+		pen_is_active = pen_is_touching;
+	}
+
+	/* Hardware palm rejection: while the pen tip is down, drop finger
+	 * contacts (the palm rests on the panel while writing) and release
+	 * any finger slots that were already active. */
+	if (pen_is_touching) {
+		if (ts->prev_finger_cnt > 0) {
+#if MT_PROTOCOL_B
+			for (i = 0; i < ts->max_touch_num; i++) {
+				input_mt_slot(ts->input_dev, i);
+				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
+				input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
+				input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
+			}
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+#else
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+			input_mt_sync(ts->input_dev);
+#endif
+			input_sync(ts->input_dev);
+			ts->prev_finger_cnt = 0;
+		}
+		finger_cnt = 0;
+		goto SKIP_FINGER_PARSING;
+	}
+
 	finger_cnt = 0;
 
 	for (i = 0; i < ts->max_touch_num; i++) {
@@ -2525,6 +2548,11 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 				input_p = 1;
 #endif /* #if NVT_SUPER_RESOLUTION_N */
 
+			/* Palm rejection: while the pen is in proximity,
+			 * ignore large palm contacts. */
+			if (pen_is_active && input_w >= 10)
+				continue;
+
 #if MT_PROTOCOL_B
 			press_id[input_id - 1] = 1;
 			input_mt_slot(ts->input_dev, input_id - 1);
@@ -2548,6 +2576,7 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		}
 	}
 
+SKIP_FINGER_PARSING:
 	if (finger_cnt > 0 || ts->prev_finger_cnt > 0) {
 #if MT_PROTOCOL_B
 		for (i = 0; i < ts->max_touch_num; i++) {
@@ -2587,41 +2616,33 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 		ts->prev_finger_cnt = finger_cnt;
 	}
 
-	if (ts->pen_support) {
-/*
-		//--- dump pen buf ---
-		printk("%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-			point_data[66], point_data[67], point_data[68], point_data[69], point_data[70],
-			point_data[71], point_data[72], point_data[73], point_data[74], point_data[75],
-			point_data[76], point_data[77], point_data[78], point_data[79]);
-*/
+	if (ts->pen_support && pen_data) {
 #if CHECK_PEN_DATA_CHECKSUM
-		if (nvt_ts_pen_data_checksum(&point_data[66], PEN_DATA_LEN)) {
+		if (nvt_ts_pen_data_checksum(pen_data, PEN_DATA_LEN)) {
 			// pen data packet checksum not match, skip it
 			goto XFER_ERROR;
 		}
 #endif // #if CHECK_PEN_DATA_CHECKSUM
 
 		// parse and handle pen report
-		pen_format_id = point_data[66];
 		if (pen_format_id != 0xFF) {
 			if (pen_format_id == 0x01) {
 				// report pen data
-				pen_x = (uint32_t)(point_data[67] << 8) + (uint32_t)(point_data[68]);
-				pen_y = (uint32_t)(point_data[69] << 8) + (uint32_t)(point_data[70]);
-				if ((pen_x > PEN_MAX_WIDTH) || (pen_y > PEN_MAX_HEIGHT))
-					goto XFER_ERROR;
+				pen_x = (uint32_t)(pen_data[1] << 8) + (uint32_t)(pen_data[2]);
+				pen_y = (uint32_t)(pen_data[3] << 8) + (uint32_t)(pen_data[4]);
+				if (pen_x > PEN_MAX_WIDTH)
+					pen_x = PEN_MAX_WIDTH;
+				if (pen_y > PEN_MAX_HEIGHT)
+					pen_y = PEN_MAX_HEIGHT;
 				pen_x = PEN_MAX_WIDTH - pen_x;
 				pen_y = PEN_MAX_HEIGHT - pen_y;
-				pen_pressure = (uint32_t)(point_data[71] << 8) + (uint32_t)(point_data[72]);
-				pen_tilt_x = (int32_t)point_data[73];
-				pen_tilt_y = (int32_t)point_data[74];
-				pen_distance = (uint32_t)(point_data[75] << 8) + (uint32_t)(point_data[76]);
-				pen_btn1 = (uint32_t)(point_data[77] & 0x01);
-				pen_btn2 = (uint32_t)((point_data[77] >> 1) & 0x01);
-				pen_battery = (uint32_t)point_data[78];
-//				printk("x=%d,y=%d,p=%d,tx=%d,ty=%d,d=%d,b1=%d,b2=%d,bat=%d\n", pen_x, pen_y, pen_pressure,
-//						pen_tilt_x, pen_tilt_y, pen_distance, pen_btn1, pen_btn2, pen_battery);
+				pen_pressure = (uint32_t)(pen_data[5] << 8) + (uint32_t)(pen_data[6]);
+				pen_tilt_x = (int8_t)pen_data[7];
+				pen_tilt_y = (int8_t)pen_data[8];
+				pen_distance = (uint32_t)(pen_data[9] << 8) + (uint32_t)(pen_data[10]);
+				pen_btn1 = (uint32_t)(pen_data[11] & 0x01);
+				pen_btn2 = (uint32_t)((pen_data[11] >> 1) & 0x01);
+				pen_battery = (uint32_t)pen_data[12];
 
 				input_report_abs(ts->pen_input_dev, ABS_X, pen_x);
 				input_report_abs(ts->pen_input_dev, ABS_Y, pen_y);
@@ -2633,8 +2654,8 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, !!pen_distance || !!pen_pressure);
 				input_report_key(ts->pen_input_dev, BTN_STYLUS, pen_btn1);
 				input_report_key(ts->pen_input_dev, BTN_STYLUS2, pen_btn2);
-				// TBD: pen battery event report
-				// NVT_LOG("pen_battery=%d\n", pen_battery);
+				input_sync(ts->pen_input_dev);
+				ts->prev_pen_active = 1;
 
 				// ioctl-DAA Buffering pen raw data
 				frame_time = (u16)jiffies_to_msecs(jiffies);
@@ -2662,34 +2683,19 @@ if (nvt_check_stylus_state(input_id, point_data)) {
 
 			} else if (pen_format_id == 0xF0) {
 				// report Pen ID
-			} else {
-				// unhandled / idle pen state, clear pen inputs gracefully without error
-				input_report_abs(ts->pen_input_dev, ABS_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-				input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
-				input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
 			}
-		} else { // pen_format_id = 0xFF, i.e. no pen present
-			input_report_abs(ts->pen_input_dev, ABS_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_Y, 0);
+		} else if (ts->prev_pen_active) {
+			// pen lifted out of proximity, send clean release once
 			input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
 			input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
 			input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
 			input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
 			input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
 			input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+			input_sync(ts->pen_input_dev);
+			ts->prev_pen_active = 0;
 		}
-
-		input_sync(ts->pen_input_dev);
-	} /* if (ts->pen_support) */
+	} /* if (ts->pen_support && pen_data) */
 
 XFER_ERROR:
 
@@ -2703,7 +2709,35 @@ XFER_ERROR:
 	return IRQ_HANDLED;
 }
 
+/* Safety net from the verified IRQ fix: if the TDDI leaves INT latched LOW
+ * while idle (no touch being reported), do one clean event-buffer drain to
+ * release the line.  Runs every 5 s; never resets or re-flashes the MCU. */
+static void nvt_idle_check_func(struct work_struct *work)
+{
+	uint8_t point_data[POINT_DATA_LEN + 1] = {0};
 
+	if (!ts || !bTouchIsAwake)
+		goto reschedule;
+
+	if (gpio_is_valid(ts->irq_gpio) && gpio_get_value(ts->irq_gpio) == 0) {
+		static unsigned int drain_logs;
+
+		if (drain_logs < 5) {
+			drain_logs++;
+			NVT_LOG("INT latched LOW during idle, releasing via drain read\n");
+		}
+		mutex_lock(&ts->lock);
+		point_data[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
+		mutex_unlock(&ts->lock);
+	}
+
+reschedule:
+	if (nvt_fwu_wq)
+		queue_delayed_work(nvt_fwu_wq, &ts->idle_check_work,
+				   msecs_to_jiffies(5000));
+}
 
 static int nvt_ts_thread_func(void *data)
 {
@@ -2746,25 +2780,22 @@ static int nvt_ts_thread_func(void *data)
 			prev_spi_errors = ts->diag_spi_errors;
 
 			nvt_crash_append("NVT diag boot=%lus reset=0x%02X "
-					 "dma=%02X/%02X/%02X dead=%d/%d recov=%llu\n",
+					 "dead=%d/%d faults=%u\n",
 					 (ulong)(jiffies_to_msecs(now) / 1000UL),
-					 rv[0],
-					 nvt_reg_rd_as_u8(0x3F7D0),
-					 nvt_reg_rd_as_u8(0x3F7F1),
-					 nvt_reg_rd_as_u8(0x3F7E8),
-					 dead_ticks, dead,
-					 (unsigned long long)ts->diag_recoveries);
+					 rv[0], dead_ticks, dead,
+					 ts->diag_fault_count);
+			/* Do NOT re-download firmware from the poll watchdog.  A
+			 * full reload on a transient 0xFE/0xFD state reset the
+			 * TDDI and corrupted panel scanout (the verified #389
+			 * kernel ran with recov=0).  Re-pin the event page and
+			 * leave recovery to the next clean boot. */
 			nvt_set_page(base);
 
 			if (dead_ticks >= 2) {
-				NVT_LOG("watchdog: TDDI firmware halted (reset=0x%02X), auto-reloading...\n", rv[0]);
+				ts->diag_fault_count++;
+				if (ts->diag_fault_count <= 5)
+					NVT_ERR("watchdog: TDDI reset-state 0x%02X, re-pinning event page (no reload)\n", rv[0]);
 				dead_ticks = 0;
-				prev_spi_errors = 0;
-				ts->diag_recoveries++;
-				nvt_bootloader_reset();
-				msleep(10);
-				nvt_update_firmware(boot_update_firmware_name);
-				ts->current_page = 0xFFFFFFFF;
 				nvt_set_page(base);
 			}
 			mutex_unlock(&ts->lock);
@@ -3784,6 +3815,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	 * reboot loops (MT65xx Preloader cycling on USB). */
 	nvt_crash_append("probe: SPI untouched this boot, chip reveal deferred\n");
 
+	INIT_DELAYED_WORK(&ts->idle_check_work, nvt_idle_check_func);
 	if (!nvt_poll_exclusive)
 		nvt_irq_enable(true);
 
@@ -3963,6 +3995,7 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
+		cancel_delayed_work_sync(&ts->idle_check_work);
 		cancel_delayed_work_sync(&ts->nvt_fwu_work);
 		destroy_workqueue(nvt_fwu_wq);
 		nvt_fwu_wq = NULL;
@@ -4087,6 +4120,7 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
+		cancel_delayed_work_sync(&ts->idle_check_work);
 		cancel_delayed_work_sync(&ts->nvt_fwu_work);
 		destroy_workqueue(nvt_fwu_wq);
 		nvt_fwu_wq = NULL;
@@ -4158,6 +4192,14 @@ if(!ts->gesture_mode) {
 	nvt_tx_auto_copy_mode();
 	nvt_sw_reset();
 
+	/* Drain read before unmasking IRQ: release any event left over from
+	 * before suspend so INT starts de-asserted. */
+	{
+		uint8_t drain[POINT_DATA_LEN + 1] = {0};
+		drain[0] = 0x00;
+		nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
+		CTP_SPI_READ(ts->client, drain, POINT_DATA_LEN + 1);
+	}
 	if (!nvt_poll_exclusive)
 		nvt_irq_enable(true);
 

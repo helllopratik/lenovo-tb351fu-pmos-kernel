@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep panel backlight off while DRM DPMS is off (pmosfb workaround)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pmos-display-guard.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

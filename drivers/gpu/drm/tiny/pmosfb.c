@@ -25,7 +25,9 @@
 #include <linux/gpio.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
+#include <linux/kstrtox.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_gpio.h>
@@ -59,7 +61,28 @@
 #define DRIVER_MAJOR	1
 #define DRIVER_MINOR	2
 
-#define PMOSFB_VBLANK_HZ	60
+#define PMOSFB_DEFAULT_REFRESH_HZ	60
+
+/*
+ * DSI timing override for the bootloader-initialised NT36523N panel.
+ *
+ * LK leaves the panel running in its 60 Hz mode (VFP 1104).  The stock
+ * 90 Hz mode uses the exact same pixel clock and horizontal timing, only
+ * shortening the vertical front porch to 26 lines.  The touch controller
+ * shares the panel's scan timing (TDDI), so this is also what makes active
+ * pen reporting work: at 60 Hz the pen is only finger-emulated.
+ *
+ * These registers are the same ones the vendor DSI driver writes for a
+ * dynamic-FPS/porch update (0x20 VSA, 0x24 VBP, 0x28 VFP, 0x2c VACT).
+ */
+#define PMOSFB_DSI0_PHYS	0x14013000
+#define PMOSFB_DSI0_SIZE	0x1000
+#define PMOSFB_DSI_VSA_NL	0x20
+#define PMOSFB_DSI_VBP_NL	0x24
+#define PMOSFB_DSI_VFP_NL	0x28
+#define PMOSFB_DSI_VACT_NL	0x2c
+#define PMOSFB_DSI_VFP_60HZ	1104
+#define PMOSFB_DSI_VFP_90HZ	26
 
 /*
  * Backlight via the DISP_PWM0 block. Layout follows the mt8183-style
@@ -91,6 +114,8 @@ struct pmosfb_device {
 	/* display parameters */
 	struct drm_display_mode mode;
 	const struct drm_format_info *format;
+	unsigned int refresh_hz;
+	void __iomem *dsi_base;
 
 	/* backlight */
 	struct backlight_device *bl;
@@ -121,6 +146,90 @@ static struct pmosfb_device *pmosfb_device_of_dev(struct drm_device *dev)
 {
 	return container_of(dev, struct pmosfb_device, dev);
 }
+
+/*
+ * Panel refresh / DSI porch control.
+ *
+ * The 60 Hz and 90 Hz panel modes share one pixel clock and all horizontal
+ * timing; only the vertical front porch differs.  The synthetic vblank rate
+ * and the mode advertised to the compositor must follow the same value, so
+ * keep both derived from sdev->refresh_hz.
+ */
+static unsigned int pmosfb_refresh_hz = PMOSFB_DEFAULT_REFRESH_HZ;
+static struct pmosfb_device *pmosfb_sdev;
+
+static unsigned int pmosfb_vfp_for_refresh(unsigned int hz)
+{
+	return hz == 90 ? PMOSFB_DSI_VFP_90HZ : PMOSFB_DSI_VFP_60HZ;
+}
+
+static void pmosfb_dsi_log_timing(struct pmosfb_device *sdev)
+{
+	u32 vsa, vbp, vfp, vact;
+
+	if (!sdev->dsi_base)
+		return;
+
+	vsa = readl(sdev->dsi_base + PMOSFB_DSI_VSA_NL);
+	vbp = readl(sdev->dsi_base + PMOSFB_DSI_VBP_NL);
+	vfp = readl(sdev->dsi_base + PMOSFB_DSI_VFP_NL);
+	vact = readl(sdev->dsi_base + PMOSFB_DSI_VACT_NL);
+
+	pr_info("pmosfb: DSI0 timing VSA=%u VBP=%u VFP=%u VACT=%u refresh_hz=%u\n",
+		vsa, vbp, vfp, vact, sdev->refresh_hz);
+}
+
+static void pmosfb_dsi_set_vfp(struct pmosfb_device *sdev, unsigned int hz)
+{
+	unsigned int vfp = pmosfb_vfp_for_refresh(hz);
+	u32 old;
+
+	if (!sdev->dsi_base)
+		return;
+
+	old = readl(sdev->dsi_base + PMOSFB_DSI_VFP_NL);
+	if (old != vfp)
+		writel(vfp, sdev->dsi_base + PMOSFB_DSI_VFP_NL);
+
+	pr_info("pmosfb: DSI0 VFP %u -> %u for %u Hz\n", old, vfp, hz);
+}
+
+static void pmosfb_apply_refresh(struct pmosfb_device *sdev, unsigned int hz)
+{
+	sdev->refresh_hz = hz;
+	sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / hz);
+	pmosfb_dsi_set_vfp(sdev, hz);
+
+	if (sdev->vblank_enabled)
+		hrtimer_start(&sdev->vblank_timer, sdev->vblank_period,
+			      HRTIMER_MODE_REL);
+}
+
+static int pmosfb_refresh_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned int hz;
+	int ret;
+
+	ret = kstrtouint(val, 10, &hz);
+	if (ret)
+		return ret;
+	if (hz != 60 && hz != 90)
+		return -EINVAL;
+
+	pmosfb_refresh_hz = hz;
+	if (pmosfb_sdev)
+		pmosfb_apply_refresh(pmosfb_sdev, hz);
+
+	return 0;
+}
+
+static const struct kernel_param_ops pmosfb_refresh_ops = {
+	.set = pmosfb_refresh_set,
+	.get = param_get_uint,
+};
+
+module_param_cb(refresh_hz, &pmosfb_refresh_ops, &pmosfb_refresh_hz, 0644);
+MODULE_PARM_DESC(refresh_hz, "Panel/synthetic refresh rate in Hz (60 or 90)");
 
 /*
  * Modesetting
@@ -312,7 +421,8 @@ static enum drm_mode_status pmosfb_crtc_helper_mode_valid(struct drm_crtc *crtc,
  * compositor (wlroots/Phosh) cannot pace page-flips: on the unlock->desktop
  * morph it may present under-composited frames that survive for minutes as a
  * stale region in the scanout (the "black spot").  We therefore synthesize a
- * 60 Hz vblank with a high-resolution timer, giving wlroots a real vsync to
+ * vblank at the panel refresh rate with a high-resolution timer, giving
+ * wlroots a real vsync to
  * complete each frame as an atomic, full repaint before presenting.  This is
  * the same approach used by several DRM drivers that lack a hardware vblank
  * interrupt.
@@ -355,7 +465,7 @@ static void pmosfb_vblank_stop(struct pmosfb_device *sdev)
 /*
  * Present-rate gate.
  *
- * The panel refresh period is vblank_period (60 Hz).  With no_vblank set,
+ * The panel refresh period is vblank_period.  With no_vblank set,
  * page-flip completion is synchronous, so a compositor (wlroots) is not
  * throttled by any vsync: on touch/unlock it can commit several full frames
  * within a single panel refresh period.  Those unpaced, back-to-back whole
@@ -633,13 +743,14 @@ static struct drm_driver pmosfb_driver = {
  * Platform driver
  */
 
-static struct drm_display_mode pmosfb_mode(unsigned int width,
+static struct drm_display_mode pmosfb_mode(unsigned int refresh_hz,
+					   unsigned int width,
 					   unsigned int height,
 					   unsigned int width_mm,
 					   unsigned int height_mm)
 {
 	struct drm_display_mode mode = {
-		DRM_MODE_INIT(60, width, height, width_mm, height_mm)
+		DRM_MODE_INIT(refresh_hz, width, height, width_mm, height_mm)
 	};
 
 	mode.type |= DRM_MODE_TYPE_PREFERRED | DRM_MODE_TYPE_DRIVER;
@@ -725,9 +836,29 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 	width_mm = DRM_MODE_RES_MM(width, 96ul);
 	height_mm = DRM_MODE_RES_MM(height, 96ul);
 
-	sdev->mode = pmosfb_mode(width, height, width_mm, height_mm);
+	if (pmosfb_refresh_hz != 60 && pmosfb_refresh_hz != 90)
+		pmosfb_refresh_hz = PMOSFB_DEFAULT_REFRESH_HZ;
+
+	sdev->refresh_hz = pmosfb_refresh_hz;
+	sdev->mode = pmosfb_mode(sdev->refresh_hz, width, height, width_mm, height_mm);
 	sdev->format = format;
 	sdev->pitch = stride;
+
+	/*
+	 * The DSI block is still running from LK.  Map it so we can report
+	 * what timing LK actually programmed and, when a 90 Hz boot was
+	 * requested, shorten VFP to the stock 90 Hz value.  A 60 Hz boot
+	 * leaves the register untouched.
+	 */
+	sdev->dsi_base = devm_ioremap(&pdev->dev, PMOSFB_DSI0_PHYS,
+				      PMOSFB_DSI0_SIZE);
+	if (!sdev->dsi_base) {
+		pr_warn("pmosfb: could not iomap DSI0; refresh override unavailable\n");
+	} else {
+		pmosfb_dsi_log_timing(sdev);
+		if (sdev->refresh_hz != 60)
+			pmosfb_dsi_set_vfp(sdev, sdev->refresh_hz);
+	}
 
 	drm_dbg(dev, "display mode={" DRM_MODE_FMT "}\n", DRM_MODE_ARG(&sdev->mode));
 	drm_dbg(dev, "framebuffer format=%p4cc, size=%dx%d, stride=%d byte\n",
@@ -841,7 +972,7 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 		return ERR_PTR(ret);
 
 	spin_lock_init(&sdev->vblank_lock);
-	sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / PMOSFB_VBLANK_HZ);
+	sdev->vblank_period = ns_to_ktime(NSEC_PER_SEC / sdev->refresh_hz);
 	sdev->vblank_enabled = false;
 	hrtimer_init(&sdev->vblank_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	sdev->vblank_timer.function = pmosfb_vblank_timer_cb;
@@ -849,6 +980,9 @@ static struct pmosfb_device *pmosfb_device_create(struct drm_driver *drv,
 	drm_mode_config_reset(dev);
 
 	pmosfb_backlight_init(sdev, pdev);
+
+	pmosfb_sdev = sdev;
+	pmosfb_refresh_hz = sdev->refresh_hz;
 
 	return sdev;
 }
@@ -889,6 +1023,8 @@ static void pmosfb_remove(struct platform_device *pdev)
 	struct drm_device *dev = &sdev->dev;
 
 	pmosfb_vblank_stop(sdev);
+	if (pmosfb_sdev == sdev)
+		pmosfb_sdev = NULL;
 	drm_dev_unplug(dev);
 }
 
