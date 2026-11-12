@@ -2709,9 +2709,12 @@ XFER_ERROR:
 	return IRQ_HANDLED;
 }
 
-/* Safety net from the verified IRQ fix: if the TDDI leaves INT latched LOW
- * while idle (no touch being reported), do one clean event-buffer drain to
- * release the line.  Runs every 5 s; never resets or re-flashes the MCU. */
+/* Idle safety net: only touch the MCU when INT is actually asserted.
+ * The raw INT line idles LOW and pulses HIGH for data-ready; a drain read
+ * while the line is low is unsolicited SPI traffic during firmware idle
+ * scan, which correlated with 90 Hz scan-engine halts.  Read the event
+ * buffer only if the line is stuck HIGH (a genuinely missed edge).
+ * Runs every 5 s; never resets or re-flashes the MCU. */
 static void nvt_idle_check_func(struct work_struct *work)
 {
 	uint8_t point_data[POINT_DATA_LEN + 1] = {0};
@@ -2719,12 +2722,12 @@ static void nvt_idle_check_func(struct work_struct *work)
 	if (!ts || !bTouchIsAwake)
 		goto reschedule;
 
-	if (gpio_is_valid(ts->irq_gpio) && gpio_get_value(ts->irq_gpio) == 0) {
+	if (gpio_is_valid(ts->irq_gpio) && gpio_get_value(ts->irq_gpio) == 1) {
 		static unsigned int drain_logs;
 
 		if (drain_logs < 5) {
 			drain_logs++;
-			NVT_LOG("INT latched LOW during idle, releasing via drain read\n");
+			NVT_LOG("INT asserted during idle, releasing via drain read\n");
 		}
 		mutex_lock(&ts->lock);
 		point_data[0] = 0x00;
