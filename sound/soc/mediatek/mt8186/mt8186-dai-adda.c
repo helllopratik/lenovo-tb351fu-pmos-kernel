@@ -598,8 +598,17 @@ static int mtk_dai_adda_hw_params(struct snd_pcm_substream *substream,
 			regmap_write(afe->regmap, AFE_ADDA_PREDIS_CON0, 0);
 			regmap_write(afe->regmap, AFE_ADDA_PREDIS_CON1, 0);
 
-			regmap_write(afe->regmap,
-				     AFE_ADDA_DL_SRC2_CON0, dl_src2_con0);
+			/*
+			 * Preserve the DAPM-owned DL source enable bit (bit 0).
+			 * The "ADDA Playback Enable" supply sets it, and
+			 * clearing it here silences playback whenever
+			 * hw_params runs on an already-powered ADDA backend
+			 * (for example, a card profile switch during playback).
+			 */
+			regmap_update_bits(afe->regmap,
+					   AFE_ADDA_DL_SRC2_CON0,
+					   ~(u32)DL_2_SRC_ON_CTL_PRE_MASK_SFT,
+					   dl_src2_con0);
 			regmap_write(afe->regmap,
 				     AFE_ADDA_DL_SRC2_CON1, dl_src2_con1);
 

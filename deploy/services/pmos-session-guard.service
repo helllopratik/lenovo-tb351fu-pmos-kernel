@@ -1,0 +1,11 @@
+[Unit]
+Description=Auto-recover Phosh VT and layer-surface state
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pmos-session-guard.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

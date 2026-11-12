@@ -192,6 +192,7 @@ struct nvt_ts_data {
 	struct input_dev *input_dev;
 	struct delayed_work nvt_fwu_work;
 	struct delayed_work poll_work;
+	struct delayed_work idle_check_work;
 	struct task_struct *poll_task;
 	uint16_t addr;
 	int8_t phys[32];
@@ -268,6 +269,7 @@ struct nvt_ts_data {
 #endif
 	/* --- bring-up diagnostics (touch under simpledrm) --- */
 	int prev_finger_cnt;
+	uint8_t prev_pen_active;
 	u64 diag_frames;            /* SPI 108-byte frames read successfully */
 	u64 diag_touch_frames;      /* frames carrying at least one active finger */
 	u64 diag_spi_errors;        /* failed CTP_SPI_READ attempts */

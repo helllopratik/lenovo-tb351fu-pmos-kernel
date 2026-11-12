@@ -1,3 +1,5 @@
-# Lenovo Tab Plus (TB351FU) Pen Digitizer TouchScreen mapping
-# Parity with stock Android /system/usr/idc/NVTCapacitivePen.idc (touch.deviceType = touchScreen)
-ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="NVTCapacitivePen", ENV{ID_INPUT_TOUCHSCREEN}="1"
+# Lenovo Tab Plus (TB351FU) pen digitizer: expose as a tablet/stylus device,
+# NOT as a touchscreen. NVTCapacitivePen reports ABS_MT + BTN_TOOL_PEN, so the
+# default ID_INPUT_TOUCHSCREEN=1 makes libinput treat every pen report as a
+# finger and mask it. ID_INPUT_KEY=0 suppresses the stray KEY_STYLUS event.
+ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="NVTCapacitivePen", ENV{ID_INPUT_TOUCHSCREEN}="0", ENV{ID_INPUT_KEY}="0", ENV{ID_INPUT_TABLET}="1"

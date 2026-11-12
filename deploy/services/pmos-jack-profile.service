@@ -1,0 +1,13 @@
+[Unit]
+Description=Follow ACCDET headphone jack and switch PulseAudio card profile
+After=pulseaudio.service
+Wants=pulseaudio.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pmos-jack-profile.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
