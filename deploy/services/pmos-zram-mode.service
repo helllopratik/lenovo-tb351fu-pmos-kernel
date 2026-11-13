@@ -1,0 +1,13 @@
+[Unit]
+Description=pmOS zram swap user choice (Mobile Settings)
+After=systemd-user-sessions.service
+ConditionPathExists=/usr/bin/zramstart
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pmos-zram-mode.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+- name: Memory
+  weight: 25
+  sections:
+    - name: Swap
+      weight: 0
+      settings:
+        - name: Compressed RAM swap (zram)
+          help: |-
+            Stores swapped pages compressed in RAM instead of on storage.
+            Keeps more applications resident and can avoid out-of-memory
+            kills. Disable to run without swap.
+          type: boolean
+          backend: gsettings
+          key: org.postmarketos.Zram.enabled

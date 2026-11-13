@@ -1,0 +1,13 @@
+#!/usr/sbin/nft -f
+
+table inet filter {
+	chain input {
+
+		# DHCPv4 client replies: server port 67 -> client port 68.
+		# Conntrack normally marks these established, but broadcast
+		# replies can arrive as a new flow; allow them explicitly so
+		# enabling the firewall cannot break DHCP.
+		ip protocol udp udp sport bootps udp dport bootpc accept \
+			comment "accept DHCPv4 client replies"
+	}
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.postmarketos.Zram" path="/org/postmarketos/Zram/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Enable compressed RAM swap</summary>
+      <description>
+        When enabled, postmarketos-zram-swap.service creates a zram block
+        device, formats it as swap and activates it. Disabling it stops and
+        removes the zram swap device. The setting is exposed in Mobile
+        Settings and applied by pmos-zram-mode.service.
+      </description>
+    </key>
+  </schema>
+</schemalist>
