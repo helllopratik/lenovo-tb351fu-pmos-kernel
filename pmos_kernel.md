@@ -871,13 +871,15 @@ Mechanism (all hardware-software verified in crashed-boot journal + in-tree driv
 
 ## 7. Later stuff — remaining devices, their intros & how to continue
 
-### 7.1 Sensors (accel / gyro / magnetometer / ALS) — READY, UNVERIFIED
+### 7.1 Sensors (accel / gyro / magnetometer / ALS) — AUTO-LOADED, UNVERIFIED LIVE
 - MT6789 has NO discrete sensor I2C/USB devices — motion sensors hang off the **SCP (System Companion Processor / SensorHub)** co-processor (why "No sensor detect" appears without it).
 - Kernel user stack (all SIX load with **0 missing symbols** currently):
   `mtk-mbox.ko → mtk_rpmsg_mbox.ko → mtk_tinysys_ipi.ko → scp.ko → hf_manager.ko → sensorhub.ko` → exposes `/dev/hf_manager` (+ Android `sensord` equivalents later).
+- **Deployed path:** `deploy/scripts/init_sensors.sh` loads the chain in dependency order, waits for `/dev/hf_manager`, and writes `/run/pmos_sensors_status` plus `/tmp/pmos_sensors_init.log`. `init_wifi_sensors.sh` §8 launches it in the background so a slow/failed SCP probe cannot delay the graphical boot.
+- `ts_scp_common.ko` is deliberately **not** loaded: it would hand the Novatek touch controller (AP `spi2`) over to SCP. Touch stays on the AP; only the real sensors use SCP.
 - `scp.ko` needed 11 stubs — all in `drivers/soc/mediatek/pmos-aee-stub.c` (`aed_common_exception_api`, `aee_get_mode`, `gpio_dump_regs_range`, `mt_get_fmeter_freq`, `mtk_emimpu_*`, `register_3way_semaphore_notifier`).
 - Firmware needed by scp: `remoteproc_scp` (name/FW) — in staging bundle under `firmware/`. ConnSys SW side needs `soc2_2_ram_*`, `WIFI_RAM_CODE_soc2_2_1d_1.bin`/`1e_1`, `WMT_SOC.cfg`, `wifi.cfg` (all staged).
-- **How to verify after WiFi session settles:** load the six modules in the chain order; grep `scp|hf_manager|tinysys|rpmsg` in `journalctl -b`; look for `/dev/hf_manager` and `/sys/bus/iio/devices/iio:device*`; run `getevent`/`cat` once userland is set up. If nothing: check whether scp.ko probe stalls on the SCP power domain (needs the pd_stub token domain IDs; find subsys id via `journalctl` prints or the `scpsys-disable-unused` nodes in dts) and whether remoteproc firmware request succeeds (`/lib/firmware/remoteproc_scp`).
+- **How to verify on a live boot:** check `/run/pmos_sensors_status` and `/tmp/pmos_sensors_init.log`; grep `scp|hf_manager|tinysys|rpmsg` in `journalctl -b`; look for `/dev/hf_manager`, `/proc/sensor_info`, and SCP binding under `/sys/bus/platform/drivers/scp/`. If nothing: check whether scp.ko probe stalls on the SCP power domain (needs the pd_stub token domain IDs; find subsys id via `journalctl` prints or the `scpsys-disable-unused` nodes in dts) and whether remoteproc firmware request succeeds (`/lib/firmware/remoteproc_scp`).
 - Modules + firmware all pre-staged in **`/mnt/Nvme/slot_b_bundle/staging.tar.gz`** (staging/setup script installs to `/lib/modules/extra` + `/lib/firmware`).
 
 ### 7.2 Bluetooth — Issue 41: ROM decode done, host driver module MISSING, blocked on slot_a pull (chronology 30, 2026-11-01)
