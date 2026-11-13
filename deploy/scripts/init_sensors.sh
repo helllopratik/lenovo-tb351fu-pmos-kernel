@@ -1,0 +1,89 @@
+#!/bin/sh
+# SCP sensorhub bring-up for Lenovo TB351FU (MT6789).
+#
+# The accelerometer/gyro (bmi3xy) and ambient light sensor (mn29xxx) sit
+# behind the MTK SCP, not on the AP buses.  The Android vendor stack exposes
+# them through scp.ko -> hf_manager.ko -> sensorhub.ko and /dev/hf_manager.
+#
+# ts_scp_common.ko is intentionally NOT loaded: it hands the Novatek touch
+# controller off to SCP.  We keep touch on the AP (spi2) and only use SCP for
+# the real sensors.
+#
+# Runs in the background from init_wifi_sensors.sh so a slow/failed SCP probe
+# can never delay the graphical boot.  Log: /tmp/pmos_sensors_init.log and
+# PMOSSENS lines in kmsg.
+
+KMSG=/dev/kmsg
+MODDIR=/lib/modules/extra
+STATUS=/run/pmos_sensors_status
+
+kp() { echo "PMOSSENS: $*" > "$KMSG" 2>/dev/null; }
+exec > /tmp/pmos_sensors_init.log 2>&1
+
+kp "=== SCP sensor stack starting ==="
+echo NOK > "$STATUS"
+
+load_one() {
+    mod="$1"
+    # /proc/modules reports hyphens as underscores (mtk-mbox -> mtk_mbox).
+    name=$(echo "$mod" | tr '-' '_')
+    if grep -q "^${name} " /proc/modules 2>/dev/null; then
+        kp "$mod already loaded"
+        return 0
+    fi
+    if [ ! -f "$MODDIR/$mod.ko" ]; then
+        kp "WARN $mod.ko missing"
+        return 1
+    fi
+    if insmod "$MODDIR/$mod.ko"; then
+        kp "$mod loaded"
+        return 0
+    fi
+    kp "WARN $mod insmod failed rc=$?"
+    return 1
+}
+
+# Dependency order required by the vendor modules.
+for m in mtk-mbox mtk_rpmsg_mbox mtk_tinysys_ipi scp hf_manager sensorhub; do
+    load_one "$m" || kp "continuing after $m failure"
+done
+
+# scp.ko binds to 10500000.scp and sensorhub creates /dev/hf_manager.
+n=0
+while [ "$n" -lt 40 ]; do
+    [ -e /dev/hf_manager ] && break
+    sleep 0.5
+    n=$((n + 1))
+done
+
+if [ -e /sys/bus/platform/drivers/scp/10500000.scp ]; then
+    kp "SCP platform device bound"
+else
+    kp "WARN SCP platform device not bound"
+fi
+
+if [ -e /dev/hf_manager ]; then
+    kp "STATUS=HF_MANAGER_UP after ${n} polls"
+    ls -l /dev/hf_manager >> /tmp/pmos_sensors_init.log 2>&1
+    echo OK > "$STATUS"
+else
+    kp "STATUS=NO_HF_MANAGER after ${n} polls"
+fi
+
+# Read-only proof of what SCP advertised.  Keep this light: no debugfs.
+if [ -d /proc/sensor_info ]; then
+    for f in /proc/sensor_info/*; do
+        [ -f "$f" ] || continue
+        echo "== $f" >> /tmp/pmos_sensors_init.log
+        cat "$f" >> /tmp/pmos_sensors_init.log 2>&1
+    done
+fi
+if [ -f /proc/hf_manager ]; then
+    echo "== /proc/hf_manager" >> /tmp/pmos_sensors_init.log
+    cat /proc/hf_manager >> /tmp/pmos_sensors_init.log 2>&1
+fi
+
+# Keep the useful kernel lines, not the whole ring.
+dmesg 2>/dev/null | grep -iE 'scp|sensorhub|hf_manager|tinysys' | tail -60 \
+    >> /tmp/pmos_sensors_init.log 2>&1
+kp "=== SCP sensor stack probe complete ==="

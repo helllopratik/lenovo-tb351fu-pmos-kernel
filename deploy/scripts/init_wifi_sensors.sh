@@ -69,6 +69,27 @@ if [ ! -d /sys/module/mt6789_pd_stub ]; then
 fi
 
 # ------------------------------------------------------------------
+# 0.1  MT6789 audio SPM power domain (AFE / speakers)
+#    pmos_afe_dt_fixup removes the AFE power-domains and pd_stub only
+#    exposes domains 0..7, so SPM domain 0xB (audio) is never powered.
+#    Result: every AFE register reads 0 and the AW88395 amps report NOCLKS.
+#    Module pokes SPM 0x10006000 using values decoded from stock
+#    mtk-scpsys-mt6789.ko (ctl 0x358, sta BIT(22), sram BIT(8)/BIT(12)).
+# ------------------------------------------------------------------
+if [ ! -d /sys/module/mt6789_audio_pd ]; then
+    if insmod /lib/modules/extra/mt6789_audio_pd.ko; then kp "audio_pd loaded"; else kp "WARN audio_pd insmod failed"; fi
+fi
+
+# Mainline mt8186-afe-clk wires DAI_I2S3 to the I2S4 MCK tree
+# (top_i2s4_m_sel + top_apll12_div4).  MT6789 I2S3 needs its own tree
+# (top_i2s3_m_sel -> top_apll12_div3 = 6.144 MHz).  Without it the AFE
+# registers look alive but no MCLK reaches the AW88395 amps (NOCLKS),
+# and playback/PCM stalls (Firefox YouTube endless buffering).
+if [ ! -d /sys/module/mt6789_i2s3_mclk ]; then
+    if insmod /lib/modules/extra/mt6789_i2s3_mclk.ko; then kp "i2s3_mclk loaded"; else kp "WARN i2s3_mclk insmod failed"; fi
+fi
+
+# ------------------------------------------------------------------
 # 0.5  XO-EARLY: CONN 26 MHz XO via PMIC CW00 BEFORE any connsys module.
 #      CW00 (0x788): 0x4e1d (CO_BUF, EN=0) -> 0x4e05 (SW, EN=1).
 #      early_xo.py is PMIC-only (NO CONSYS MMIO - cold-AHB sync external
@@ -337,8 +358,15 @@ if [ -x /usr/local/bin/init_bt.sh ]; then
     /usr/local/bin/init_bt.sh > /tmp/pmos_bt_init.log 2>&1 &
 fi
 
-# 8. SensorHub / SCP disabled to protect SPI2 touch bus
-kp "SensorHub / SCP modules disabled to prevent SPI2 timeouts"
+# 8. SCP sensor hub (bmi3xy accelerometer/gyro, mn29xxx ALS).
+#    Loaded in the background so a slow/failed SCP probe cannot delay boot.
+#    ts_scp_common.ko is deliberately not loaded: touch stays on AP spi2.
+if [ -x /usr/local/bin/init_sensors.sh ]; then
+    kp "Starting SCP sensor stack (background)"
+    /usr/local/bin/init_sensors.sh >/dev/null 2>&1 &
+else
+    kp "WARN init_sensors.sh missing; SCP sensors not started"
+fi
 # 9. Active pen / game mode: MATCH STOCK NO-PEN STEADY STATE.
 #    Stock init.stylus.rc writes support_pen=1 then game_mode=1 at boot,
 #    but Lenovo PalmGuard immediately drops game_mode to 0 while no pen
