@@ -54,7 +54,21 @@ echo "Initramfs created: $ARTIFACTS_DIR/pmos_initramfs_194.cpio ($(du -h "$ARTIF
 echo "========================================================================"
 echo " 2. Compiling Linux Kernel (GKI 6.12, LLVM 20)"
 echo "========================================================================"
+# Re-apply the TB351FU feature fragment (nftables + built-in zram) before
+# every build so these options cannot be lost by a config regeneration.
+"$COMMON_DIR/apply_pmos_kernel_config.sh"
 make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 -j$(nproc) Image
+
+# Built-in modules (notably zram) are invisible to kmod unless the
+# per-release modules.builtin index exists.  Stage it for the installer
+# and for the running device; zramstart calls modprobe and would abort
+# under 'set -e' without it.
+KERNEL_RELEASE="$(cat "$OUT_DIR/include/config/kernel.release")"
+MODULES_BUILTIN_DIR="$ARTIFACTS_DIR/modules_builtin/$KERNEL_RELEASE"
+mkdir -p "$MODULES_BUILTIN_DIR"
+cp "$OUT_DIR/modules.builtin" "$OUT_DIR/modules.builtin.modinfo" "$MODULES_BUILTIN_DIR/"
+echo "$KERNEL_RELEASE" > "$ARTIFACTS_DIR/modules_builtin/kernel.release"
+echo "Built-in module index staged for $KERNEL_RELEASE"
 
 echo "========================================================================"
 echo " 3. Packaging boot.img, init_boot.img, and vbmeta.img"
@@ -104,7 +118,9 @@ echo "========================================================================"
 # - Slot B Init_Boot: /dev/block/by-name/init_boot_b
 # - Slot B VBMeta:    /dev/block/by-name/vbmeta_b (+ vbmeta_system_b, vbmeta_vendor_b)
 # Note: Slot A partitions are NEVER modified.
-if adb get-state 1>/dev/null 2>&1; then
+if [ "${NO_FLASH:-0}" = "1" ]; then
+  echo "NO_FLASH=1 set; images are packaged but Slot B was NOT flashed."
+elif adb get-state 1>/dev/null 2>&1; then
   echo "Pushing images to device..."
   adb push "$ARTIFACTS_DIR/boot_latest.img" /data/local/tmp/boot_latest.img
   adb push "$ARTIFACTS_DIR/init_boot_latest.img" /data/local/tmp/init_boot_latest.img

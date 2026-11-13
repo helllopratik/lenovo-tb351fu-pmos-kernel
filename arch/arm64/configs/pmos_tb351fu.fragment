@@ -1,0 +1,29 @@
+# Lenovo Tab Plus (TB351FU) pmOS kernel features.
+#
+# Keep these settings in a fragment so they survive a clean rebuild of
+# out/.config.  Apply with:
+#   ./apply_pmos_kernel_config.sh
+#
+# nftables: userspace nft was installed but every rule failed with
+# "Error: Could not process rule: Not supported" because the kernel
+# netfilter tables framework was absent.  The stock /etc/nftables.nft
+# needs inet tables, conntrack state matching and reject-with-icmpx;
+# NAT/MASQ are enabled for NetworkManager hotspot/shared mode.
+CONFIG_NF_TABLES=y
+CONFIG_NF_TABLES_INET=y
+CONFIG_NF_TABLES_IPV4=y
+CONFIG_NF_TABLES_IPV6=y
+CONFIG_NFT_CT=y
+CONFIG_NFT_REJECT=y
+CONFIG_NFT_REJECT_INET=y
+CONFIG_NFT_NAT=y
+CONFIG_NFT_MASQ=y
+CONFIG_NFT_COMPAT=y
+
+# zram: the previous config kept zram and zsmalloc as modules but no
+# zram module was ever installed, so the swap service failed.  Build
+# both in so zramstart works on every boot without module packaging.
+# zstd is added as a backend because zramstart defaults to zstd.
+CONFIG_ZRAM=y
+CONFIG_ZSMALLOC=y
+CONFIG_ZRAM_BACKEND_ZSTD=y

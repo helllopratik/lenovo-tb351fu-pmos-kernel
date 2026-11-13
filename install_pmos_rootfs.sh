@@ -134,6 +134,7 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
          "$PAYLOAD_DIR/etc/phosh" \
          "$PAYLOAD_DIR/etc/sysctl.d" \
          "$PAYLOAD_DIR/etc/systemd/system.conf.d" \
+         "$PAYLOAD_DIR/etc/nftables.d" \
          "$PAYLOAD_DIR/usr/share/glib-2.0/schemas" \
          "$PAYLOAD_DIR/usr/share/postmarketos-tweaks" \
          "$PAYLOAD_DIR/data_host"
@@ -141,6 +142,19 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
 # Extract out-of-tree hardware modules into usr/lib/modules/extra
 mkdir -p "$PAYLOAD_DIR/usr/lib/modules/extra"
 tar -xf "$DEPLOY_DIR/modules.tar.xz" -C "$PAYLOAD_DIR/usr/lib/modules/extra"
+
+# Built-in module index for the target kernel.  zram is built in, but
+# zramstart calls modprobe; without modules.builtin + depmod, kmod
+# reports "Module zram not found" and the script aborts under set -e.
+BUILTIN_STAGE="$SCRIPT_DIR/../artifacts/modules_builtin"
+if [ -f "$BUILTIN_STAGE/kernel.release" ]; then
+  KREL="$(cat "$BUILTIN_STAGE/kernel.release")"
+  mkdir -p "$PAYLOAD_DIR/usr/lib/modules/$KREL"
+  cp "$BUILTIN_STAGE/$KREL/modules.builtin" \
+     "$BUILTIN_STAGE/$KREL/modules.builtin.modinfo" \
+     "$PAYLOAD_DIR/usr/lib/modules/$KREL/"
+  echo "$KREL" > "$PAYLOAD_DIR/usr/lib/modules/.pmos_kernel_release"
+fi
 
 # Extract proprietary vendor firmware into usr/lib/firmware
 if [ -f "$DEPLOY_DIR/firmware.tar.xz" ]; then
@@ -200,6 +214,18 @@ cp "$DEPLOY_DIR/configs/org.postmarketos.Display.gschema.xml" \
    "$PAYLOAD_DIR/usr/share/glib-2.0/schemas/"
 cp "$DEPLOY_DIR/configs/postmarketos-tweaks/display.yml" \
    "$PAYLOAD_DIR/usr/share/postmarketos-tweaks/"
+
+# zram swap choice: GSettings schema + Mobile Settings panel.  The
+# pmos-zram-mode daemon starts/stops postmarketos-zram-swap.service.
+cp "$DEPLOY_DIR/configs/org.postmarketos.Zram.gschema.xml" \
+   "$PAYLOAD_DIR/usr/share/glib-2.0/schemas/"
+cp "$DEPLOY_DIR/configs/postmarketos-tweaks/zram.yml" \
+   "$PAYLOAD_DIR/usr/share/postmarketos-tweaks/"
+
+# nftables: allow DHCPv4 client replies so the default-drop ruleset
+# cannot break DHCP.  SSH is already allowed by 50_sshd.nft.
+cp "$DEPLOY_DIR/configs/nftables.d/10_dhcp-client.nft" \
+   "$PAYLOAD_DIR/etc/nftables.d/"
 
 # Copy ALSA UCM2 audio configurations
 if [ -d "$DEPLOY_DIR/configs/ucm2" ]; then
@@ -299,6 +325,21 @@ adb shell "su -c '
   else
     echo \"WARNING: glib-compile-schemas missing; Display settings panel may not register\"
   fi
+
+  echo \"Building built-in module index...\"
+  if [ -f /data/local/tmp/chk/usr/lib/modules/.pmos_kernel_release ]; then
+    KREL=$(cat /data/local/tmp/chk/usr/lib/modules/.pmos_kernel_release)
+    echo \"  kernel release: $KREL\"
+    chroot /data/local/tmp/chk /usr/sbin/depmod -a \"$KREL\" >/dev/null 2>&1 || true
+  fi
+
+  echo \"Configuring nftables and zram services...\"
+  # The kernel now has nftables built in; the stock ruleset already
+  # allows SSH and the extra DHCPv4 client rule is in /etc/nftables.d.
+  chroot /data/local/tmp/chk /usr/bin/systemctl enable nftables.service >/dev/null 2>&1 || true
+  # zram is controlled by pmos-zram-mode.service (Mobile Settings), so
+  # the stock swap unit must not start it unconditionally at boot.
+  chroot /data/local/tmp/chk /usr/bin/systemctl disable postmarketos-zram-swap.service >/dev/null 2>&1 || true
 
   echo \"Unmounting and syncing...\"
   umount /data/local/tmp/chk
