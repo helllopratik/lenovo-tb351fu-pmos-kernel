@@ -70,7 +70,16 @@ if [ -e /dev/hf_manager ]; then
     # Expose the SCP sensors through IIO.  The bridge creates one hf_manager
     # client and republishes accel/gyro/ALS as iio:deviceN, which lets udev
     # start iio-sensor-proxy for Phosh auto-brightness and rotation.
-    load_one pmos_sensor_bridge || kp "WARN sensor bridge not loaded"
+    if load_one pmos_sensor_bridge; then
+        # udev may start iio-sensor-proxy when the first IIO device appears,
+        # before all three exist.  Re-trigger after the bridge has finished
+        # and restart the proxy if it already enumerated a partial set.
+        sleep 1
+        udevadm trigger --subsystem-match=iio 2>/dev/null
+        systemctl try-restart iio-sensor-proxy 2>/dev/null
+    else
+        kp "WARN sensor bridge not loaded"
+    fi
 else
     kp "STATUS=NO_HF_MANAGER after ${n} polls"
 fi
