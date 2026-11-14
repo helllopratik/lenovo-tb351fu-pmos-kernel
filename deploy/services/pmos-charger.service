@@ -1,0 +1,12 @@
+[Unit]
+Description=pmOS charger stack and battery charge cap
+After=pmos-hardware-init.service
+Wants=pmos-hardware-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/init_charger.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

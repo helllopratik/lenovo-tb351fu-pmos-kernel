@@ -1,0 +1,36 @@
+#!/bin/sh
+# Select the battery charge cap: "full" or a percentage (50-100).
+# Persists the choice in /etc/pmos-charge-cap.conf and applies it immediately.
+CONF=/etc/pmos-charge-cap.conf
+SYS=/sys/kernel/pmos_charge_cap/limit
+
+if [ $# -ne 1 ]; then
+	echo "usage: $0 full|<50-100>" >&2
+	exit 1
+fi
+
+val=$1
+case "$val" in
+	full|100) val=full ;;
+	[5-9][0-9]) ;;
+	*) echo "usage: $0 full|<50-100>" >&2; exit 1 ;;
+esac
+
+if [ ! -w "$SYS" ]; then
+	echo "pmos_charge_cap is not loaded (pmos-charger.service)" >&2
+	exit 1
+fi
+
+echo "$val" > "$SYS" || exit 1
+
+if [ -f "$CONF" ]; then
+	if grep -q '^LIMIT=' "$CONF"; then
+		sed -i "s/^LIMIT=.*/LIMIT=$val/" "$CONF"
+	else
+		echo "LIMIT=$val" >> "$CONF"
+	fi
+else
+	printf '# Charge limit: full or a percentage (50-100), e.g. 80\nLIMIT=%s\nINPUT_UA=900000\n' "$val" > "$CONF"
+fi
+
+echo "charge limit set to $val"
