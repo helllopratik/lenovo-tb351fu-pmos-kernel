@@ -192,8 +192,8 @@ def handle(gesture, usage, cfg, uinput, dry_run):
     log(f"{gesture} (0x{usage:04x}) -> key {key} (mode={mode})")
 
 
-def open_pen_devices(device_hint):
-    fds = {}
+def scan_pen_devices(device_hint):
+    found = {}
     for path in sorted(glob.glob("/dev/input/event*")):
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
@@ -201,20 +201,25 @@ def open_pen_devices(device_hint):
             continue
         name = device_name(fd)
         if device_hint in name:
-            fds[fd] = name
-            log(f"watching {path}: {name}")
+            found[path] = (fd, name)
         else:
             os.close(fd)
-    return fds
+    return found
 
 
-def rescan(fds, device_hint):
-    new = open_pen_devices(device_hint)
-    for fd in list(fds):
-        if fd not in new:
+def refresh_devices(devices, device_hint):
+    """Pick up newly connected pen nodes without reopening watched ones."""
+    found = scan_pen_devices(device_hint)
+    for path, (fd, name) in found.items():
+        if path in devices:
             os.close(fd)
-            del fds[fd]
-    fds.update(new)
+        else:
+            devices[path] = fd
+            log(f"watching {path}: {name}")
+    for path in list(devices):
+        if path not in found:
+            os.close(devices.pop(path))
+            log(f"pen device removed: {path}")
 
 
 def main():
@@ -259,18 +264,21 @@ def main():
     last_scan = {}
     replay_fd = None
 
+    devices = {}  # path -> fd
+    replay_fd = None
+
     if args.replay:
         replay_fd = os.open(args.replay, os.O_RDONLY)
-        fds = {replay_fd: "replay"}
+        devices["<replay>"] = replay_fd
         log(f"replaying {args.replay}")
     else:
-        fds = open_pen_devices(args.device)
-        if not fds:
+        refresh_devices(devices, args.device)
+        if not devices:
             log("pen not connected yet; waiting for it to appear")
 
     try:
         while running:
-            readable = list(fds)
+            readable = list(devices.values())
             try:
                 ready, _, _ = select.select(readable, [], [], 2.0)
             except InterruptedError:
@@ -278,9 +286,10 @@ def main():
 
             if not ready:
                 if replay_fd is None:
-                    rescan(fds, args.device)
+                    refresh_devices(devices, args.device)
                 continue
 
+            fd_to_path = {fd: path for path, fd in devices.items()}
             for fd in ready:
                 try:
                     data = os.read(fd, EVENT_STRUCT.size * 64)
@@ -291,11 +300,13 @@ def main():
                     if fd == replay_fd:
                         running = False
                         break
+                    path = fd_to_path.get(fd)
+                    if path is not None:
+                        devices.pop(path, None)
                     os.close(fd)
-                    fds.pop(fd, None)
                     buffers.pop(fd, None)
                     last_scan.pop(fd, None)
-                    log("pen device removed")
+                    log(f"pen device removed: {path}")
                     continue
 
                 buf = buffers.get(fd, b"") + data
@@ -321,7 +332,7 @@ def main():
     finally:
         if uinput is not None:
             uinput.close()
-        for fd in list(fds):
+        for fd in list(devices.values()):
             os.close(fd)
 
     return 0
