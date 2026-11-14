@@ -28,6 +28,8 @@
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
 #include <linux/of.h>
+#include <linux/slab.h>
+#include <linux/byteorder/generic.h>
 #include <linux/clk.h>
 #include <linux/workqueue.h>
 #include <linux/io.h>
@@ -870,3 +872,70 @@ static int __init pmos_scp_dt_fixup(void)
 	return 0;
 }
 early_initcall(pmos_scp_dt_fixup);
+
+/*
+ * The stock charger nodes read the PMIC VBUS voltage through
+ * io-channel-names = "pmic_vbus", but their io-channels entries point at
+ * AUXADC channel 2, which is BAT_TEMP.  VCDT is channel 1 on the MT6358.
+ * Point every charger consumer at the real VCDT channel before the PMIC
+ * AUXADC and the charger devices are populated, otherwise the charger
+ * stack interprets battery temperature as a (negative, overflowing) VBUS
+ * voltage.
+ */
+static const char * const pmos_vbus_chg_compat[] = {
+	"southchip,sc89890h",
+	"mtk,hl7015",
+	"sc,sc854x-master",
+};
+
+static int __init pmos_charger_vbus_dt_fixup(void)
+{
+	struct device_node *adc, *np;
+	phandle adc_ph;
+	int i;
+
+	adc = of_find_compatible_node(NULL, NULL, "mediatek,mt6358-auxadc");
+	if (!adc)
+		return 0;
+
+	adc_ph = adc->phandle;
+	of_node_put(adc);
+
+	for (i = 0; i < ARRAY_SIZE(pmos_vbus_chg_compat); i++) {
+		for_each_compatible_node(np, NULL, pmos_vbus_chg_compat[i]) {
+			struct property *prop;
+			u32 cur[2];
+			u32 *cells;
+
+			if (of_property_match_string(np, "io-channel-names",
+						     "pmic_vbus") < 0)
+				continue;
+
+			/* Already fixed (node may match two compatibles). */
+			if (!of_property_read_u32_array(np, "io-channels", cur,
+							ARRAY_SIZE(cur)) &&
+			    cur[0] == adc_ph && cur[1] == 1)
+				continue;
+
+			prop = kzalloc(sizeof(*prop), GFP_KERNEL);
+			cells = kzalloc(2 * sizeof(*cells), GFP_KERNEL);
+			if (!prop || !cells) {
+				kfree(prop);
+				kfree(cells);
+				continue;
+			}
+
+			cells[0] = cpu_to_be32(adc_ph);
+			cells[1] = cpu_to_be32(1);	/* MT6358_AUXADC_VCDT */
+			prop->name = "io-channels";
+			prop->value = cells;
+			prop->length = 2 * sizeof(*cells);
+			of_update_property(np, prop);
+			pr_emerg("PMOS-CHG: %s pmic_vbus -> auxadc channel 1\n",
+				 of_node_full_name(np));
+		}
+	}
+
+	return 0;
+}
+early_initcall(pmos_charger_vbus_dt_fixup);
