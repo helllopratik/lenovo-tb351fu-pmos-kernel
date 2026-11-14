@@ -134,6 +134,11 @@ Replay a captured event stream: `--replay <binary struct input_event file>`.
 Pair the pen once with `bluetoothctl`; the daemon rescans `/dev/input/event*`
 and picks it up whenever it reconnects.
 
+**Validated on pmOS boot `084c7d15…` (2026-11-14):** the daemon decoded
+`MSC_SCAN 0x0c0600/01/02` and the user confirmed single = play/pause,
+double = next track, triple = previous track. It creates the uinput keyboard
+`pmos-pen-daemon` (event7) and watches event5/event6.
+
 ---
 
 ## 5. Network & Debugging Interface
