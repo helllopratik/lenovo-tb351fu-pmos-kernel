@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""pmos-pen-daemon: Lenovo Tab Pen Plus gesture dispatcher.
+
+The pen firmware detects clicks itself and reports them as vendor Consumer
+usages 0x0c0600-0x0c0605 in HID report ID 2 (one bit per gesture).  Linux
+hid-input does not know those usages: it maps the bit field to KEY_UNKNOWN and
+preserves the usage in an MSC_SCAN event.  This daemon watches the pen's evdev
+node, decodes MSC_SCAN, and dispatches the gesture either to a configured shell
+command or to a virtual keyboard key injected through /dev/uinput.
+
+Live capture (stock Android, event12 "Lenovo Tab Pen Plus Consumer Control"):
+
+    EV_MSC MSC_SCAN 000c0601
+    EV_KEY KEY_UNKNOWN DOWN
+    EV_KEY KEY_UNKNOWN UP
+
+Gesture map:
+
+    0x0c0600 single     0x0c0601 double    0x0c0602 triple
+    0x0c0603 long       0x0c0604 press     0x0c0605 spare
+
+Config: /etc/pmos-pen-daemon.conf (simple KEY=VALUE lines):
+
+    MODE=media|presentation|camera|none
+    SINGLE_CMD=...      # optional per-gesture shell command override
+    DOUBLE_CMD=...
+    TRIPLE_CMD=...
+    LONG_CMD=...
+    PRESS_CMD=...
+
+Run with --dry-run to log actions without creating a uinput device, and
+--replay FILE to process a binary stream of struct input_event records (used
+for offline tests).
+"""
+
+import argparse
+import fcntl
+import glob
+import os
+import select
+import signal
+import struct
+import subprocess
+import sys
+import time
+
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_MSC = 0x04
+SYN_REPORT = 0x00
+MSC_SCAN = 0x04
+KEY_UNKNOWN = 240
+BTN_MISC = 0x110
+
+USAGE_GESTURE = {
+    0x0C0600: "single",
+    0x0C0601: "double",
+    0x0C0602: "triple",
+    0x0C0603: "long",
+    0x0C0604: "press",
+    0x0C0605: "spare",
+}
+
+# Media/presentation/camera actions mirror the stock PenBridge remote-control
+# behaviour: media single/double = play-pause/next, presentation single/double
+# = page down/page up, camera single = volume down (shutter).
+MODE_KEYS = {
+    "media": {
+        "single": 164,   # KEY_PLAYPAUSE
+        "double": 163,   # KEY_NEXTSONG
+        "triple": 165,   # KEY_PREVIOUSSONG
+        "long": 113,     # KEY_MUTE
+        "press": 164,    # KEY_PLAYPAUSE
+    },
+    "presentation": {
+        "single": 109,   # KEY_PAGEDOWN
+        "double": 104,   # KEY_PAGEUP
+    },
+    "camera": {
+        "single": 114,   # KEY_VOLUMEDOWN (stock shutter key)
+        "double": 212,   # KEY_CAMERA
+    },
+    "none": {},
+}
+
+CONFIG_PATH = os.environ.get("PMOS_PEN_CONF", "/etc/pmos-pen-daemon.conf")
+EVENT_STRUCT = struct.Struct("llHHi")  # struct input_event on 64-bit Linux
+EVIOCGNAME = 0x80000000 | (256 << 16) | (0x45 << 8) | 0x06
+
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_DEV_SETUP = 0x405C5503
+
+running = True
+
+
+def log(msg):
+    print("pmos-pen-daemon: " + msg, flush=True)
+
+
+def load_config(path):
+    cfg = {"MODE": "media"}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                cfg[key.strip()] = value.strip().strip("\"'")
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log(f"cannot read {path}: {exc}")
+    return cfg
+
+
+def device_name(fd):
+    try:
+        raw = fcntl.ioctl(fd, EVIOCGNAME, b"\0" * 256)
+    except OSError:
+        return ""
+    return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+
+
+class UInput:
+    """Minimal uinput keyboard used to inject one key per gesture."""
+
+    def __init__(self, keys):
+        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
+        for key in sorted(set(keys)):
+            fcntl.ioctl(self.fd, UI_SET_KEYBIT, key)
+        setup = struct.pack(
+            "HHHH80sI", 0x03, 0x1209, 0x0001, 1, b"pmos-pen-daemon", 0
+        )
+        fcntl.ioctl(self.fd, UI_DEV_SETUP, setup)
+        fcntl.ioctl(self.fd, UI_DEV_CREATE, 0)
+        time.sleep(0.1)
+        log("uinput device created")
+
+    def _emit(self, ev_type, code, value):
+        os.write(self.fd, EVENT_STRUCT.pack(0, 0, ev_type, code, value))
+
+    def tap(self, key):
+        self._emit(EV_KEY, key, 1)
+        self._emit(EV_SYN, SYN_REPORT, 0)
+        time.sleep(0.02)
+        self._emit(EV_KEY, key, 0)
+        self._emit(EV_SYN, SYN_REPORT, 0)
+
+    def close(self):
+        try:
+            fcntl.ioctl(self.fd, UI_DEV_DESTROY, 0)
+        finally:
+            os.close(self.fd)
+
+
+def run_command(command, gesture, usage):
+    env = os.environ.copy()
+    env["PEN_GESTURE"] = gesture
+    env["PEN_USAGE"] = f"0x{usage:04x}"
+    try:
+        subprocess.Popen(command, shell=True, env=env, start_new_session=True)
+        log(f"{gesture}: started command: {command}")
+    except OSError as exc:
+        log(f"{gesture}: command failed: {exc}")
+
+
+def handle(gesture, usage, cfg, uinput, dry_run):
+    command = cfg.get(gesture.upper() + "_CMD", "")
+    if command:
+        if dry_run:
+            log(f"{gesture} (0x{usage:04x}) -> dry-run command: {command}")
+        else:
+            run_command(command, gesture, usage)
+        return
+
+    mode = cfg.get("MODE", "media").lower()
+    key = MODE_KEYS.get(mode, {}).get(gesture)
+    if key is None:
+        log(f"{gesture} (0x{usage:04x}) -> no action (mode={mode})")
+        return
+
+    if dry_run or uinput is None:
+        log(f"{gesture} (0x{usage:04x}) -> key {key} (mode={mode}, dry-run)")
+        return
+
+    uinput.tap(key)
+    log(f"{gesture} (0x{usage:04x}) -> key {key} (mode={mode})")
+
+
+def open_pen_devices(device_hint):
+    fds = {}
+    for path in sorted(glob.glob("/dev/input/event*")):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        name = device_name(fd)
+        if device_hint in name:
+            fds[fd] = name
+            log(f"watching {path}: {name}")
+        else:
+            os.close(fd)
+    return fds
+
+
+def rescan(fds, device_hint):
+    new = open_pen_devices(device_hint)
+    for fd in list(fds):
+        if fd not in new:
+            os.close(fd)
+            del fds[fd]
+    fds.update(new)
+
+
+def main():
+    global running
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="log actions instead of injecting keys")
+    parser.add_argument("--replay", metavar="FILE",
+                        help="read struct input_event records from FILE and exit")
+    parser.add_argument("--config", default=CONFIG_PATH)
+    parser.add_argument("--device", default="Lenovo Tab Pen Plus",
+                        help="evdev device-name substring")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    mode = cfg.get("MODE", "media").lower()
+    if mode not in MODE_KEYS:
+        log(f"unknown MODE={mode}, using none")
+        mode = "none"
+        cfg["MODE"] = mode
+
+    uinput = None
+    if not args.dry_run and not args.replay:
+        keys = MODE_KEYS[mode].values()
+        if MODE_KEYS[mode]:
+            try:
+                uinput = UInput(keys)
+            except OSError as exc:
+                log(f"cannot create uinput device: {exc}")
+                return 1
+
+    def stop(_signum, _frame):
+        global running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    buffers = {}
+    last_scan = {}
+    replay_fd = None
+
+    if args.replay:
+        replay_fd = os.open(args.replay, os.O_RDONLY)
+        fds = {replay_fd: "replay"}
+        log(f"replaying {args.replay}")
+    else:
+        fds = open_pen_devices(args.device)
+        if not fds:
+            log("pen not connected yet; waiting for it to appear")
+
+    try:
+        while running:
+            readable = list(fds)
+            try:
+                ready, _, _ = select.select(readable, [], [], 2.0)
+            except InterruptedError:
+                continue
+
+            if not ready:
+                if replay_fd is None:
+                    rescan(fds, args.device)
+                continue
+
+            for fd in ready:
+                try:
+                    data = os.read(fd, EVENT_STRUCT.size * 64)
+                except OSError:
+                    data = b""
+
+                if not data:
+                    if fd == replay_fd:
+                        running = False
+                        break
+                    os.close(fd)
+                    fds.pop(fd, None)
+                    buffers.pop(fd, None)
+                    last_scan.pop(fd, None)
+                    log("pen device removed")
+                    continue
+
+                buf = buffers.get(fd, b"") + data
+                offset = 0
+                while offset + EVENT_STRUCT.size <= len(buf):
+                    _sec, _usec, ev_type, code, value = EVENT_STRUCT.unpack_from(
+                        buf, offset)
+                    offset += EVENT_STRUCT.size
+
+                    if ev_type == EV_MSC and code == MSC_SCAN:
+                        last_scan[fd] = value
+                        if args.verbose:
+                            log(f"MSC_SCAN 0x{value:08x}")
+                    elif (ev_type == EV_KEY and value == 1
+                          and code in (KEY_UNKNOWN, BTN_MISC)):
+                        usage = last_scan.get(fd)
+                        gesture = USAGE_GESTURE.get(usage)
+                        if gesture:
+                            handle(gesture, usage, cfg, uinput, args.dry_run)
+                        elif args.verbose and usage is not None:
+                            log(f"unhandled usage 0x{usage:08x}")
+                buffers[fd] = buf[offset:]
+    finally:
+        if uinput is not None:
+            uinput.close()
+        for fd in list(fds):
+            os.close(fd)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

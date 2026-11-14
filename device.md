@@ -80,6 +80,60 @@ The tablet operates in a dual-boot A/B layout without repartitioning internal UF
    * Polling kthread (`nvt_ts_poll`) removed to keep touch purely interrupt-driven with zero SPI bus contention.
    * `libinput list-devices` binds cleanly to `NVTCapacitiveTouchScreen` on `seat0`.
 
+### 4.1 Bluetooth pen (Lenovo Tab Pen Plus) gestures
+
+The BT pen is a BLE HID device (`17ef:617f`). Its firmware detects
+single/double/triple/long/press itself and sends them in HID report ID 2 as
+vendor Consumer usages `0x0c0600`–`0x0c0605` (one bit each). Linux hid-input
+does not know these usages, so it reports `KEY_UNKNOWN` and preserves the usage
+in `MSC_SCAN`.
+
+Live capture on stock Android (`/dev/input/event12`,
+"Lenovo Tab Pen Plus Consumer Control"):
+
+```
+EV_MSC MSC_SCAN 000c0601
+EV_KEY KEY_UNKNOWN DOWN
+EV_KEY KEY_UNKNOWN UP
+```
+
+`/dev/input/event11` ("Lenovo Tab Pen Plus Mouse") stays silent for button
+gestures, so **no hidraw reader is needed** — evdev + `MSC_SCAN` is sufficient.
+The AES pen on `NVTCapacitivePen` is a separate input node.
+
+`pmos-pen-daemon` (deploy `scripts/pmos-pen-daemon`) decodes the usage and
+either injects a key through `/dev/uinput` or runs a per-gesture shell command:
+
+| Usage | Gesture | Default (`MODE=media`) |
+|---|---|---|
+| `0x0c0600` | single | `KEY_PLAYPAUSE` |
+| `0x0c0601` | double | `KEY_NEXTSONG` |
+| `0x0c0602` | triple | `KEY_PREVIOUSSONG` |
+| `0x0c0603` | long | `KEY_MUTE` |
+| `0x0c0604` | press | `KEY_PLAYPAUSE` |
+| `0x0c0605` | spare | — |
+
+`MODE=presentation` gives page down/page up on single/double; `MODE=camera`
+gives volume down (shutter) and camera launch; `MODE=none` disables keys.
+`SINGLE_CMD`…`PRESS_CMD` in `/etc/pmos-pen-daemon.conf` override any gesture
+with a shell command.
+
+Install when slot B is running:
+
+```sh
+sudo install -m755 pmos-pen-daemon /usr/local/bin/
+sudo install -m644 pmos-pen-daemon.conf /etc/
+sudo install -m644 pmos-pen-daemon.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pmos-pen-daemon
+journalctl -u pmos-pen-daemon -f
+```
+
+Test without injecting keys: `pmos-pen-daemon --dry-run --verbose`.
+Replay a captured event stream: `--replay <binary struct input_event file>`.
+Pair the pen once with `bluetoothctl`; the daemon rescans `/dev/input/event*`
+and picks it up whenever it reconnects.
+
 ---
 
 ## 5. Network & Debugging Interface
