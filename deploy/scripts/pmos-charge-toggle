@@ -1,0 +1,42 @@
+#!/bin/sh
+# One-tap charge-limit toggle for the Phosh app grid / favorites row.
+# Switches between the 80 % cap and full charging, reusing pmos-charge-cap.
+SYS=/sys/kernel/pmos_charge_cap/limit
+CLI=/usr/local/bin/pmos-charge-cap
+NOTIFY=/usr/bin/notify-send
+
+notify() {
+	[ -x "$NOTIFY" ] && "$NOTIFY" -i battery-good-symbolic -a "Charge limit" "$1" "$2" 2>/dev/null
+}
+
+if [ ! -r "$SYS" ]; then
+	notify "Charge limit unavailable" "The charger stack is not loaded yet."
+	exit 1
+fi
+
+cur=$(cat "$SYS")
+if [ "$cur" = "full" ]; then
+	new=80
+else
+	new=full
+fi
+
+if ! sudo -n "$CLI" "$new" >/dev/null 2>&1; then
+	notify "Charge limit" "Failed to set the limit. Check sudo and pmos-charger.service."
+	exit 1
+fi
+
+cap=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)
+charging=$(cat /sys/kernel/pmos_charge_cap/charging 2>/dev/null)
+
+if [ "$new" = "full" ]; then
+	msg="Charging to full (battery ${cap}%)."
+else
+	if [ "$charging" = "0" ]; then
+		msg="Limited to ${new}%; charging paused at ${cap}%."
+	else
+		msg="Limited to ${new}%; charging until ${new}% (now ${cap}%)."
+	fi
+fi
+
+notify "Charge limit: $new" "$msg"

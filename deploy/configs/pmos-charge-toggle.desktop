@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Charge limit
+Comment=Switch battery charging between 80% and full
+Exec=/usr/local/bin/pmos-charge-toggle
+Icon=battery-good-symbolic
+Terminal=false
+Categories=Settings;
+Keywords=battery;charge;limit;charging;
+X-Purism-FormFactor=Workstation;Mobile;
+StartupNotify=false
