@@ -1,7 +1,6 @@
 [Unit]
 Description=pmOS charger stack and battery charge cap
-After=pmos-hardware-init.service
-Wants=pmos-hardware-init.service
+After=basic.target
 
 [Service]
 Type=oneshot
