@@ -66,6 +66,11 @@ if [ -e /dev/hf_manager ]; then
     kp "STATUS=HF_MANAGER_UP after ${n} polls"
     ls -l /dev/hf_manager >> /tmp/pmos_sensors_init.log 2>&1
     echo OK > "$STATUS"
+
+    # Expose the SCP sensors through IIO.  The bridge creates one hf_manager
+    # client and republishes accel/gyro/ALS as iio:deviceN, which lets udev
+    # start iio-sensor-proxy for Phosh auto-brightness and rotation.
+    load_one pmos_sensor_bridge || kp "WARN sensor bridge not loaded"
 else
     kp "STATUS=NO_HF_MANAGER after ${n} polls"
 fi

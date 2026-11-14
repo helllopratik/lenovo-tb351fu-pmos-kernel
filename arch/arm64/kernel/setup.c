@@ -836,3 +836,37 @@ static int __init pmos_afe_dt_fixup(void)
 	return 0;
 }
 early_initcall(pmos_afe_dt_fixup);
+
+/*
+ * The vendor SCP DVFS driver calibrates ULPOSC2 from the AP through secure
+ * monitor calls and the CCF fmeter.  Neither is usable under pmOS, so the
+ * calibration fails, scp_helper.c resets the SCP, and the cycle repeats
+ * forever.  scp.ko supports a bypass mode selected with
+ * "scp-dvfs-disable = <1>"; in that mode the calibration loop, the PMIC
+ * sshub regulators and the PLL requests are all skipped.  Force it here so
+ * the SCP stays up and can serve the sensorhub.
+ */
+/* DT cells are big-endian; the driver reads this as a u32. */
+static u8 pmos_scp_dvfs_disable[4] = { 0x00, 0x00, 0x00, 0x01 };
+
+static struct property pmos_scp_dvfs_disable_prop = {
+	.name	= "scp-dvfs-disable",
+	.length	= sizeof(pmos_scp_dvfs_disable),
+	.value	= pmos_scp_dvfs_disable,
+};
+
+static int __init pmos_scp_dt_fixup(void)
+{
+	struct device_node *np;
+
+	np = of_find_compatible_node(NULL, NULL, "mediatek,scp-dvfs");
+	if (!np)
+		return 0;
+
+	of_update_property(np, &pmos_scp_dvfs_disable_prop);
+	pr_emerg("PMOS-SCP: set scp-dvfs-disable=1 on %s\n",
+		 of_node_full_name(np));
+	of_node_put(np);
+	return 0;
+}
+early_initcall(pmos_scp_dt_fixup);
