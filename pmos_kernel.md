@@ -452,7 +452,7 @@ The kernel renders real-time dmesg logs onto the LCD panel using the `fbtext.c` 
 *(Synchronized from /home/user/Desktop/pmos_later_stuff.md)*
 
 # TB351FU postmarketOS Port — Later Stuff & Full Session Handoff
-**Written:** 2026-10-30 · **Updated:** 2026-11-14 (charger VBUS live-validated on slot B; 80 %/full charge cap deployed; sensor-bridge retry validated) · **Audience:** any AI agent or human continuing the Lenovo TB351FU port1FU (MT6789 / Helio G99) postmarketOS port.
+**Written:** 2026-10-30 · **Updated:** 2026-11-15 (GNSS live on slot B with on-demand socket activation and EPO-assisted TTFF; Panfrost live; user-selectable 50–99 %/full charge GUI; charger VBUS live-validated; sensor-bridge retry validated) · **Audience:** any AI agent or human continuing the Lenovo TB351FU port1FU (MT6789 / Helio G99) postmarketOS port.
 **Companion docs (read alongside, do not replace):**
 - `PMOS_TB351FU_PORTING_GUIDE.md` — Issues 1–31 (what WORKS today), build/flash commands.
 - `TB351FU_COMPLETE_DEVICE_GUIDE.md` — hardware architecture, slot switching commands (§7.3), diag cheatsheet (§9).
@@ -466,9 +466,11 @@ The kernel renders real-time dmesg logs onto the LCD panel using the `fbtext.c` 
 | Display / phosh / touch / audio (8× JBL AW88395) / battery % / charging / reboot / buttons | **WORKING** (see porting guide §4 status table, build #346) |
 | **WiFi/BT CONSYS bring-up** | **≈50% THERE — chip ALIVE for the first time (v12+v7 boot `996bca62`: chipid trio `(0x1)/(0x8a00)/(0x8a00)` PASSES, `0x180b1010=0x100c0000`); v13 outcome (boot `3e08464c`): the deployed 8-byte adie-getter patch (`mov w0,#0x6631`) WORKED — RomPatch path now RUNS — but op‑34's own `srh_rom_patch` chip query never gets an answer (6 s `wait signal timeout`) → `failed to get patch (type: 0, ret: -1)` → `-7`. Full ROMpatch chain white-boxed; v14 TEST RESULT (boot alive, full journal `/tmp/opencode/ko/v14_journal_full.txt` 22261 lines): stock pre-chain now passes through **`CONSYS-HW-PWR-ON, finish(0)` @25.036 s — new milestone** — then NEW wall `wmt_core_stp_init(822):turn on SDIO_FUNC_STP func fail (-8)` @26.60 s (16× `hif_sdio_stp_on:no supported func probed` + `id(11) iRet:-8` → `opfunc_pwr_on(1221):wmt_core_stp_init fail (-10)`). ROOT CAUSE FULLY DECODED: the SET‑HIF arg was WRONG — `0x14` (low nibble 4) = hifType 1 **SDIO**, not BTIF (v14's comment mislabeled it; final decode: nibble 4=SDIO, 3=BTIF, 1=UART; high nibble 1/2 = co_clock) — stp_init ran the FIRST‑TIME SDIO arm and probed an SDIO client func that does not exist on this DT. `wmt_core_stp_init` branch table fully decoded (1=SDIO first‑time arm, 2=BTIF stock arm → `wmt_core_hw_check`, 0=UART); HIF_CONF op chain decoded (ioctl → opId 0 → opfunc_hif_conf → `gMtkWmtCtx+0x34` = ONLY runtime setter; ioctl sets `hif_info` latch ⇒ once/boot). **v15 = ONE value: SET‑HIF arg `0x14` → `0x13` (BTIF + co‑clock 1, ROMpatch bytes unchanged) — DEPLOYED on device (`/root/wmtshim.py` corrected docstring + `/usr/local/bin/init_wifi_sensors.sh` v15 comments, py_compile/sh -n OK), awaiting user reboot.** Next queued obstacle after the wall = missing `/soc/wifi@18000000` DT node (`mediatek,wifi`, stock‑DTB‑present, pmOS‑absent) for wlan0 — no live OF overlay (`CONFIG_OF_OVERLAY is not set`); options = boot‑DTB repack vs register‑platform‑device helper module (`mtk_axi_probe ret: 0` already seen without the node). = chronology 21 + Issue 36.** **v15 LIVE RESULT (2026‑11‑01, chronology 19): SET‑HIF `0x13` IS CORRECT — the full BTIF front chain ran and kernel‑side STP state ended stock‑identical (mode=8 / is_enable=1; conf‑gate bit2 set by stp_open); the wall moved HOST‑side: `Rx REG_EVT fail!(0) len(0,16)` @23.030 s right after `mtk_wcn_btif_open` — the v15 shim closed its stpwmt fd after every ioctl ⇒ last‑close set gWmtClose=1 ⇒ the rx path shed the chip REG EVT. v16 (fix A: forked forever‑fd‑holder) CRASHED THE BOOT (console pstore ends t≈34.26 s mid‑flood, no oops; kmsg pstore record lost by the follow‑on slot_a boot). Slot_a runtime + pulled stock `/vendor/bin/wmt_launcher` decode (chronology 21): stock HOLDS the fd for the process lifetime AND CONSUMES it (blocking poll→read≤0x100 watchdog; single close only on re‑init) ⇒ v16's sleep‑only holder (never reads = kernel rx queue with no consumer) is the prime crash suspect; **v17 = holder upgraded to stock's poll(500 ms)→read(0x100) drain loop + O_RDWR|O_NOCTTY + chip‑id probe 0x8004a00c, STAGED (masters updated, device not yet redeployed), next slot_b boot must suppress the aw88395 flood and peek kmsg pstore 0x48170000 immediately on any crash.** History: v8/v6 oops (t≈24.25 s external abort in `polling_consys_chipid_mt6789_gen+0x4c`) root-caused to pd_stub pre-powering the CONN island at MODULE LOAD (~13 s early) → poisoned chip-id under early XO. **v9** removed that load-time call (6 bytes) → boot no longer crashes, but chip-id read `0x0` clean-fail: **genpd bug** — the stub registers its 8 domains `pm_genpd_init(..., is_off=FALSE)` = *assume powered-on* → `pm_runtime_get_sync()` sees "on" and never runs the `power_on` callback → SPM poke never executes (SPM `0x10006304` stuck `0x12` vs success `0x0d`; get_sync 2.7 ms; zero `CONN ctl` prints). **v10** (10 bytes: `is_off=TRUE` at `.init.text+0x114`) collided with a SECOND stub quirk — each domain also sets `GENPD_FLAG_ALWAYS_ON` (=4, `mov w27,#4` @`.init.text+0xec`) and genpd **rejects** is_off=TRUE+ALWAYS_ON: every v10 boot printed `PM: always-on PM domain mt6789-scpsys.X is not on` ×8 → `of_genpd_add_provider_onecell failed: -22` → cleanup `pm_genpd_remove` → **NULL-deref oops in `genpd_remove+0x118`** (journal-traced via pmOS loop-mount; boots 5990cd47 & 67521131 + RAM pstore `/tmp/devpull/pstore_raw_v10crash.bin`; system survives the oops but genpd never registers → "crashed" to the user). **v11** (11 bytes vs v8 = v9's 6 + v10's 4 + 1: clear the ALWAYS_ON flag, `5280009b→5280001b` @`.init.text+0xec`; script `/tmp/opencode/ko/patch_pd_stub_v11.py`, sha256 `3dddf2c8e8a059dd36691fa04f98949a2c27e513d02a2db84775334818bafb70`) → attach succeeds AND callback runs. Deployed 20:58 into `$MNT/lib/modules/extra/` (ro-mounted rootfs write-under-Android verified); v9 on-device at `/root/…v9_installed.ko`, v10 at `/data/local/tmp/…v10_installed.ko`. Next-boot go/no-go: **no** `always-on PM domain` warnings + **no oops** (genpd line absent entirely), `PMOSWIFI: pd_stub loaded`, then at ~26 s `pm_runtime_get_sync()` takes ~0.5-3 s with `CONN ctl pre = 0x…` / `CONN ctl post = 0x…, sta=0x…bc2` prints, then `Consys HW version id(0x100c0000), retry(10)` + passes `(0x1)` `(0x8a00)` `(0x8a00)`; `CONN PWR_ACK timeout (sta=…)` = poke-stage failure; journal `journalctl -b` + RAM pstore peek (`0x48090000 0xE0000`) both viable forensics now (journald captures the oops to disk if the boot lives past insmod). **v12+v7 TEST RESULT (boot `996bca62`, 2026-10-31 evening): fingerprint CONFIRMED through `readback 0x4e25` + all `v12ccif` prints + `0x180b1010=0x100c0000` (chip ALIVE) + chip-id trio PASS; then NEW wall `can not go into idle loop!` → -7 (see chronology item 16 + Issue 33). If the v13 getter patch works, expect: `[RomPatch]`/`go into idle loop pass`/`0x18002600(0x1d1e)`/`REG-CTRL finish`/`PWR-ON finish(0)`/`wmt_core_hw_check hwcode(0x6789)`/`wlan0`. If RomPatch starts but errors, check the `/vendor/firmware/…**.bin` path resolution in pmOS (stock kernel opens that absolute dir).** **v16+fixA BOOT2 RESULT (2026‑11‑01, chronology 20/22): boot CRASHED before sshd — oops now FULLY DECODED: `connadp.ko connectivity_export_dump_thread_state` walks the pmOS process list with STOCK‑built task_struct offsets; trigger = the ROUTINE rx‑timeout diagnostic in `wmt_ctrl_rx` (an rx window (500 ms) with no data ⇒ warn‑print + `wmt_lib_cmd_pre_rx_timeout_dump` + `osal_dump_thread_state("btif_rxd")`); on the pmOS 6.12.23 kernel layout the first load `[init_task+0x638]` (stock `tasks.next` offset) returns 0 ⇒ NULL walk ⇒ read abort at hardcoded `comm` offset `+0x2d8` (x0=0x2d8, x19=−0x638, lr `…dump_thread_state+0x8c [connadp]`, t≈33.03 s). = Issue 37.** **v17 + connadp‑neuter DEPLOYED OFFLINE from slot_a (2026‑11‑01, chronology 23): pmOS rootfs = ext4 img `/data/pmos/rootfs.img` inside Android f2fs `/data` (sdc64); deployment via losetup loop47 + ext4 mount (NO ssh needed): `/root/wmtshim.py` md5 `831aa3ee…` (v17 drain holder), `/usr/local/bin/init_wifi_sensors.sh` v17 (4 `v17:` markers; `/root/aw_flood_suppress` flag touched), `/lib/modules/extra/connadp.ko` entry‑ret neuter md5 `737ca9fb…` (stock backup `/root/connadp_orig.ko` md5 `1b945471…`); persistent pmOS journal for boot ‑1 pulled to host. NEXT = user: (1) BEFORE reboot optionally BootROM‑peek boot2 kmsg pstore `0x48170000` (last copy unpulled — every new boot overwrites it); (2) slot_a Wi‑Fi/BT toggle canary; **(3) slot_b v17 TEST BOOT RESULT (2026‑11‑01, chronology 25): boot2‑crash class CLOSED LIVE — the boot survived end‑to‑end (no oops, zero `dump_thread_state`/`__pi_strncmp` faults; connadp neuter + v17 drain holder worked exactly as decoded), pre‑chain repeated (chipid trio, RomPatch ×3, `PWR‑ON finish(0)` @25.03) and SET‑HIF was CONSUMED (pOp opid‑0 D‑fields `2,0,0,1` @25.02 = conf payload [conf\[0\]=2 ✓BTIF, +4=0, +8=0, **conf+0xC=1**]) — then the NEW wall = Issue 38: opid‑0 "configure FM comm" FAILS its 1‑byte verify (wire: our HCI Tx `01 05 02 00 02 01` vs chip event `02 05 02 00 00 02` — byte5 = the FM‑comm byte: ours 1, chip strap 2) → assert retry storm → `sw_init` ret ‑27 → pwr‑on fail. ROOT CAUSE decoded from BOTH binaries (disassembly‑driven, no MTK sources): the FM‑comm byte = **conf+0xC (gDevWmt+0x104)** written ONLY by `wmt_lib_set_hif`'s tail @0x2d568 as `(arg>>4)&0xF`; SOLE opid‑0 producer = the SET‑HIF ioctl case @0x4e58c in `WMT_unlocked_ioctl` (hif_info latch @0x4eff0 = replay suppression); byte NOT cfg‑settable (62‑key WMT_SOC.cfg table, no fm/stp key); STOCK launcher packs **arg = (bss+1500<<8) | (fm=bss+968=2)<<4 | (stp=bss+964=3) = `0x23`** (default stamps @0x6d44/@0x582c; packers @0x60e8–0x60f0; high byte inert; bss+608 = the fd, NOT the arg); **v18 FIX = one nibble `0x13`→`0x23`, DEPLOYED via ssh (device `/root/wmtshim.py` md5 `dbb338e8d0bc625541a6d4c6639b17ee`, v17 backup `/root/wmtshim.py.v17` md5 `831aa3ee…`; shim self‑reports "v18 holder"); mid‑boot dry run proved the hif_info replay latch (warn + ret 0, ZERO chip traffic) ⇒ the REAL 0x23 send happens on the NEXT boot. NEXT = user reboot; positive fingerprint = pOp D‑fields `2,0,0,2`, NO "configure FM comm" assert, `sw_init` proceeds (`wmt_core_hw_check:hwcode (0x6789)` → bt_tssi prints → wlanProbe → wlan0).** **v18 VERIFIED LIVE (2026‑11‑01, chronology 26): `luncher set STP mode success!` + `opfunc_hif_conf(1182):WMT HIF info added` + ZERO `configure FM comm` lines anywhere — the Issue‑38 FM wall is CLOSED; the whole stock sw_init chain then ran identical (PWR‑ON finish(0) → `wmt_core_hw_check:hwcode (0x6789)` → `options = 7080ca8` → soc_ver_check E1 `0x8a00/0x8a00`, patch `_e1` → bt_tssi → epa → calibration start/end + backup `gBTCalResultSize=552` → coex prints) — no assert storm, no crash, no pstore peek needed. NEW WALL = Issue 39: at the wifi‑on op the WMT core never gets the wlan callbacks — `wmt_func_wifi_on(805):WMT-FUNC: null pointer mtk_wcn_wlan_probe` → `opfunc_wlan_probe … ret(-2)` → `OPID(32) type(3) fail` → STATUS=NOK @29.16 (clean teardown, no wedge). ROOT CAUSE: in `wlan_drv_gen4m_6789.ko` the ONLY writer of the 6 wmt cb globals is `mtk_wcn_wmt_wlan_reg`, called only from `register_plat_connsys_cbs` whose two callers (`wlanNvramBufHandler`, `wlanOnPreAdapterStart`) are ORPHANED DEAD CODE (zero relocations anywhere); FIX = 4-byte `.ko` patch — `init_module`'s dead `nop` @0x133a34 replaced by `bl register_plat_connsys_cbs` (word `0x9402712f` @file 0x18da34) — DEPLOYED via ssh (device `/lib/modules/extra/wlan_drv_gen4m_6789.ko` md5 `a0feceba…`, stock backup `.prepatch` md5 `3f80ca70…`). NEXT = user reboot; expect `(805)` ABSENT → `OPID(32) type(3) ok` → `wlan0`; probable follow‑up wall = firmware‑download chain. The OLD "missing `/soc/wifi@18000000` mediatek,wifi DT node" theory is OBSOLETE for this build (wlan init runs fully without the node). = Issue 39.** **v19 VERIFIED LIVE (2026‑11‑01, chronology 28): ISSUE‑39 FIX WORKED — `wlan0` UP for the FIRST TIME (`initcall ret=0` @24.84 s, `PMOSWIFI: STATUS=WLAN0-UP (bring-up complete)` @30.34 s, `(805)` absent, `OPID(32) ok`) — then NEW crash = Issue 40: expanding the wifi panel oopsed (`Internal error: Oops: 0000000096000005 … pc=mtk_cfg80211_set_pmksa+0x64/0x1e0 [wlan]`; console pstore `0x48090000` has it, kmsg `0x48170000` peek pending; journald missed it, system limped on). ROOT‑CAUSED from binaries (chronology 29): `struct cfg80211_ops` FIELD‑OFFSET DRIFT — the module was built against the vendor header with `CONFIG_NL80211_TESTMODE=y` (extra slots `testmode_cmd`@+0x1c0 filled + `testmode_dump`@+0x1c8; trio set/del/flush @+0x1e0/0x1e8/0x1f0 — EXACTLY matching stock `cfg80211_stock.ko`'s nl80211 reads) while our booted 6.12.23 kernel has `TESTMODE not set` ⇒ every field after `rfkill_poll` reads 0x10 lower: kernel `flush_pmksa`@+0x1e0 lands on the module's SET wrapper `mtk_cfg_set_pmksa` 0x11f5ec ⇒ set‑real‑fn deref oops (x19 leftover 0xfffef5ce, `ldr x8,[x3,#8]`, x3=4). FIX = `.ko` RELOCATION SURGERY (stock‑equivalent shim, `.rela.data` bytes only): 23 ABS64 entries of `mtk_cfg_ops` — `testmode_cmd` entry PARKED into the struct's unused tail +0x408, the other 22 SHIFTED −0x10 (set_bitrate 0x1d0→0x1c0 … external_auth 0x358→0x348) so the loaded table matches the kernel's testmode=n layout; `r_info` untouched (verified exactly 23 entries differ, offsets only, no dup slots); DEPLOYED from slot_a via live rootfs remount (device `.ko` md5 `cf16872742baa6d105034e5bb1ee3ece`, backups `.pre40`=`a0feceba` + `.prepatch`=`3f80ca70`). NEXT = user reboot; wifi panel must survive (NO `Internal error:`, wpa_supplicant connects). WARNING for later: a `TESTMODE=y` kernel rebuild REQUIRES reverting this .ko patch (then `.prepatch` is correct as‑is). = Issue 40.** |
 | Sensors (accel/gyro/ALS via SCP SensorHub) | **LIVE (2026-11-14, slot B)** — DVFS bypass + patched `hf_manager.ko` + `pmos_sensor_bridge.ko`; IIO exposes accel/gyro/ALS, `iio-sensor-proxy` verified (lux + rotation) (§7.1) |
-| Charger / VBUS + charge cap | **LIVE (2026-11-14, slot B)** — MT6358 VCDT bit/scale + DT channel fix; vendor `sc8989x` reads 4.834 V; user-selectable 80 %/full cap via `pmos_charge_cap` (CLI + Phosh launcher) (§7.9) |
+| Charger / VBUS + charge cap | **LIVE (2026-11-14/15, slot B)** — MT6358 VCDT bit/scale + DT channel fix; vendor `sc8989x` reads 4.834 V; user-selectable **50–99 %** limit or full charge via the GTK4/Adw `pmos-charge-limit` app (slider + "Charge to full" switch, saved in `/etc/pmos-charge-cap.conf`), plus a quick app-grid toggle that restores the saved percentage; CLI `/usr/local/bin/pmos-charge-cap` (§7.9) |
 | **Bluetooth (Issue 41)** | **MODULE PULLED + DECODED (chronology 30/31) — deploy-then-test in slot_b pending:** the missing `.ko` = **`bt_drv_connac1x.ko`** (md5 `0a641a9e…`, `depends: wmt_drv` only, fixed-char `stpbt` major-192 module param `BT_major`, vermagic `gaaaa486553c8` DDK build of the same 6.12.23 base) — pulled from `/vendor_dlkm/lib/modules` (≡ `/vendor/lib/modules`, 186 entries incl. `gps_drv_stp.ko` + `mtk-btcvsd.ko` also grabbed); module decode COMPLETE, all deps verified `T [wmt_drv]` in stock kallsyms and wmt already loaded; BT_open decode = canary-identical: `wmt_func_on` (`OPID(3) type(0)`)→`stp_is_ready`→`stp_set_bluez(0)` (stock default flag → wmt `.bss+0x30040`)→both event cbs→`g_bt_on=1`→state notify ("MTK Bluetooth Mode")→pm_qos; data path = PLAIN bytes via `mtk_wcn_stp_receive_data/send_data` (STP wrapping is wmt-core↔chip only) ⇒ BlueZ consumes raw H4; **NO in-kernel hci** ⇒ BlueZ `hci0` appears via a pty-bridge shim + `btattach` (same as stock where the Android HAL IS the hci host); ioctls 0x{4004b000,4001b001,4008b004,8008b002/3} all optional (dbg/psm/ic-info); fw-log family (`0xb006` canary family) attaches to the separate `fw_log_bt_*` fops — unused for bring-up. Stock `/vendor/etc/firmware` BT fw set ≡ pmOS staged set (BT_FW.cfg + the two bt hdr bins) = parity ✔. pmOS side READY: `CONFIG_BT` stack in booted kernel, BlueZ 5.86 + `BT_FW.cfg` + `soc2_2_ram_bt_*.bin` staged, btif_drv+wmt_drv load clean, wifi up; ABSENT until deploy: `/dev/stpbt`, rfkill‑BT row, `hci0`. NEXT USER ACTION = return to slot_b → agent deploys `bt_drv_connac1x.ko` to `/lib/modules/extra`, insmods, opens, bridges via pty+btattach (`/sys/class/bluetooth/hci0` + `bluetoothctl list`), then wires `open("/dev/stpbt")` into `init_wifi_sensors.sh` post-wifi-guard (fingerprint = `[MTK-BT]BT_open: WMT turn on BT OK!` + rfkill1 + hci0). |
-| GPS / NFC / Camera / GPU(mali) | Not started (details §7) |
+| GPS (GNSS) | **LIVE (2026-11-15, slot B)** — stock `mnld` in a private mount/PID namespace + HAL/NMEA bridge; GeoClue NMEA-only source; socket activation starts GPS only when a location client asks, with 60 s idle shutdown; real overnight and live outdoor fixes verified, GNOME Maps blue dot confirmed (§7.3) |
+| GPU (Mali-G57 MC2) | **LIVE (2026-11-15, slot B)** — Panfrost modules (`mt6789_mfg_pd.ko`, `gpu-sched.ko`, `panfrost.ko`) load at boot; phoc renders on `Mali-G57 MC2 (Panfrost)`, GLES 3.1 Mesa 26.1.6 (§7.6) |
+| NFC / Camera | Not started (§7.4–7.5) |
 | **Crash auto-recovery trap** | **VERIFIED AGAIN 2026-10-31**: on two v5/v6 wedges the device auto-rebooted out (supervisor SWRST or HW watchdog — either way recovery worked). v7/v8 changed: the wifi supervisor NO LONGER auto-reboots on NOK (see §5 note) — a warm reboot right after a wedge deposits the CONSYS in a dirty state and the next pmOS boot oopses. hbguard + HW watchdog still cover true kernel death. UPower will poweroff the device at ~1% battery ALL BY ITSELF — several of today's "crashes at ~30-36 s" were exactly that (`systemd-logind: poweroff requested from client PID 418 ('upowerd'). Charge to ≥5% (ideally ≥20%) before test boots. |
 
 **Device status vs. boot plan (2026-10-31 night, post boot `996bca62`): pd_stub v11 + early_xo v7 + init script v12 ALL VALIDATED LIVE (chip ALIVE!); `wmt_drv.ko` now v13 ON DEVICE = base `22ba8101…` + 8-byte getter patch (`mov w0,#0x6631` at .text+0x535b4, relocs→NONE) built via `/tmp/opencode/ko/patch_wmt_v13.py` → sha `3b95c8ea…`; base backup at `/root/wmt_drv_base_backup.ko`; rootfs was rw at deploy. Gate: battery ≥20% + explicit user go-ahead → user reboots slot_b → v13 success = chipid trio + **`mtk_wcn_soc_rom_patch_dwn` prints** + `go into idle loop pass, count=[…]` + `0x18002600(0x1d1e)` + `REG-CTRL finish` + `PWR-ON finish(0)` + `wlan0`; likely follow-up trap = firmware `.bin` path (kernel hardcodes `/vendor/firmware/…`) — check journal for file-open errors, symlink/copy if needed.**
@@ -905,8 +907,164 @@ Mechanism (all hardware-software verified in crashed-boot journal + in-tree driv
 **Why blocked:** neither the stock `.ko` nor source exists on host — verified empty: `/home/user/Desktop/pmos/*.ko` (4 files, all wifi-side), `/tmp/opencode/{ko,tarx}` (wmt/connadp/chrdev_wifi/pd stubs only), `/mnt/Nvme/slot_b_bundle/staging*` (BT fw but no module), `stock_vendor_boot` ramdisk modules (182 entries = charger/platform/panel family, `wmt|conn|bt|stp` grep → only `cqhci.ko`), full `/mnt/Nvme .ko` inventory outside `evolutionx`, and the Lenovo ZUI 16.0.02.242 opensource drop symlink at `/mnt/Nvme/tb351fu_opensource_lenovo_zui_…` is **DANGLING** (target `/home/user/Desktop/pmos/tb351fu_opensource_lenovo_zui…` missing).
 **UPDATE chronology 31 (2026-11-01, user rebooted slot_a): THE MODULE IS IN HAND + FULLY DECODED.** `adb` pull of `/vendor_dlkm/lib/modules` (= identical listing to `/vendor/lib/modules`, 186 entries) grabbed: **`bt_drv_connac1x.ko`** (THE stpbt host driver; md5 `0a641a9e00c1e11234024e4c5bf417c0`, 90840 B, `vermagic 6.12.23-android16-5-gaaaa486553c8-4k`, `depends: wmt_drv` only, DDK build; param `BT_major` fixed major = canary 192 via `register_chrdev_region`), plus `gps_drv_stp.ko` (§7.3 GPS) and `mtk-btcvsd.ko` (BT SCO/CVSD audio) at `/tmp/opencode/pull_bt/`. Stock `/vendor/etc/firmware` BT set = `BT_FW.cfg` + `soc2_2_ram_bt_{1d_1,1e_1}_hdr.bin` — identical to the pmOS-staged set (parity ✔). **Full disasm (`kdis.py` → `/tmp/opencode/pull_bt/bt_kdis.txt`):** node `stpbt` (class `stpbt_class`), fops `BT_{read,write,write_iter,poll,unlocked_ioctl,compat_ioctl}` + separate `fw_log_bt_*` (the canary's `0xb006`-family HAL ioctls = fw-log/psm/assert/ic-info — ALL OPTIONAL for bring-up: `0x4004b000`=assert, `0x4001b001`=psm ctrl, `0x4008b004`=dbg save, `0x8008b002/3`=`wmt_ic_info_get(1/3)`→4-byte copy). **BT_open = whole trigger, canary-identical:** `mtk_wcn_wmt_func_on` (`OPID(3) type(0)`) → `mtk_wcn_stp_is_ready` → **`mtk_wcn_stp_set_bluez(0)`** (stock default; `orr w0,wzr,wzr` @0x179c; flag stores at wmt **`.bss+0x30040`**; siblings `set_dbg_mode`@+0x30044 / `set_auto_rst`@+0x30048) → `stp_register_event_cb` + `wmt_msgcb_reg` → `g_bt_on`(`.bss+0x12f8`)=1 → `bt_state_notify(1)` = "Now it's in MTK Bluetooth Mode" → `cpu_latency_qos_update_request(0)` + `alloc_workqueue("pm_qos_task",0x6,1)` (gated by `pm_qos_support` OF property). **Data path: plain bytes to userspace** — `BT_read` = sem-down → `mtk_wcn_stp_receive_data` → copy_to_user; `BT_write` → `send_hci_frame` → `mtk_wcn_stp_send_data`; STP framing lives only wmt-core↔chip ⇒ BlueZ consumes raw H4 directly. **NO in-kernel hci registration in the module** (stock = Android HAL is the HCI host) ⇒ pmOS BlueZ side gets `hci0` via a small pty-bridge shim + `btattach` (ships in the bluez pkg; verify on device). **Symbol completeness double-verified:** stock kallsyms `T [wmt_drv]` covers ALL BT deps (`connsys_log_*` ×6 + `mtk_wcn_stp_*` ×7) and wmt_drv is already loaded in slot_b ⇒ insmods clean under the Issue-22 vermagic relaxation. **NEXT (user back in slot_b):** deploy `/lib/modules/extra/bt_drv_connac1x.ko` (new file; nothing to back up), insmod + open + verify (`OPID(3) type(0) ok`, `WMT turn on BT OK!`, rfkill-BT row, raw-H4 rx) → pty bridge + `btattach` → `hci0` + `bluetoothctl list` → wire `open("/dev/stpbt")` permanently into `init_wifi_sensors.sh` AFTER the wifi success guard.
 
-### 7.3 GPS
-CONSYS core-based GPS (WMT type GPS, no separate SoC IP node in dts). Trigger analogous to WiFi/BT via WMT func ctrl once stack is solid. Low priority; verify `ge0`-ish nodes AFTER stock DTB diff (not in decompiled dts).
+### 7.3 GPS/GNSS — LIVE 2026-11-15 (slot B, on-demand)
+
+**What runs.** The stock Android GNSS daemon `mnld` (`MTK_MNLD_14_1.00`,
+`MNL_VER_26010602ALPS05_8.20_00`) is not recompiled. It runs inside a private
+mount + PID namespace built by `common/deploy/gnss/`:
+
+- Payload from stock slot A (read-only): `/vendor/bin/mnld`, `/vendor/lib64/*`,
+  `/system/lib64/*`, `/vendor/etc/{MNL_Config.xml,mpe.conf}`, and a
+  `runtime-apex.img` ext2 copy of `/apex/com.android.runtime` (Bionic linker /
+  libc). `ld.config.txt` defines the linker namespaces.
+- `shim/lib64/libgpsprops.so` is an `LD_PRELOAD` shim for the Bionic
+  `__system_property_*` ABI; `shim/props.txt` lists the MTK properties it
+  returns (`persist.vendor.connsys.chipid=0x6789`,
+  `vendor.connsys.adie.chipid=0x6631`, `vendor.connsys.driver.ready=yes`,
+  `vendor.service.nvram_init=Ready`, ...).
+- `gps-runtime-inner.sh` bind-mounts `/data` to
+  `/var/lib/tb351fu-gps/data`, the runtime APEX, `/system`, `/vendor`, the
+  optional `/mnt/vendor/nvdata` + `/mnt/vendor/nvcfg`, and the receiver
+  devices (`/dev/stpgps`, `/dev/stpgps2`, `/dev/gps_pwr`, `/dev/gps_emi`,
+  ...), then `chroot`s to `/vendor/bin/mnld`.
+- Persistent state: `/var/lib/tb351fu-gps/data/vendor/gps/{mtkgps.dat,
+  cache.dat,MNL_Config.xml,EPO.DAT,QEPO_BD.DAT,QEPO_GA.DAT,MTKNAV.DAT}`.
+  `EPO.DAT` holds validated MediaTek predicted orbits; the QEPO/MTKNAV files
+  are downloaded when online. `EPO_GR_3_1.DAT`/`.MD5` and `EPOHAL.DAT` are
+  transient download/merge files. `mtkgps.dat` carries receiver state.
+
+**EPO assistance.** `mnld` downloads MediaTek EPO (predicted satellite
+orbits, not a position source) from `vepodownload.mediatek.com` with the
+vendor `libcurl.so`, whose compiled CA path is `/system/etc/security/cacerts`.
+The chroot originally had no certs there, so every HTTPS download failed with
+curl errors 26/60 and EPO stayed empty. Installing the 118 host root certs
+from `/etc/ssl/certs/*.0` fixed it; `QEPO_BD`, `QEPO_GA`, and `MTKNAV`
+downloads now return `res = 0`. Measured TTFF fell from 6 min 32 s on the
+previous no-EPO boot to 13–29 s (17 s and 14 s in later runs), and a fix
+reported 11 satellites at HDOP 1.06. `EPO.DAT` is persistent and current for
+roughly three days; at each start `mnld` logs `EPO file is valid, no need
+update` or re-downloads when expired. A forced-refresh test (move `EPO.DAT`
+aside, connect a client) downloaded, MD5-checked, merged to `EPOHAL.DAT`, and
+rebuilt `EPO.DAT` at 15:21 on 2026-11-15.
+
+**Kernel modules.** Stock vendor modules from slot A
+`/vendor_dlkm/lib/modules`, staged in `/lib/modules/extra/`:
+`gps_pwr.ko` (md5 `b882ab3c74059bb4af30d07bedee087c`, `depends: connadp`) and
+`gps_drv_stp.ko` (md5 `ea280b6b8503e1ab03410168861d7c3c`, `depends: wmt_drv`).
+The deployed `gps_drv_stp.ko` has its 31-byte `vermagic` rewritten from the
+stock `gaaaa486553c8` to the pmOS build `gd2c91f0c3b11`; the unmodified stock
+pull is at the repository root. `tb351fu-gps.service` loads both in
+`ExecStartPre` and read-only mounts `/dev/disk/by-partlabel/nvdata` at
+`/mnt/vendor/nvdata`. It is ordered after `pmos-hardware-init.service` and
+`pmos-wifi-supervisor.service` so `connadp`/`wmt_drv` exist first.
+
+**HAL bridge.** `mnld` speaks the vendor HAL over the abstract `AF_UNIX`
+datagram names `mtk_hal2mnl` (bridge -> daemon) and `mtk_mnl2hal`
+(daemon -> bridge). Messages are little-endian int32 version `1` + command
++ arguments: `101` init, `102` start (float `1.4`), `103` stop, `105` time
+injection (wall-clock ms, boot-time ms, interval ms). NMEA arrives on type
+`104`; type `308` is the version reply. `tablet-gnss-bridge.py` binds
+`mtk_mnl2hal` first, starts `mnld` only after the abstract socket exists, and
+forwards every standard sentence to the raw pty `/run/tablet-gps/nmea` for
+diagnostics. GeoClue gets `/run/tablet-gps/nmea.sock`, where GGA/RMC/GLL/GSA
+are forwarded only when they describe a real fix, VTG is dropped, and the
+receiver's no-fix placeholder `8960.0000,N,00000.0000,E` is impossible to
+surface. Auxiliary standard sentences (GSV, ZDA, TXT, GBS, GNS) are passed
+through.
+
+**On-demand power.** `tb351fu-gps.socket` is enabled at `sockets.target` and
+owns `/run/tablet-gps/nmea.sock` (`0666`). `tb351fu-gps.service` is static
+(no `[Install]`) and starts only when a client connects. The bridge exits
+after 60 s with no clients, sends the HAL stop request, and the wrapper exits
+`0`; `KillMode=control-group` removes `mnld`, `unshare`, and the log sink.
+The socket remains active, so the next location client starts the cycle
+again. There is no receiver or `mnld` process at boot. Do not use
+`pkill -x mnld` or a bare `wait` in the wrapper: `mnld` is PID 1 in its
+private PID namespace, so host `SIGTERM` is ignored and cgroup teardown is
+the reliable path. Stop the socket first when shutting it down manually.
+
+**GeoClue.** `/etc/geoclue/geoclue.conf` is NMEA-only:
+`[network-nmea] enable=true` with
+`nmea-socket=/run/tablet-gps/nmea.sock`; `[ip]`, `[wifi]`, `[static-source]`,
+`[3g]`, `[cdma]`, and `[modem-gps]` are disabled. The pre-change file is
+`geoclue.conf.bak-tb351fu`. GeoClue agents are per-UID: Phosh registers
+`sm.puri.Phosh` for uid 10000, so probes must run as uid 10000 (a root probe
+waits forever) and must request accuracy `EXACT` = `8`. GeoClue exits after
+60 s with no clients and is re-activated on demand.
+
+**Verified 2026-11-14/15.** A real overnight fix, quality 1 with 5
+satellites:
+
+```
+$GNGGA,154725.317,2105.4722,N,07959.4748,E,1,5,1.98,268.2,M,-65.9,M,,*63
+```
+
+That is 21°05.4722′N, 079°59.4748′E (Sakoli area), not the Mumbai GeoIP point.
+A live daytime fix outside on 2026-11-15 12:03:33 IST confirmed the whole
+chain end to end:
+
+```
+$GNGGA,063336.000,2105.4725,N,07959.4677,E,1,5,1.17,249.7,M,-65.9,M,,*6E
+```
+
+GeoClue reported `lat=21.09119, lon=79.99114, acc=1.0` with source `GPS RMC`,
+and GNOME Maps drew the blue location dot. The map had been left panned to
+Mumbai, so the dot was initially off-screen; **Current Location** recentered
+it and the dot became visible. The helper
+`/usr/local/bin/pmos-maps-current-location` (source
+`common/deploy/scripts/pmos-maps-current-location`) clicks that button via
+AT-SPI and must run as the session user (uid 10000), not root. Before the
+fix the receiver emitted a transitional quality-0 position at
+33°36′N 070°53′E; the bridge filtered it, so GeoClue only ever saw the
+quality-1 fix. After the tablet came back indoors the receiver dropped to
+quality 0 / 0 satellites again, which is expected.
+
+The on-demand cycle was verified repeatedly in the journal:
+`NMEA client connected (1)` -> `GPS start requested` -> `no NMEA clients for
+60 s, stopping` -> `GPS stop sent` -> `Deactivated successfully`, with no
+`mnld` left behind and the socket still active. A real GNOME Maps background
+session on 2026-11-15 11:37 started the service; Maps exited at 11:38,
+GeoClue idled out at 11:39, and the bridge/GPS followed, leaving only the
+socket. At a desk with no sky view
+the receiver can report 0 satellites and only the placeholder; the stock
+Android slot A GNSS also failed at this site, so that is an antenna/site
+issue, not a chroot regression. `MTK_GPS_MSG_FIX_READY,GET_RTC_FAIL` at start
+is benign (the overnight and live fixes succeeded with it).
+
+**Files and deploy.** Everything is in `common/deploy/gnss/` with a README
+covering payload provenance, installation, GeoClue, and diagnostics. The
+systemd units are `tb351fu-gps.socket` (enabled) and `tb351fu-gps.service`
+(static). Use `pgrep -f '^/vendor/bin/mnld'`, not `pgrep -x mnld`, and read
+`/run/tb351fu-gps/mnld.log` plus `journalctl -u tb351fu-gps.service -b`.
+
+**Browser location.** GeoClue is system-wide, not Maps-only. Any GeoClue
+client gets the same fixes; GNOME Maps is just the one that was verified.
+Firefox's Linux GeoClue provider can use them too. Chromium/Chrome on Linux
+does not use GeoClue by default: it asks Google's network location service,
+which failed here with `Failed to query location from network service`.
+Chromium 157 has an experimental `LocationProviderManager` portal provider,
+but enabling `LocationProviderManagerMode/PlatformOnly` in the Flatpak build
+crashes the browser (exit status 133) immediately after geolocation starts,
+before any position is returned, so that path is not usable yet. Indoors the
+receiver reports quality 0 / 0 satellites; Android's indoor fix comes from
+WiFi/cell/Bluetooth network location, not raw GNSS, and those sources are
+deliberately disabled here. Enabling only GeoClue's `[wifi]` source
+(BeaconDB) would give coarse indoor fixes to GeoClue clients, but it would
+not repair Chromium's own provider, and it sends WiFi BSSIDs to a third
+party.
+
+**Final configuration (2026-11-15).** The NMEA-only GeoClue setup is
+accepted as final. GNOME Maps shows an accurate blue dot indoors with no
+network fallback enabled; keep `[wifi]`, `[ip]`, `[static-source]`, `[3g]`,
+`[cdma]`, and `[modem-gps]` disabled. Do not add a fallback source or change
+the GeoClue configuration without explicit approval.
+
+**Next.** Completed 2026-11-15: live outdoor fix, GeoClue output, the GNOME
+Maps blue dot, and EPO-assisted TTFF were verified (13–29 s vs. 6 min 32 s
+without EPO). Remaining optional work: a travel test to confirm the dot keeps
+up while walking/driving, and possibly raising the 60 s GPS idle timeout to
+5–10 min so brief app switches do not stop the receiver. No kernel change is
+needed.
 
 ### 7.4 NFC
 No `nfc` node in the device dts copy — TB351FU appears to have **no NFC** (verify once against spec sheet; skip otherwise).
@@ -914,8 +1072,24 @@ No `nfc` node in the device dts copy — TB351FU appears to have **no NFC** (ver
 ### 7.5 Camera — big, LAST
 Dts has full subsystem: `mediatek,imgsensor` node + `seninf1..6 + seninf_top` (0x1a004xxx) + CAMSYS/RAW with LARBs. Requires imgsensor driver + sensor I2C list (no discrete sensor nodes visible in dts → sensor descriptors come from stock imgsensor driver list / seninf muxing). Do NOT start before WiFi/BT/sensors done.
 
-### 7.6 GPU (Mali)
-`mali_kbase.ko` is vendor (Android-side). pmOS currently runs display/headless fine via mediatek DRM. **Status unknown** — quick check on next session: `ls /dev/mali*; dmesg | grep -ai mali; modetest -M mediatek`. Not urgent (UI works via software accel currently; only perf matters).
+### 7.6 GPU (Mali-G57 MC2, Panfrost) — LIVE 2026-11-15
+
+Mainline Panfrost is live on slot B; the vendor `mali_kbase.ko` is not used.
+`mt6789_mfg_pd.ko` runs the vendor MTCMOS/regulator/clock power sequence
+(`VGPU -> VSRAM_GPU -> MFG0..3 -> mfg_ref_sel`), and `gpu-sched.ko` +
+`panfrost.ko` provide the DRM driver from `/lib/modules/extra/`.
+`/usr/local/bin/init_wifi_sensors.sh` section 0.0 loads all three before
+greetd; the block is idempotent and fail-safe (no `mt6789_mfg_pd` -> skip
+Panfrost rather than trigger a reset timeout). `/usr/bin/phosh-session`
+(backup `.pre-gpu`) unsets `LIBGL_ALWAYS_SOFTWARE` and exports
+`WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128`; KMS output stays on pmosfb
+(`card0`). Live phoc on 2026-11-15: `EGL driver name: panfrost`,
+`Mali-G57 MC2 (Panfrost)`, GLES 3.1 Mesa 26.1.6, with no MMU faults or resets
+in the first ~40 minutes. Docs: `logs/2026-11-14_panfrost/
+PANFROST_BRINGUP_SUCCESS.md` and `verification.md` §7b. A built-in build
+(`CONFIG_DRM_PANFROST=y` plus folding the MFG sequence into
+`mtk-mt6789-gpu-fixup.c`) is future work and requires a `boot_b` flash and
+explicit approval; the module path is sufficient today.
 
 ### 7.7 Audio residuals
 8× JBL AW88395 fully working (`plughw:0,0`, pinctrl fallback + I2S3 f2 mapping). The boot-log `iis signal check error` spam is benign — ignore. Mic/input path untested (only needed if asked).
@@ -925,26 +1099,28 @@ Dts has full subsystem: `mediatek,imgsensor` node + `seninf1..6 + seninf_top` (0
 - Fresh-install kbd/touch/DRM/build/flash pipeline: see porting guide §4–5 (mkbootimg + avb + `nc 9998` push + `dd to /dev/disk/by-partlabel/boot_b` over the device's telnet/nc listener).
 - Modules load helper: vermagic relaxation in `kernel/module/main.c:check_modinfo()` (out-of-tree OK) — DO NOT LOSE this commit.
 
-### 7.9 Charger / VBUS (`sc8989x` + PMIC AUXADC) — root-caused 2026-11-14, fix built (NOT flashed)
+### 7.9 Charger / VBUS (`sc8989x` + PMIC AUXADC) — LIVE 2026-11-14/15 (slot B)
 
-- The tablet charges through the vendor **`sc8989x_charger.ko` + `charger_class.ko`** stack (i2c `5-006a` / `7-006a` / `9-006a`); the in-tree `mt6375` charger cannot bind (no ACK at `5-0x34`). `sc8989x` probes with `pmos_chg_stub.ko` providing `Charger_Detect_Init/Release`; it creates `/sys/class/power_supply/{primary_chg,sub_chg1_psy,sub_chg2_psy}` + `/sys/class/switching_charger/*`, and `get_charger_by_name("primary_chg")` + `charger_dev_enable()` were verified live. Charger modules are **not** loaded on the current boot (only sensors).
+- The tablet charges through the vendor **`sc8989x_charger.ko` + `charger_class.ko`** stack (i2c `5-006a` / `7-006a` / `9-006a`); the in-tree `mt6375` charger cannot bind (no ACK at `5-0x34`). `sc8989x` probes with `pmos_chg_stub.ko` providing `Charger_Detect_Init/Release`; it creates `/sys/class/power_supply/{primary_chg,sub_chg1_psy,sub_chg2_psy}` + `/sys/class/switching_charger/*`, and `get_charger_by_name("primary_chg")` + `charger_dev_enable()` were verified live. The vendor charger stack and `pmos_charge_cap.ko` are loaded on every boot by `pmos-charger.service` (see below).
 - **Three independent VBUS-sensing faults**, all fixed in the tree:
   1. **DT channel:** every charger node (`southchip,sc89890h`, `mtk,hl7015`, `sc,sc854x-master`) has `io-channel-names = "pmic_vbus"` but `io-channels = <&mt635x_auxadc 2>` — channel 2 is **BAT_TEMP**; VCDT is channel **1** (`MT6358_AUXADC_VCDT`). `pmos_charger_vbus_dt_fixup()` in `arch/arm64/kernel/setup.c` rewrites the cell to channel 1 at `early_initcall` (boot log: `PMOS-CHG: … pmic_vbus -> auxadc channel 1`).
   2. **Request bit:** MT6358 VCDT is **bit 2** of RQST0 (`0x1108`), not the mainline bit 0. Proven with `pmos_vcdt_probe.ko`: RQST0 bits 0/1 → `-ETIMEDOUT`; bit 2 → `ret=0 adc=0x848c` (raw 1164).
   3. **Scale:** VCDT full-scale is 1800 mV over 4096 codes ⇒ `1800/4096` (0.4395 mV/LSB), not `1800`. `drivers/iio/adc/mt6359-auxadc.c` now uses `struct u16_fract r_ratio` and MT6358 VCDT desc `{RQST0, bit 2, 8 samples, 1/4096}`. With the old math `sc8989x` logged VBUS ≈ `-1.7e9` µV; with the fix, raw 1164 → ≈ 4.84 V.
 - ⛔ **NEVER unbind the built-in `mt6359-auxadc` while `sc8989x_charger` is loaded.** The auxadc has consumer device links to i2c `5-006a`/`5-006b`/`7-006a`/`7-006b`/`9-0055`/`9-006a`/`9-006b`, `mt6358-sound`, `mt6366_temp` and `pmic-codec-accdet`; unbinding it unbinds all consumers, and the vendor `sc8989x` remove path crashes in `power_supply_unregister` (`device_links_unbind_consumers → i2c_device_remove → power_supply_unregister → device_del → kernfs_remove_by_name_ns`) and rebooted the tablet (crashed boot `eb9ca73c…`). `rmmod sc8989x_charger` fails with `Resource busy`; pstore stays empty (this path is not captured by ramoops). Crashed-boot journals are preserved in `logs/2026-11-14_slotB_pmos_charger/`.
-- **Next:** flash slot B with the rebuilt `Image` (contains both changes), then load the vendor charger stack and confirm VBUS ≈ 5 V plus `charger_dev_enable()` control. The user-selectable 80 %/full charge cap follows once VBUS reads correctly (vendor `charger_dev_enable` path vs direct sc8989x regmap control).
-- **2026-11-14 deployment (flash approved):** built `artifacts/boot_chargervbus_20261114.img` (md5 `dd9715b387606a396d935e1d8e8b305f`) and flashed it to slot B (`boot_b`) over SSH. Previous boot backed up first to `artifacts/boot_b_pre_chargervbus_20261114.img` (md5 `7b80fcbc435b4df2605bfe84050eff32`, identical to the running `boot_latest.img`); the boot_b readback matches the new image. Slot A was not written. **Reboot pending.** Vendor charger modules + `pmos_chg_stub.ko` are staged in `/lib/modules/extra/charger/`; `/root/charger_vbus_test.sh` loads the stack and prints the `PMOS-CHG` fixup lines, sc8989x VBUS, and `/sys/class/power_supply` state. Charge-cap choice: vendor `charger_dev_enable()` + capacity monitor with hysteresis (user-selected 2026-11-14).
+- **Next (completed 2026-11-14):** flash slot B with the rebuilt `Image` (contains both changes), then load the vendor charger stack and confirm VBUS ≈ 5 V plus `charger_dev_enable()` control. The user-selectable 80 %/full charge cap follows once VBUS reads correctly (vendor `charger_dev_enable` path vs direct sc8989x regmap control).
+- **2026-11-14 deployment (flash approved):** built `artifacts/boot_chargervbus_20261114.img` (md5 `dd9715b387606a396d935e1d8e8b305f`) and flashed it to slot B (`boot_b`) over SSH. Previous boot backed up first to `artifacts/boot_b_pre_chargervbus_20261114.img` (md5 `7b80fcbc435b4df2605bfe84050eff32`, identical to the running `boot_latest.img`); the boot_b readback matches the new image. Slot A was not written. **Reboot approved and performed; see live validation below.** Vendor charger modules + `pmos_chg_stub.ko` are staged in `/lib/modules/extra/charger/`; `/root/charger_vbus_test.sh` loads the stack and prints the `PMOS-CHG` fixup lines, sc8989x VBUS, and `/sys/class/power_supply` state. Charge-cap choice: vendor `charger_dev_enable()` + capacity monitor with hysteresis (user-selected 2026-11-14).
 - **2026-11-14 live validation (boot `fca49b38…`, kernel `#401`):**
   - `PMOS-CHG` fixup ran for all six charger nodes; `sc8989x 5/7/9-006a` all log `vbus voltage: 4834000` (4.834 V).
   - Without current tuning the battery net current is ≈ −160 mA at the 500 mA input limit (system load exceeds the port limit). Raising `input_current_limit` to 900 mA turns it into +65…+106 mA and `battery status=Charging`; VBUS sags to ≈ 4.71 V under load. The power path is already enabled (`is_powerpath_enabled=1`). IBUS/IBAT ADC reads return `−EOPNOTSUPP`, and `online=0` even while charging, so neither is a useful indicator.
   - `charger_dev_enable(false)` works: after the gauge's ~10 s telemetry settles, battery current is 0 mA and `primary_chg status=Not charging` — the tablet runs from VBUS with the battery idle. `full` re-enables charging.
-- **Charge cap deployed (2026-11-14):** `pmos_charge_cap.ko` (source `pmos_charge_cap_module/`) + `pmos-charger.service` + `/usr/local/bin/init_charger.sh` + `/usr/local/bin/pmos-charge-cap`; vendor modules live in `/lib/modules/extra/charger/`. Sysfs: `/sys/kernel/pmos_charge_cap/{limit,capacity,charging,input_current}`. `limit` is `full` or 50–100; charging stops at the limit and resumes at limit−5 (matches stock Android: stop 80 % / recharge 75 %). Config `/etc/pmos-charge-cap.conf` (`LIMIT=`, `INPUT_UA=`, default 900000 µA). Service is enabled and active; currently `LIMIT=80`, device at 80 %, `charging=0`, 0 mA. Change with `sudo pmos-charge-cap full|80` (persists). A Phosh launcher (`pmos-charge-toggle.desktop`, favorites row + app grid) calls `/usr/local/bin/pmos-charge-toggle`, which flips 80 % ↔ full and posts a notification.
+- **Charge cap deployed (2026-11-14):** `pmos_charge_cap.ko` (source `pmos_charge_cap_module/`) + `pmos-charger.service` + `/usr/local/bin/init_charger.sh` + `/usr/local/bin/pmos-charge-cap`; vendor modules live in `/lib/modules/extra/charger/`. Sysfs: `/sys/kernel/pmos_charge_cap/{limit,capacity,charging,input_current}`. `limit` is `full` or 50–100; charging stops at the limit and resumes at limit−5 (matches stock Android: stop 80 % / recharge 75 %). Config `/etc/pmos-charge-cap.conf` (`LIMIT=`, `INPUT_UA=`, default 900000 µA). Service is enabled and active; at deployment time `LIMIT=80`, device at 80 %, `charging=0`, 0 mA. Change with `sudo pmos-charge-cap full|80` (persists). The Phosh quick toggle (`pmos-charge-toggle.desktop`, app grid) calls `/usr/local/bin/pmos-charge-toggle`, which flips between the saved `LIMIT=` and full and posts a notification. The favorites row now uses the GTK4 GUI described below.
 - **2026-11-14 VBUS stability on a USB2 host port:** the tablet's gadget links at 480 Mbit through a 500 mA USB2 port (host `lsusb -t`). With `INPUT_UA=900000`, VBUS oscillates ≈4.62–4.82 V and the MM8013 fuel-gauge status flips `Charging`/`Discharging` every ~10 s; the USB link itself stays up (host `journalctl -k` shows no disconnects after boot). Measured on this port: 500–600 mA → stable VBUS (4.77–4.82 V); at idle the tablet charges at ≈ +150 mA, but under heavy load (load average ≈2–3) the battery supplements and net current goes negative; 700 mA → ≈ −22 mA average at high load, VBUS dips to 4.68 V; 900 mA → VBUS oscillation. The status flicker is the MM8013 `POWER_SUPPLY_PROP_STATUS` ±20 mA threshold crossing, not a USB fault. **Use a USB3 port or powered hub for net charging at 900 mA**; otherwise 600 mA is the stable compromise. A status-hysteresis patch in `drivers/power/supply/mm8013.c` is the clean fix for the icon flicker.
 - **Boot-time power path (2026-11-14):** `pmos_charge_cap` now enables the charger once for 3 s at module load before re-applying the cap, so a boot with the battery already at the limit still brings up the VBUS power path. The module was rebuilt and reloaded on boot `d715b257…` (battery at 79 %, `INPUT_UA=600000` → `primary_chg=Charging`, battery +150 mA, VBUS 4.78 V).
 - **Boot ordering fix (2026-11-14):** `pmos-charger.service` was ordered `After=pmos-hardware-init.service`, which runs the long WiFi/SensorHub bring-up as a blocking oneshot and delayed the charger stack for minutes. The unit is now `After=basic.target` only; the script loads the vendor stack + cap module as soon as multi-user is reached.
 - **Boot `084c7d15…` validation (2026-11-14):** service reached `OK` 10.7 s after boot (ordering fix confirmed). New `pmos_charge_cap.ko` (`md5 bd53f2e9833d7e47f9d561ab99ad460a`, `CAP_HYSTERESIS=5`) installed; boundary test at 71 % stopped with `limit=71` and resumed with `limit=76` (76−5 = 71), then restored to 80. Live charge at 900 mA: 71→72 %, VBUS 4.607–4.617 V, battery +126…+456 mA, no oscillation in a 20 s sample. Phosh toggle flipped 80↔full and persisted `LIMIT=80`. Real 80 % stop / 75 % resume still to be observed.
-- **Next:** validate the fixed boot ordering and the Phosh launcher after the next reboot; decide the site default input current (600 mA stable vs 900 mA on a USB3/powered port). Keep the 900 mA input default in mind for SDP ports (500 mA is spec-safe but leaves the tablet discharging under load).
+- **2026-11-15 user-settable percentage GUI:** `/usr/local/bin/pmos-charge-limit` (source `common/deploy/scripts/pmos-charge-limit`, launcher `common/deploy/configs/pmos-charge-limit.desktop`) is a GTK4/Adw app. It shows the live battery state and active limit, offers a **50–99 % slider** plus a **Charge to full** switch, and an Apply button that runs `sudo -n /usr/local/bin/pmos-charge-cap <pct|full>`. The helper writes sysfs and `/etc/pmos-charge-cap.conf`, so the choice survives reboot (restored by `init_charger.sh`). Hysteresis is 5 %: stop at N, resume at N−5. `pmos-charge-toggle` now reads the saved `LIMIT=` (falling back to 80 for `full`/invalid) instead of hardcoding 80. `pmos-charge-limit.desktop` replaced the old toggle in the Phosh favorites row; the quick toggle remains in the app grid.
+- **2026-11-15 GUI status:** initial render verified at 69 %, charging, `limit=80`, "Charge limit: 80 % · resumes at 75 %", slider at 80, full switch off. The helper round-trip 75 → 80 → full → 80 updated both sysfs and `/etc/pmos-charge-cap.conf` each time; the CLI remains `sudo pmos-charge-cap <50-100|full>`. The Apply handler was exercised off-screen: percentage target `75`, `full`, and a forced failure (error alert + button re-enabled), all through the same `sudo -n pmos-charge-cap` path. **Live window click verified 2026-11-15 11:44:** slider set to 75 through AT-SPI and Apply clicked in the running app; the label changed to "Charge limit: 75% · resumes at 70%", `/sys/kernel/pmos_charge_cap/limit` read 75, and `LIMIT=75` was written. The slider was then set back to 80 and Apply clicked again; label, sysfs, and config all returned to 80 / "resumes at 75%".
+- **Next:** live charge GUI Apply verified 2026-11-15 (80 → 75 → 80; label, sysfs, and config all matched); the remaining charger decision is the site default input current (600 mA stable vs 900 mA on a USB3/powered port; 900 mA is the current default, 500 mA is spec-safe but leaves the tablet discharging under load). GNSS live outdoor fix and GNOME Maps blue dot verified 2026-11-15 (§7.3).
 
 ---
 
@@ -956,6 +1132,7 @@ Dts has full subsystem: `mediatek,imgsensor` node + `seninf1..6 + seninf_top` (0
 | `/home/user/Desktop/PMOS_TB351FU_PORTING_GUIDE.md` | 26 issues + build/flash commands |
 | `/home/user/Desktop/TB351FU_COMPLETE_DEVICE_GUIDE.md` | hardware architecture, slot switch commands §7.3, cheat sheet §9 |
 | `/home/user/Desktop/pmos/{common,out,artifacts,init_wifi_sensors.sh}` | kernel tree, build out, boot artifacts, bring-up script snapshot |
+| `/home/user/Desktop/pmos/common/deploy/gnss/` | GNSS payload, systemd units, GeoClue config, README (§7.3) |
 | `/home/user/Desktop/pmos/common/out/Makefile.savedcmd` | shows the EXACT clang/compiler invocation that matches the kernel |
 | `/mnt/Nvme/slot_b_bundle/` | `boot_pmos.img` (current pmOS boot for slot_b), `staging.tar.gz` (sensor+wifi modules & firmware), `DTB/dts` copy, scatter file |
 | `/mnt/Nvme/evolutionx/sync/` | AOSP trees; prebuilt clang r547379 at `prebuilts/clang/host/linux-x86/clang-r547379`; decompiled dts `device/lenovo/tb351fu/dts/mt6789.dts` |

@@ -260,6 +260,72 @@ md5-verify, reboot to slot B. Verify panfrost bind via
 `dmesg | grep -i panfrost` (look for "clock rate =", absence of "failed to get pm-domain",
 and `/dev/dri/renderD*` present / llvmpipe gone from phoc logs).
 
+### §7b. WORKING GPU (2026-11-14, kernel 6.12.23): MTCMOS sequence is mandatory
+
+The §7a image still failed: panfrost reached `clock rate = 364000000` and then
+`gpu soft reset timed out` / `gpu hard reset timed out` (-110). The mfgcfg clock
+and mali rail were fine; the four MFG MTCMOS domains were never actually powered
+and the GPU clock stayed on the 364 MHz reference path. Root cause: MT6789 has no
+mainline SCPSYS driver, and neither the SCPSYS power-on nor the vendor gpufreq
+clock-control sequence was being run.
+
+The authoritative sequences are in the vendor
+`vendor_dlkm/lib/modules/mtk_gpufreq_mt6789.ko` (not `mtk-scpsys`).
+
+Working validation setup (runtime, no flashing):
+
+1. `mt6789_mfg_pd.ko` (out-of-tree, `deploy/modules/mt6789_mfg_pd/`) runs the
+   exact vendor `__gpufreq_power_control(1)`:
+   VGPU -> VSRAM_GPU -> MFG0 -> MFG1 -> `mfg_ref_sel` enable -> MFG2 -> MFG3 ->
+   `__gpufreq_clock_control(1)`.
+   Per-domain enable must use read-modify-write, the `0x16c`/`0x170` status gate
+   (10 us polls, max 501), `udelay(100)`, separate clears of bits 4/1, set bit 0,
+   clear bit 8, then poll CTL bit 12 clear. MFG1 additionally releases the EMI
+   handshake in `infracfg_ao` (`+0x718`, `+0x2a4`, `+0x718`, `+0x2ac`).
+   Clock control: enable `mfg_pll_sel`, reparent to `mfgpll_ck`, wait
+   `topckgen+0x50` bit 18, enable `subsys_bg3d`, program `mfg_top_config`
+   (`+0x20`, `+0xb0`, `+0xb4`, `+0x24`, `+0xf60`), write 3 to `+0x130`, then
+   `infracfg_ao+0x290 |= 0x200`.
+2. `insmod gpu-sched.ko`, `insmod panfrost.ko`.
+3. Verified: `MFG status 0xf87a1bfe`, CTLs `0x0d`, mfgpll/mfg_pll_sel/mfgcfg_bg3d
+   all 390 MHz, `mali-g57 id 0x9093`, `/dev/dri/renderD128`, Mesa
+   `Mali-G57 MC2 (Panfrost)` GLES 3.1, correct clear+readback, 30/30 runs, no faults.
+
+Full details and evidence: `logs/2026-11-14_panfrost/PANFROST_BRINGUP_SUCCESS.md`.
+
+**Boot-time persistence and live compositor (verified 2026-11-15):** the three
+modules live in `/lib/modules/extra/` (`mt6789_mfg_pd.ko`, `gpu-sched.ko`,
+`panfrost.ko`), and `/usr/local/bin/init_wifi_sensors.sh` section 0.0 loads
+them as its first action, before XO/WiFi bring-up. The block is idempotent and
+fail-safe: if `mt6789_mfg_pd` does not stay loaded it skips Panfrost instead
+of triggering a reset timeout. `pmos-hardware-init.service` runs before
+greetd, so the render node exists before the user session.
+
+**Compositor verified live (2026-11-15):** `/usr/bin/phosh-session` (backup
+`.pre-gpu`) now unsets `LIBGL_ALWAYS_SOFTWARE` and, when
+`/dev/dri/renderD128` exists, exports
+`WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128`; KMS output stays on pmosfb
+(card0). The TB351FU `phosh-nopoweroff.so` `LD_PRELOAD` workaround is
+preserved. This was validated without a session restart:
+
+- EGL on a GBM device from `renderD128` + GBM window surface ->
+  `Mali-G57 MC2 (Panfrost)`, GLES 3.1, `eglSwapBuffers` OK.
+- Panfrost dmabuf imported into card0 (`drmPrimeFDToHandle` ret 0) and
+  `drmModeAddFB2` ret 0 at the native 1200x2000 mode (with and without an
+  explicit LINEAR modifier). 64x64 failed only because pmosfb enforces the
+  panel-sized minimum.
+
+The 2026-11-15 boot (slot B, 10:49 IST) is running on Panfrost, not software
+rendering: `phoc` logged `Opening DRM render node '/dev/dri/renderD128' from
+WLR_RENDER_DRM_DEVICE`, `EGL driver name: panfrost`, `GL renderer:
+Mali-G57 MC2 (Panfrost)`, and `Using OpenGL ES 3.1 Mesa 26.1.6`. The live
+environment no longer contains `LIBGL_ALWAYS_SOFTWARE=1`. No MMU faults or
+reset messages appeared in the first 40 minutes. If GPU init fails after
+reboot, phoc still falls back to pixman. A future built-in build may fold the
+MFG sequence into `mtk-mt6789-gpu-fixup.c` and set
+`CONFIG_DRM_PANFROST=y`, but that needs explicit approval and a `boot_b`
+flash; it is not required for the module path that is now verified.
+
 ---
 
 ## 8. Flash & Recovery Procedure
@@ -284,6 +350,7 @@ and `/dev/dri/renderD*` present / llvmpipe gone from phoc logs).
 | `init_boot_b` | pmOS initramfs | `daeb308b620603ac556e18afb29d1fa9` |
 | (amended `vendor_boot_b` attempt) | surgical mali DTBO + testkey RSA re-sign | `9b5f930f8cb89ea5e8d751e8cad15e66` — REJECTED by device |
 | `boot_b` (panfrost GPU fix) | GKI kernel + `CONFIG_DRM_PANFROST=y`, mfgcfg clk, DT mali fixup | `623f73a9bdeffd76a1cba310abd1e05b` — flash to boot_b, TEST (md5 of 64 MB `boot_gpufix.img`) |
+| `boot_b` (2026-11-14 current) | GKI 6.12.23 + DT mali fixup; panfrost/mfg modules loaded at runtime | `dbde774a0347447f94156302803b21aa` (`boot_panfrost_m_20261114.img`) — GPU fully verified, see §7b |
 
 > GPU-fix boot (`623f73a9`): all four changes are kernel-side, so `vendor_boot_b` stays stock and NO
 > changes are needed on the SD rootfs or initramfs. Kernel UTS kept `6.12.15-android16-5-gd2c91f0c3b11-4k`
