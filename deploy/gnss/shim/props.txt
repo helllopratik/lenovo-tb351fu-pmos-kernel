@@ -1,0 +1,8 @@
+# TB351FU: MT6789 + MT6631
+persist.vendor.connsys.chipid=0x6789
+vendor.connsys.adie.chipid=0x6631
+vendor.connsys.driver.ready=yes
+vendor.service.nvram_init=Ready
+ro.build.type=user
+ro.debuggable=0
+ro.vendor.mtk_log_hide_gps=0

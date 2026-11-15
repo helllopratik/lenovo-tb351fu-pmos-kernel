@@ -1,0 +1,13 @@
+# TB351FU vendor GPS daemon (mnld) runtime.
+dir.tablet_gps = /vendor/bin
+
+[tablet_gps]
+additional.namespaces = system
+namespace.default.isolated = true
+namespace.default.search.paths = /vendor/lib64:/gps-shim/lib64
+namespace.default.permitted.paths = /gps-shim/lib64:/vendor/lib64
+namespace.default.links = system
+namespace.default.link.system.shared_libs = libc.so:libm.so:libdl.so:liblog.so:libvndksupport.so:libnativewindow.so:libsync.so:libbinder_ndk.so:libandroid_net.so:libselinux.so:libcgrouprc.so:libmediandk.so:libvulkan.so:libEGL.so:libGLESv2.so
+namespace.system.isolated = true
+namespace.system.search.paths = /apex/com.android.runtime/lib64/bionic:/system/lib64
+namespace.system.permitted.paths = /apex/com.android.runtime/lib64/bionic:/system/lib64

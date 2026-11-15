@@ -1,0 +1,34 @@
+--- a/libgeoclue/gclue-simple.c
++++ b/libgeoclue/gclue-simple.c
+@@ -295,6 +295,7 @@
+         if (error != NULL) {
+                 if (priv->task != NULL) {
+                         g_task_return_error (priv->task, g_steal_pointer (&error));
++                        priv->task = NULL;
+                 } else {
+                         g_warning ("Failed to create location proxy: %s",
+                                    error->message);
+@@ -306,6 +307,7 @@
+ 
+         if (priv->task != NULL) {
+                 g_task_return_boolean (priv->task, TRUE);
++                priv->task = NULL;
+         } else {
+                 g_object_notify (G_OBJECT (user_data), "location");
+         }
+@@ -510,6 +512,7 @@
+ 
+         if (priv->task) {
+                 g_task_return_boolean (priv->task, TRUE);
++                priv->task = NULL;
+         }
+         else {
+                 g_object_notify (G_OBJECT (simple), "location");
+@@ -537,6 +540,7 @@
+ 
+         if (response != 0) {
+                 g_task_return_new_error (priv->task, G_IO_ERROR, G_IO_ERROR_FAILED, "Start failed");
++                priv->task = NULL;
+         }
+ }
+ 

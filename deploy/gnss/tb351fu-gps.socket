@@ -1,0 +1,12 @@
+[Unit]
+Description=TB351FU GNSS NMEA socket (starts GPS only on demand)
+Documentation=file:///opt/tb351fu-gps/
+
+[Socket]
+ListenStream=/run/tablet-gps/nmea.sock
+SocketMode=0666
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

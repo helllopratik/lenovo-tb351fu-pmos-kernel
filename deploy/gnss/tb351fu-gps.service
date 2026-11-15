@@ -1,0 +1,18 @@
+[Unit]
+Description=TB351FU live GNSS (vendor mnld + NMEA/GeoClue bridge)
+After=pmos-hardware-init.service pmos-wifi-supervisor.service NetworkManager.service
+Wants=pmos-hardware-init.service pmos-wifi-supervisor.service
+ConditionPathExists=/opt/tb351fu-gps/run-mnld.sh
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'grep -q "^gps_pwr " /proc/modules || insmod /lib/modules/extra/gps_pwr.ko'
+ExecStartPre=/bin/sh -c 'grep -q "^gps_drv_stp " /proc/modules || insmod /lib/modules/extra/gps_drv_stp.ko'
+ExecStartPre=/bin/sh -c 'mountpoint -q /mnt/vendor/nvdata || { mkdir -p /mnt/vendor/nvdata; mount -o ro /dev/disk/by-partlabel/nvdata /mnt/vendor/nvdata; }'
+ExecStart=/opt/tb351fu-gps/run-gps.sh
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=15
