@@ -4,6 +4,9 @@
 # options listed in arch/arm64/configs/pmos_tb351fu.fragment.
 set -e
 
+# Keep the pinned release from the fragment; avoids setlocalversion's "+".
+export LOCALVERSION=
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_DIR="${COMMON_DIR:-$SCRIPT_DIR}"
 OUT_DIR="${OUT_DIR:-$COMMON_DIR/out}"
@@ -20,3 +23,7 @@ echo "Merging $FRAGMENT into $OUT_DIR/.config"
 
 echo "Resolving kernel config dependencies (olddefconfig)"
 make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 olddefconfig
+
+# olddefconfig only rewrites .config; regenerate include/config/auto.conf so
+# kernelrelease and the build use the new CONFIG_LOCALVERSION immediately.
+make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 syncconfig

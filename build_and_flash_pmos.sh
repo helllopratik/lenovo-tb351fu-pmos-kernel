@@ -6,6 +6,10 @@
 
 set -e
 
+# The fragment pins CONFIG_LOCALVERSION_AUTO=n.  Set LOCALVERSION explicitly
+# (empty) so scripts/setlocalversion does not append its "+" suffix.
+export LOCALVERSION=
+
 # Base Directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PMOS_DIR="${PMOS_DIR:-$(dirname "$SCRIPT_DIR")}"

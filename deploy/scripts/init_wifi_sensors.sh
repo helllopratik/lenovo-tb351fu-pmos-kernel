@@ -18,6 +18,43 @@ exec > /tmp/pmos_wifi_init.log 2>&1
 kp "=== bring-up starting ==="
 
 # ------------------------------------------------------------------
+# 0.0  Mali-G57 (Panfrost) GPU bring-up.  Runs first so the render
+#      node exists before greetd can start a user session.
+#      MT6789 has no mainline SCPSYS driver, so mt6789_mfg_pd runs the
+#      exact vendor __gpufreq_power_control(1) sequence (VGPU,
+#      VSRAM_GPU, MFG0..3 MTCMOS, mfg_ref_sel) followed by the vendor
+#      __gpufreq_clock_control(1) (mfg_pll_sel -> mfgpll_ck,
+#      mfgcfg bg3d, mfg_top_config).  Then gpu-sched + panfrost bind
+#      to 13000000.mali (renderD128).
+#      The MFG module deliberately leaves rails/clocks/domains on
+#      (validation build), so this adds some idle power.
+#      Skips quietly on rootfs images where the modules are not staged.
+# ------------------------------------------------------------------
+if [ -f /lib/modules/extra/panfrost.ko ] && [ ! -e /dev/dri/renderD128 ]; then
+    kp "GPU: loading MFG power + panfrost"
+    if [ ! -d /sys/module/mt6789_mfg_pd ]; then
+        if insmod /lib/modules/extra/mt6789_mfg_pd.ko; then kp "mfg_pd loaded"; else kp "WARN mfg_pd insmod failed"; fi
+    fi
+    # Panfrost without powered MFG domains would time out on reset and
+    # leave a dead card1; only continue when the power module is up.
+    if [ -d /sys/module/mt6789_mfg_pd ]; then
+        if [ ! -d /sys/module/gpu_sched ]; then
+            if insmod /lib/modules/extra/gpu-sched.ko; then kp "gpu-sched loaded"; else kp "WARN gpu-sched insmod failed"; fi
+        fi
+        if [ ! -d /sys/module/panfrost ]; then
+            if insmod /lib/modules/extra/panfrost.ko; then kp "panfrost loaded"; else kp "WARN panfrost insmod failed"; fi
+        fi
+        if [ -e /dev/dri/renderD128 ]; then
+            kp "GPU ready: $(cat /sys/kernel/debug/dri/1/name 2>/dev/null)"
+        else
+            kp "WARN GPU render node missing (panfrost probe failed)"
+        fi
+    else
+        kp "WARN GPU: MFG power module absent, panfrost not loaded"
+    fi
+fi
+
+# ------------------------------------------------------------------
 # -1. v17 AUX: aw88395 flood suppression (TEST-BOOT ONLY, flag-gated).
 #     The smart-amp driver spams ~20k console lines/60 s (~640 KB/s),
 #     wrapping both pstore records to a ~1.4 s tail (v16 lesson: a crash

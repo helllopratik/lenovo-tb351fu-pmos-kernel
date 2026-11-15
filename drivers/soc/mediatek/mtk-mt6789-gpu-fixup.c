@@ -20,7 +20,7 @@
  * tree here, at core_initcall, which runs before of_platform_default_populate
  * (arch_initcall_sync) binds the panfrost platform device.
  *
- * The mfgcfg clock provider is node /soc/syscon@13fbf000
+ * The mfgcfg clock provider is node /syscon@13fbf000
  * (compatible mediatek,mt6789-mfg, #clock-cells=<1>, driven by
  * drivers/clk/mediatek/clk-mt6789-mfgcfg.c, clock id 0 = subsys_bg3d).
  * The GPU regulator is /soc/pwrap@10026000/mt6366/mt6358regulator/buck-vgpu.
@@ -33,7 +33,7 @@
 #include <linux/slab.h>
 
 #define MALI_NODE_PATH		"/soc/mali@13000000"
-#define MFGCFG_NODE_PATH	"/soc/syscon@13fbf000"
+#define MFGCFG_NODE_PATH	"/syscon@13fbf000"
 #define VGPU_REG_NODE_PATH	"/soc/pwrap@10026000/mt6366/mt6358regulator/buck-vgpu"
 
 /* Compatible[2]: "mediatek,mt6789-mali" '\0' "arm,mali-valhall-jm" '\0' */

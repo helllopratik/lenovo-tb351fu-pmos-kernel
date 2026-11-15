@@ -27,3 +27,20 @@ CONFIG_NFT_COMPAT=y
 CONFIG_ZRAM=y
 CONFIG_ZSMALLOC=y
 CONFIG_ZRAM_BACKEND_ZSTD=y
+
+# ---------------------------------------------------------------------------
+# Mali-G57 MC2 (Panfrost) — first bring-up as a loadable module.
+#
+# The DT fixup (drivers/soc/mediatek/mtk-mt6789-gpu-fixup.c) is built into the
+# kernel so the vendor_boot mali node is rewritten before
+# of_platform_default_populate().  Panfrost itself stays a module so it can be
+# insmod'ed only after a clean boot; if probe fails, the running system falls
+# back to pixman and the next boot is still safe.
+CONFIG_DRM_PANFROST=m
+CONFIG_DRM_SCHED=y
+CONFIG_COMMON_CLK_MT6789_MFGCFG=y
+
+# Pin the exact kernel release used by the currently deployed vendor modules
+# (WiFi/BT/charger).  Do not let setlocalversion append the current HEAD.
+CONFIG_LOCALVERSION="-android16-5-gd2c91f0c3b11-4k-g9cfa397996e7-dirty"
+CONFIG_LOCALVERSION_AUTO=n

@@ -10,5 +10,6 @@ obj-$(CONFIG_MTK_SVS) += mtk-svs.o
 obj-$(CONFIG_MTK_SOCINFO) += mtk-socinfo.o
 obj-y += mtk-dvfsrc-stub.o
 obj-y += pmos-aee-stub.o
-# TEMPORARILY DISABLED with panfrost (stable simpledrm GUI). Re-enable later.
-# obj-y += mtk-mt6789-gpu-fixup.o
+# MT6789 Mali-G57 DT fixup for Panfrost.  Re-enabled for the GPU bring-up; it
+# must run at core_initcall, before of_platform_default_populate().
+obj-y += mtk-mt6789-gpu-fixup.o

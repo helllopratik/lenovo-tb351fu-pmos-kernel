@@ -57,10 +57,25 @@ fi
 
 # export WLR_RENDERER=pixman
 export WLR_NO_HARDWARE_CURSORS=1
-export LIBGL_ALWAYS_SOFTWARE=1
 [ -n "$WLR_BACKENDS" ] || WLR_BACKENDS=drm,libinput
 # export WLR_RENDERER=pixman
 export WLR_NO_HARDWARE_CURSORS=1
-export LIBGL_ALWAYS_SOFTWARE=1
 export WLR_BACKENDS
+
+# Render on the Mali-G57 via Panfrost when its render node exists.  KMS
+# output stays on pmosfb (card0); WLR_RENDER_DRM_DEVICE gives wlroots a
+# separate render node.  If Panfrost did not come up, leave the variable
+# unset so phoc falls back to its pixman renderer instead of failing.
+unset LIBGL_ALWAYS_SOFTWARE
+if [ -e /dev/dri/renderD128 ]; then
+  WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128
+  export WLR_RENDER_DRM_DEVICE
+fi
+# TB351FU: keep the builtin output enabled when phosh blanks, so phoc never
+# disables the output and touch keeps working.  True panel darkness is
+# provided by pmos-display-guard through the i2c-3 WLED registers.
+if [ -f /usr/local/lib/phosh-nopoweroff.so ]; then
+  LD_PRELOAD="/usr/local/lib/phosh-nopoweroff.so${LD_PRELOAD:+:$LD_PRELOAD}"
+  export LD_PRELOAD
+fi
 exec $SYSTEMD_CAT $DBUS_RUN_SESSION "${COMPOSITOR}" -v -S -C "${PHOC_INI}" -E "${PHOSH_SESSION_BIN} --session=phosh"
