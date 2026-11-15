@@ -1,0 +1,348 @@
+#!/usr/bin/python3
+"""User-facing charge limit control for the Lenovo TB351FU.
+
+Reads /sys/kernel/pmos_charge_cap, lets the user pick any limit from 50% to
+99% (or full charge), and applies it through the root helper
+/usr/local/bin/pmos-charge-cap, which writes sysfs and persists the choice in
+/etc/pmos-charge-cap.conf.
+"""
+
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Adw, Gio, GLib, Gtk
+
+APP_ID = "org.pmos.ChargeLimit"
+SYS = "/sys/kernel/pmos_charge_cap"
+HELPER = "/usr/local/bin/pmos-charge-cap"
+MIN_LIMIT = 50
+MAX_LIMIT = 99
+DEFAULT_LIMIT = 80
+HYSTERESIS = 5
+
+
+def read_sysfs(name, default=""):
+    try:
+        with open(f"{SYS}/{name}", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return default
+
+
+def battery_icon(capacity, charging):
+    if capacity is None:
+        level = "good"
+    elif capacity >= 90:
+        level = "full"
+    elif capacity >= 20:
+        level = "good"
+    else:
+        level = "caution"
+    suffix = "-charging" if charging else ""
+    return f"battery-{level}{suffix}-symbolic"
+
+
+class ChargeLimitWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Charge limit")
+        self.set_default_size(400, 560)
+        self.available = False
+        self.dirty = False
+        self.updating = False
+        self.last_percent = DEFAULT_LIMIT
+
+        title = Adw.WindowTitle(title="Charge limit")
+        header = Adw.HeaderBar()
+        header.set_title_widget(title)
+        self.apply_button = Gtk.Button(label="Apply")
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.set_sensitive(False)
+        self.apply_button.connect("clicked", self.on_apply)
+        header.pack_end(self.apply_button)
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        self.toasts = Adw.ToastOverlay()
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        outer.set_margin_top(18)
+        outer.set_margin_bottom(18)
+        outer.set_margin_start(18)
+        outer.set_margin_end(18)
+
+        outer.append(self.build_status_card())
+        outer.append(self.build_limit_card())
+
+        note = Gtk.Label(
+            label="The choice is saved and restored automatically after reboot.",
+            xalign=0,
+            wrap=True,
+        )
+        note.add_css_class("dim-label")
+        outer.append(note)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        scrolled.set_child(outer)
+        self.toasts.set_child(scrolled)
+        toolbar.set_content(self.toasts)
+        self.set_content(toolbar)
+
+        self.reload(force=True)
+        GLib.timeout_add_seconds(5, self.poll)
+
+    def card(self):
+        frame = Gtk.Frame()
+        frame.add_css_class("card")
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        inner.set_margin_top(14)
+        inner.set_margin_bottom(14)
+        inner.set_margin_start(14)
+        inner.set_margin_end(14)
+        frame.set_child(inner)
+        return frame, inner
+
+    def build_status_card(self):
+        frame, inner = self.card()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        self.icon = Gtk.Image.new_from_icon_name("battery-good-symbolic")
+        self.icon.set_pixel_size(36)
+        self.icon.set_valign(Gtk.Align.CENTER)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        labels.set_hexpand(True)
+        self.status_label = Gtk.Label(xalign=0)
+        self.status_label.add_css_class("title-3")
+        self.detail_label = Gtk.Label(xalign=0, wrap=True)
+        self.detail_label.add_css_class("dim-label")
+        labels.append(self.status_label)
+        labels.append(self.detail_label)
+        row.append(self.icon)
+        row.append(labels)
+        inner.append(row)
+        return frame
+
+    def build_limit_card(self):
+        frame, inner = self.card()
+
+        heading = Gtk.Label(label="Stop charging at", xalign=0)
+        heading.add_css_class("heading")
+        inner.append(heading)
+
+        self.scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, MIN_LIMIT, MAX_LIMIT, 1
+        )
+        self.scale.set_draw_value(True)
+        self.scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.scale.set_digits(0)
+        self.scale.set_hexpand(True)
+        self.scale.set_size_request(220, -1)
+        for mark in range(MIN_LIMIT, MAX_LIMIT, 10):
+            self.scale.add_mark(mark, Gtk.PositionType.BOTTOM, None)
+        self.scale.connect("value-changed", self.on_scale_changed)
+        inner.append(self.scale)
+
+        hint = Gtk.Label(
+            label=(
+                "Charging pauses at this level and resumes "
+                f"{HYSTERESIS}% below it."
+            ),
+            xalign=0,
+            wrap=True,
+        )
+        hint.add_css_class("dim-label")
+        inner.append(hint)
+
+        inner.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        full_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        full_labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        full_labels.set_hexpand(True)
+        full_title = Gtk.Label(label="Charge to full", xalign=0)
+        full_sub = Gtk.Label(
+            label="Ignore the limit and charge the battery to 100%.",
+            xalign=0,
+            wrap=True,
+        )
+        full_sub.add_css_class("dim-label")
+        full_labels.append(full_title)
+        full_labels.append(full_sub)
+        self.full_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.full_switch.connect("notify::active", self.on_switch_toggled)
+        full_row.append(full_labels)
+        full_row.append(self.full_switch)
+        inner.append(full_row)
+        return frame
+
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast.new(text))
+
+    def show_error(self, message):
+        dialog = Adw.AlertDialog(
+            heading="Could not set the charge limit",
+            body=message,
+        )
+        dialog.add_response("close", "Close")
+        dialog.set_default_response("close")
+        dialog.present(self)
+
+    def mark_dirty(self):
+        self.dirty = True
+        if self.available:
+            self.apply_button.set_sensitive(True)
+
+    def on_scale_changed(self, scale):
+        if self.updating:
+            return
+        self.last_percent = int(round(scale.get_value()))
+        if self.full_switch.get_active():
+            self.updating = True
+            self.full_switch.set_active(False)
+            self.updating = False
+            self.scale.set_sensitive(True)
+        self.mark_dirty()
+
+    def on_switch_toggled(self, switch, _pspec):
+        if self.updating:
+            return
+        if switch.get_active():
+            self.scale.set_sensitive(False)
+        else:
+            self.scale.set_sensitive(True)
+            restore = self.last_percent
+            if restore > MAX_LIMIT:
+                restore = DEFAULT_LIMIT
+            self.updating = True
+            self.scale.set_value(restore)
+            self.updating = False
+        self.mark_dirty()
+
+    def on_apply(self, _button):
+        if not self.available:
+            return
+        target = (
+            "full"
+            if self.full_switch.get_active()
+            else str(int(round(self.scale.get_value())))
+        )
+        self.apply_button.set_sensitive(False)
+        try:
+            result = subprocess.run(
+                ["sudo", "-n", HELPER, target],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            self.show_error(str(error))
+            self.apply_button.set_sensitive(True)
+            return
+
+        if result.returncode == 0:
+            self.dirty = False
+            self.toast(
+                "Charge limit set to full"
+                if target == "full"
+                else f"Charge limit set to {target}%"
+            )
+            self.reload(force=True)
+        else:
+            message = (result.stderr or result.stdout or "Unknown error").strip()
+            self.show_error(message)
+            self.apply_button.set_sensitive(True)
+
+    def reload(self, force=False):
+        raw_limit = read_sysfs("limit")
+        if not raw_limit:
+            self.available = False
+            self.status_label.set_text("Charge limit unavailable")
+            self.detail_label.set_text(
+                "The charger stack is not loaded (pmos-charger.service)."
+            )
+            self.icon.set_from_icon_name("battery-missing-symbolic")
+            for widget in (self.scale, self.full_switch):
+                widget.set_sensitive(False)
+            self.apply_button.set_sensitive(False)
+            return
+
+        self.available = True
+        raw_capacity = read_sysfs("capacity")
+        try:
+            capacity = int(raw_capacity)
+        except ValueError:
+            capacity = None
+        charging = read_sysfs("charging") == "1"
+
+        self.icon.set_from_icon_name(battery_icon(capacity, charging))
+        battery = f"{capacity}%" if capacity is not None else "Battery"
+        state = "charging" if charging else "not charging"
+        self.status_label.set_text(f"{battery} — {state}")
+
+        if raw_limit == "full":
+            detail = "Charge limit: full (100%)"
+        else:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                limit = DEFAULT_LIMIT
+            detail = (
+                f"Charge limit: {limit}% · resumes at "
+                f"{max(1, limit - HYSTERESIS)}%"
+            )
+            if not charging and capacity is not None and capacity >= limit:
+                detail += " · limit reached"
+        self.detail_label.set_text(detail)
+
+        if force or not self.dirty:
+            self.updating = True
+            self.full_switch.set_sensitive(True)
+            if raw_limit == "full":
+                self.full_switch.set_active(True)
+                self.scale.set_value(
+                    max(MIN_LIMIT, min(MAX_LIMIT, self.last_percent))
+                )
+                self.scale.set_sensitive(False)
+            else:
+                try:
+                    limit = int(raw_limit)
+                except ValueError:
+                    limit = DEFAULT_LIMIT
+                limit = max(MIN_LIMIT, min(MAX_LIMIT, limit))
+                self.full_switch.set_active(False)
+                self.scale.set_sensitive(True)
+                self.scale.set_value(limit)
+                self.last_percent = limit
+            self.updating = False
+            if force:
+                self.dirty = False
+                self.apply_button.set_sensitive(False)
+        else:
+            self.full_switch.set_sensitive(True)
+
+    def poll(self):
+        self.reload()
+        return GLib.SOURCE_CONTINUE
+
+
+class ChargeLimitApp(Adw.Application):
+    def __init__(self):
+        super().__init__(
+            application_id=APP_ID,
+            flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+        )
+        self.window = None
+
+    def do_activate(self):
+        if self.window is None:
+            self.window = ChargeLimitWindow(self)
+        self.window.present()
+
+
+if __name__ == "__main__":
+    sys.exit(ChargeLimitApp().run(sys.argv))

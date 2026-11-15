@@ -1,8 +1,10 @@
 #!/bin/sh
-# One-tap charge-limit toggle for the Phosh app grid / favorites row.
-# Switches between the 80 % cap and full charging, reusing pmos-charge-cap.
+# One-tap charge-limit toggle for the Phosh app grid.
+# Switches between the user's saved cap and full charging, reusing
+# pmos-charge-cap.  The full GUI is /usr/local/bin/pmos-charge-limit.
 SYS=/sys/kernel/pmos_charge_cap/limit
 CLI=/usr/local/bin/pmos-charge-cap
+CONF=/etc/pmos-charge-cap.conf
 NOTIFY=/usr/bin/notify-send
 
 notify() {
@@ -14,9 +16,16 @@ if [ ! -r "$SYS" ]; then
 	exit 1
 fi
 
+saved=$(sed -n 's/^LIMIT=//p' "$CONF" 2>/dev/null | tail -n 1)
+case "$saved" in
+	''|full|100) saved=80 ;;
+	[5-9][0-9]) ;;
+	*) saved=80 ;;
+esac
+
 cur=$(cat "$SYS")
 if [ "$cur" = "full" ]; then
-	new=80
+	new=$saved
 else
 	new=full
 fi

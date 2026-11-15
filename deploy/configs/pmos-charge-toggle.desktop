@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Charge limit
-Comment=Switch battery charging between 80% and full
+Name=Charge limit (quick)
+Comment=Switch between the saved charge limit and full charging
 Exec=/usr/local/bin/pmos-charge-toggle
 Icon=battery-good-symbolic
 Terminal=false

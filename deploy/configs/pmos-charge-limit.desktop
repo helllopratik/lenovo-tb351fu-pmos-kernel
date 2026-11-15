@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Charge limit
+Comment=Choose when the battery stops charging
+Exec=/usr/local/bin/pmos-charge-limit
+Icon=battery-good-symbolic
+Terminal=false
+Categories=System;Settings;
+Keywords=battery;charge;limit;charging;
+X-Purism-FormFactor=Workstation;Mobile;
+StartupNotify=true
