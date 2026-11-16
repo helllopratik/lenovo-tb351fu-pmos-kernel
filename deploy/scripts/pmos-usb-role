@@ -1,0 +1,118 @@
+#!/bin/sh
+# Switch the MT6789 MUSB controller between gadget (device) and host mode.
+#
+# MUSB itself is switched through the standard usb_role class.  VBUS for host
+# mode is produced by the SC8989x charger, exposed by pmos_otg_vbus.ko as
+# /sys/kernel/pmos_otg_vbus/enable.
+#
+# Usage: pmos-usb-role host|device|none|status
+
+set -u
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ROLE="${1:-status}"
+VBUS=/sys/kernel/pmos_otg_vbus/enable
+GADGET=/sys/kernel/config/usb_gadget/g1
+KMSG=/dev/kmsg
+
+log() {
+	echo "PMOSUSBROLE: $*"
+	echo "PMOSUSBROLE: $*" > "$KMSG" 2>/dev/null || true
+}
+
+role_file() {
+	ls /sys/class/usb_role/*/role 2>/dev/null | head -n 1
+}
+
+udc_name() {
+	ls /sys/class/udc 2>/dev/null | head -n 1
+}
+
+vbus_write() {
+	[ -w "$VBUS" ] || return 0
+	echo "$1" > "$VBUS" 2>/dev/null || log "WARN: cannot write $VBUS"
+}
+
+gadget_unbind() {
+	[ -d "$GADGET" ] || return 0
+	[ -e "$GADGET/UDC" ] || return 0
+	[ -n "$(cat "$GADGET/UDC" 2>/dev/null)" ] || return 0
+	echo "" > "$GADGET/UDC" 2>/dev/null || true
+}
+
+gadget_bind() {
+	[ -d "$GADGET" ] || return 0
+	udc=$(udc_name)
+	[ -n "$udc" ] || return 0
+	# Only bind when the controller is not already bound.
+	if [ "$(cat "$GADGET/UDC" 2>/dev/null)" = "$udc" ]; then
+		return 0
+	fi
+	i=0
+	while [ "$i" -lt 30 ]; do
+		if echo "$udc" > "$GADGET/UDC" 2>/dev/null; then
+			return 0
+		fi
+		sleep 0.1
+		i=$((i + 1))
+	done
+	log "WARN: cannot bind gadget to $udc"
+}
+
+# The charger stack is a module; give pmos-charger.service a moment if this
+# helper was called very early during boot.
+wait_vbus() {
+	i=0
+	while [ ! -e "$VBUS" ] && [ "$i" -lt 50 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+}
+
+role=$(role_file)
+if [ -z "$role" ]; then
+	log "ERROR: no usb_role switch found; MUSB is not in OTG mode"
+	exit 1
+fi
+
+case "$ROLE" in
+host)
+	wait_vbus
+	vbus_write 1
+	gadget_unbind
+	if ! echo host > "$role"; then
+		log "ERROR: cannot set host role"
+		vbus_write 0
+		exit 1
+	fi
+	log "host mode (OTG VBUS=$(cat "$VBUS" 2>/dev/null || echo n/a))"
+	;;
+device)
+	if ! echo device > "$role"; then
+		log "ERROR: cannot set device role"
+		exit 1
+	fi
+	gadget_bind
+	vbus_write 0
+	log "device mode"
+	;;
+none)
+	echo none > "$role" 2>/dev/null || true
+	gadget_unbind
+	vbus_write 0
+	log "role none"
+	;;
+status)
+	echo "role: $(cat "$role" 2>/dev/null)"
+	echo "otg-vbus: $(cat "$VBUS" 2>/dev/null || echo "module-not-loaded")"
+	echo "udc: $(udc_name)"
+	if [ -d "$GADGET" ]; then
+		echo "gadget-bound: $(cat "$GADGET/UDC" 2>/dev/null)"
+	fi
+	;;
+*)
+	echo "usage: $0 host|device|none|status" >&2
+	exit 2
+	;;
+esac

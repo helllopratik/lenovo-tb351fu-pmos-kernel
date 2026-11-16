@@ -1,0 +1,17 @@
+# Android UFS partitions are managed explicitly by pmos-storage.service.
+# Never let udisks2 mount raw UFS children: they include userdata (which
+# hosts the running pmOS rootfs.img) and the super partition with the
+# read-only logical Android partitions.
+#
+# Match the UFS host controller, not sdX names.  The controller exposes
+# several SCSI LUNs (sda/sdb boot LUNs, sdc userdata) and those names can
+# move if another SCSI device probes first.  USB disks and SD cards keep
+# normal udisks2/Nautilus auto-mount behaviour.
+SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_PATH}=="platform-11270000.ufshci*", ENV{UDISKS_IGNORE}="1"
+
+# Fallback for environments where ID_PATH is not populated.
+SUBSYSTEM=="block", KERNEL=="sdc", ENV{UDISKS_IGNORE}="1"
+SUBSYSTEM=="block", KERNEL=="sdc[0-9]*", ENV{UDISKS_IGNORE}="1"
+
+# eMMC boot partitions are raw boot blocks, never filesystems.
+SUBSYSTEM=="block", KERNEL=="mmcblk0boot[0-9]*", ENV{UDISKS_IGNORE}="1"

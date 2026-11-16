@@ -91,7 +91,7 @@ while :; do
     fi
 
     numid=$(amixer -c 0 controls 2>/dev/null |
-        sed -n "s/^numid=\([0-9]*\),iface=CARD,name='Headphone Jack'$/\1/p" |
+        sed -n "s/^numid=\([0-9]*\),iface=CARD,name='Headset Jack'$/\1/p" |
         head -n 1)
 
     if [ -n "$numid" ]; then

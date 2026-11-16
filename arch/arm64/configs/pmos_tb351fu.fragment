@@ -44,3 +44,25 @@ CONFIG_COMMON_CLK_MT6789_MFGCFG=y
 # (WiFi/BT/charger).  Do not let setlocalversion append the current HEAD.
 CONFIG_LOCALVERSION="-android16-5-gd2c91f0c3b11-4k-g9cfa397996e7-dirty"
 CONFIG_LOCALVERSION_AUTO=n
+
+# ---------------------------------------------------------------------------
+# USB host / OTG peripherals and Android storage.
+#
+# MUSB is switched to dual role by the dr_mode fixup in
+# drivers/usb/musb/mediatek.c.  Keep the common USB device classes built in so
+# a freshly booted system can use a storage stick, keyboard, headset, webcam
+# or serial adapter without hunting for modules that were never packaged.
+CONFIG_NTFS3_FS=y
+CONFIG_USB_SERIAL=y
+CONFIG_USB_SERIAL_FTDI_SIO=y
+CONFIG_USB_SERIAL_CP210X=y
+CONFIG_USB_SERIAL_CH341=y
+CONFIG_USB_SERIAL_PL2303=y
+CONFIG_USB_SERIAL_OPTION=y
+CONFIG_USB_NET_DRIVERS=y
+CONFIG_USB_USBNET=y
+CONFIG_USB_NET_CDCETHER=y
+CONFIG_USB_NET_CDC_NCM=y
+CONFIG_USB_NET_RNDIS_HOST=y
+CONFIG_USB_RTL8152=y
+CONFIG_USB_NET_AX88179_178A=y

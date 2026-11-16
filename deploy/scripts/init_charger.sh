@@ -41,6 +41,15 @@ if ! grep -q "^sc8989x_charger " /proc/modules 2>/dev/null; then
 	insmod "$MODDIR/sc8989x_charger.ko" || kp "WARN insmod sc8989x failed"
 fi
 
+# USB OTG VBUS control.  This wrapper resolves charger_class's
+# get_charger_by_name()/charger_dev_enable_otg() at load time, so it must come
+# after sc8989x has registered "primary_chg".  Userspace toggles it through
+# /sys/kernel/pmos_otg_vbus/enable (pmos-usb-role host|device).
+if [ -f "$MODDIR/pmos_otg_vbus.ko" ] &&
+	! grep -q "^pmos_otg_vbus " /proc/modules 2>/dev/null; then
+	insmod "$MODDIR/pmos_otg_vbus.ko" || kp "WARN insmod pmos_otg_vbus failed"
+fi
+
 # The cap module needs the mm8013 gauge.
 i=0
 while [ ! -e /sys/class/power_supply/battery/capacity ] && [ "$i" -lt 40 ]; do

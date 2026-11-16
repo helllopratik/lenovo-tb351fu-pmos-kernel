@@ -1,0 +1,17 @@
+[Unit]
+Description=Internal storage and read-only Android partitions
+Documentation=file:///usr/share/doc/pmos-storage/README.md
+After=local-fs.target systemd-udevd.service
+ConditionPathExists=/data_host
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/local/bin/pmos-storage-groups.sh
+ExecStart=/usr/local/bin/pmos-storage-mount.sh
+ExecStop=/usr/local/bin/pmos-storage-umount.sh
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

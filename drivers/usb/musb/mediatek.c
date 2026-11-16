@@ -13,6 +13,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/usb/role.h>
 #include <linux/usb/usb_phy_generic.h>
 #include "musb_core.h"
@@ -144,7 +145,11 @@ static int mtk_otg_switch_init(struct mtk_glue *glue)
 
 static void mtk_otg_switch_exit(struct mtk_glue *glue)
 {
-	return usb_role_switch_unregister(glue->role_sw);
+	if (!glue->role_sw)
+		return;
+
+	usb_role_switch_unregister(glue->role_sw);
+	glue->role_sw = NULL;
 }
 
 static irqreturn_t generic_interrupt(int irq, void *__hci)
@@ -389,6 +394,30 @@ static const struct platform_device_info mtk_dev_info = {
 	.dma_mask = DMA_BIT_MASK(32),
 };
 
+/*
+ * Use the standard "dr_mode" property instead of the vendor "mode" cell.
+ * The stock TB351FU DTB advertises dr_mode = "otg"; honouring it is what
+ * makes MUSB register the role switch and set up both the host and gadget
+ * sides.  Boards without the property keep the historical peripheral-only
+ * behaviour.
+ */
+static u8 mtk_musb_get_dr_mode(struct device *dev)
+{
+	const char *dr_mode;
+	int ret;
+
+	ret = device_property_read_string(dev, "dr_mode", &dr_mode);
+	if (ret)
+		return USB_DR_MODE_PERIPHERAL;
+
+	if (!strcmp(dr_mode, "host"))
+		return USB_DR_MODE_HOST;
+	if (!strcmp(dr_mode, "otg"))
+		return USB_DR_MODE_OTG;
+
+	return USB_DR_MODE_PERIPHERAL;
+}
+
 static int mtk_musb_probe(struct platform_device *pdev)
 {
 	struct musb_hdrc_platform_data *pdata;
@@ -420,7 +449,11 @@ static int mtk_musb_probe(struct platform_device *pdev)
 
 	pdata->config = &mtk_musb_hdrc_config;
 	pdata->platform_ops = &mtk_musb_ops;
-	pdata->mode = USB_DR_MODE_PERIPHERAL;
+	pdata->mode = mtk_musb_get_dr_mode(dev);
+	/* Host mode advertises 500 mA (the field is mA/2). */
+	pdata->power = 250;
+
+	pr_err("PMOSUSB: dr_mode -> pdata->mode=%u\n", pdata->mode);
 
 	switch (pdata->mode) {
 	case USB_DR_MODE_HOST:
