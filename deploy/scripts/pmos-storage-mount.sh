@@ -32,7 +32,7 @@ LOG=/run/pmos-storage.log
 SUPERMAP=/usr/local/bin/pmos-supermap.py
 KMSG=/dev/kmsg
 
-mkdir -p "$STATE" "$MEDIA_ROOT" "$PARTS"
+mkdir -p "$STATE" "$MEDIA_ROOT" "$PARTS" "$INTERNAL" "$ANDROID_DATA"
 : > "$LOG"
 
 log() {
