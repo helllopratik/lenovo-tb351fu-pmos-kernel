@@ -29,7 +29,10 @@ the vendor charger stack:
 
 The wrapper resolves `get_charger_by_name()` and `charger_dev_enable_otg()`
 from `charger_class.ko` at load time and binds the charger named
-`primary_chg` (SC8989x).
+`primary_chg` (SC8989x).  Its init returns `-ENODEV` until that charger has
+registered, so `init_charger.sh` retries the load for up to 10 seconds.  Before
+this retry existed, a probe-order race made the module fail once at boot and
+left OTG VBUS unavailable until it was loaded by hand.
 
 ## Automatic role detection is not available yet
 

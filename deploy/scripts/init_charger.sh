@@ -15,6 +15,27 @@ CONF=/etc/pmos-charge-cap.conf
 STATUS=/run/pmos_charger_status
 
 kp() { echo "PMOSCHG: $*"; echo "PMOSCHG: $*" > "$KMSG" 2>/dev/null; }
+
+# pmos_otg_vbus returns -ENODEV until sc8989x has registered "primary_chg".
+# insmod is synchronous, but probe ordering on the vendor stack is not fully
+# deterministic, so retry briefly instead of losing OTG for the whole boot.
+load_otg_vbus() {
+	[ -f "$MODDIR/pmos_otg_vbus.ko" ] || return 0
+	grep -q "^pmos_otg_vbus " /proc/modules 2>/dev/null && return 0
+	i=0
+	while [ "$i" -lt 40 ]; do
+		if insmod "$MODDIR/pmos_otg_vbus.ko"; then
+			kp "loaded pmos_otg_vbus (attempt $((i + 1)))"
+			return 0
+		fi
+		grep -q "^pmos_otg_vbus " /proc/modules 2>/dev/null && return 0
+		i=$((i + 1))
+		sleep 0.25
+	done
+	kp "WARN insmod pmos_otg_vbus failed after $i attempts"
+	return 1
+}
+
 exec > /tmp/pmos_charger_init.log 2>&1
 
 kp "=== charger stack starting ==="
@@ -47,7 +68,7 @@ fi
 # /sys/kernel/pmos_otg_vbus/enable (pmos-usb-role host|device).
 if [ -f "$MODDIR/pmos_otg_vbus.ko" ] &&
 	! grep -q "^pmos_otg_vbus " /proc/modules 2>/dev/null; then
-	insmod "$MODDIR/pmos_otg_vbus.ko" || kp "WARN insmod pmos_otg_vbus failed"
+	load_otg_vbus
 fi
 
 # The cap module needs the mm8013 gauge.
