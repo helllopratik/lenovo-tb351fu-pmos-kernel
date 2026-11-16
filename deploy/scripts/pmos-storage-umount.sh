@@ -31,21 +31,45 @@ is_mounted() {
 
 log "=== internal storage teardown ==="
 
-if is_mounted "$PARTS"; then
-	findmnt -rn -o TARGET -R "$PARTS" 2>/dev/null | sort -r |
+if [ -d "$PARTS" ]; then
+	# $PARTS itself is a plain directory, not a mountpoint, so findmnt -R
+	# cannot walk it.  Select every mount whose target is below it instead.
+	findmnt -rn -o TARGET |
+	awk -v p="$PARTS/" 'index($0, p) == 1' | sort -r |
 	while IFS= read -r mnt; do
 		[ -n "$mnt" ] || continue
-		[ "$mnt" = "$PARTS" ] && continue
 		umount "$mnt" 2>/dev/null && log "unmounted $mnt" || log "WARN: cannot unmount $mnt"
 	done
 fi
 
 if [ -f "$STATE/loops" ]; then
+	left=""
 	while IFS= read -r loop; do
 		[ -n "$loop" ] || continue
-		losetup -d "$loop" 2>/dev/null && log "detached $loop" || true
+		if findmnt -rn -o SOURCE | grep -Fqx "$loop"; then
+			log "WARN: $loop is still mounted; not detaching"
+			if [ -z "$left" ]; then left="$loop"; else left="$left
+$loop"; fi
+			continue
+		fi
+		losetup -d "$loop" 2>/dev/null || true
+		if [ -s "/sys/block/${loop##*/}/loop/backing_file" ]; then
+			# Still attached: either a mount is using it or detach
+			# failed.  Keep it tracked for the next attempt.
+			log "WARN: cannot detach $loop"
+			if [ -z "$left" ]; then left="$loop"; else left="$left
+$loop"; fi
+		else
+			# losetup -d can race with the last close and return
+			# failure for a loop the kernel has already released.
+			log "detached $loop"
+		fi
 	done < "$STATE/loops"
-	rm -f "$STATE/loops"
+	if [ -n "$left" ]; then
+		printf '%s\n' "$left" > "$STATE/loops"
+	else
+		rm -f "$STATE/loops"
+	fi
 fi
 
 for mnt in "$ANDROID_DATA" "$INTERNAL"; do

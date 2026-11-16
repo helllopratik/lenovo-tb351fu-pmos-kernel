@@ -14,6 +14,9 @@
 #   * Android /data is only ever exposed through a read-only bind.
 #   * Raw UFS partitions are mounted read-only with ext4 journal replay
 #     disabled (noload) so a slot-A Android filesystem is never modified.
+#   * The Lenovo "elabel" partition is mounted through a read-only
+#     512-byte-sector loop device because its ext4 superblock is invisible
+#     when the raw partition is read with 4096-byte logical sectors.
 #   * SD cards and USB storage are intentionally left to udisks2/Nautilus.
 #
 # This script is idempotent: re-running it leaves existing mounts alone.
@@ -44,6 +47,20 @@ log() {
 
 is_mounted() {
 	findmnt -n -M "$1" >/dev/null 2>&1
+}
+
+# Remember the loop device backing an existing mount so a service restart or a
+# manual re-run can still clean it up later.  Raw UFS partitions are mounted
+# directly and are ignored.
+record_loop() {
+	mnt=$1
+	src=$(findmnt -rn -o SOURCE "$mnt" 2>/dev/null)
+	case "$src" in
+	/dev/loop*)
+		grep -Fqx "$src" "$STATE/loops" 2>/dev/null ||
+			echo "$src" >> "$STATE/loops"
+		;;
+	esac
 }
 
 # Wait for the initramfs to finish mounting Android userdata.  It is normally
@@ -140,14 +157,52 @@ mount_one() {
 	esac
 
 	if is_mounted "$mnt"; then
+		record_loop "$mnt"
 		return 0
 	fi
 	mkdir -p "$mnt"
 	if mount -t "$fs" -o "$opts" "$dev" "$mnt"; then
+		record_loop "$mnt"
 		log "mounted $label ($fs, ro) at $mnt"
 		return 0
 	fi
 	log "WARN: cannot mount $label ($fs) from $dev"
+	rmdir "$mnt" 2>/dev/null || true
+	return 1
+}
+
+# Some UFS partitions, notably Lenovo's "elabel", contain a filesystem built
+# with 512-byte sectors while the raw partition advertises 4096-byte logical
+# sectors.  blkid cannot see the ext4 superblock and a direct mount fails.
+# Put such a partition behind a 512-byte-sector loop device instead.
+mount_elabel() {
+	dev=$1
+	mnt="$PARTS/elabel"
+
+	if is_mounted "$mnt"; then
+		record_loop "$mnt"
+		return 0
+	fi
+	mkdir -p "$mnt"
+	loop=$(losetup --find --show --read-only --sector-size 512 "$dev" 2>>"$LOG") || {
+		log "WARN: losetup failed for elabel from $dev"
+		rmdir "$mnt" 2>/dev/null || true
+		return 1
+	}
+	echo "$loop" >> "$STATE/loops"
+	fs=$(blkid -p -o value -s TYPE "$loop" 2>/dev/null)
+	if [ "$fs" != "ext4" ]; then
+		log "WARN: elabel loop $loop has no ext4 filesystem (detected '${fs:-none}')"
+		losetup -d "$loop" 2>/dev/null || true
+		rmdir "$mnt" 2>/dev/null || true
+		return 1
+	fi
+	if mount -t ext4 -o ro,nosuid,nodev,noload "$loop" "$mnt"; then
+		log "mounted elabel (ext4, ro, 512-byte sectors) at $mnt"
+		return 0
+	fi
+	log "WARN: cannot mount elabel (ext4) from $loop"
+	losetup -d "$loop" 2>/dev/null || true
 	rmdir "$mnt" 2>/dev/null || true
 	return 1
 }
@@ -184,6 +239,7 @@ mount_super_partitions() {
 		[ -n "$name" ] || continue
 		mnt="$PARTS/$name"
 		if is_mounted "$mnt"; then
+			record_loop "$mnt"
 			continue
 		fi
 		mkdir -p "$mnt"
@@ -227,11 +283,15 @@ mount_raw_ufs_partitions() {
 
 	lsblk -rno NAME,FSTYPE,PARTLABEL "/dev/$parent" 2>/dev/null |
 	while IFS=' ' read -r name fs label; do
-		[ -n "$fs" ] || continue
 		# Android userdata is already live at /data_host and super is
 		# handled through liblp, never mount either raw.
 		[ "$label" = "userdata" ] && continue
 		[ "$label" = "super" ] && continue
+		if [ "$label" = "elabel" ]; then
+			mount_elabel "/dev/$name"
+			continue
+		fi
+		[ -n "$fs" ] || continue
 		case "$fs" in
 		ext4|f2fs|erofs|vfat|exfat) ;;
 		*) continue ;;

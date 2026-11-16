@@ -7,8 +7,9 @@ desktop without ever writing to Android's system/vendor/boot partitions.
 |------|------|--------|---------|
 | `/media/internal` | rw | bind of `/data_host/media/0` | Shared storage (Downloads, Pictures, ...) |
 | `/media/android-data` | ro | bind of `/data_host` | Browse Android `/data` |
-| `/media/android-parts/<name>` | ro | loop over super extents | `system_a`, `vendor_a`, `product_a`, ... |
+| `/media/android-parts/<name>` | ro | loop over super extents | `system_a`, `vendor_a`, `product_a`, ... (erofs) |
 | `/media/android-parts/<label>` | ro | raw UFS partitions | `metadata`, `persist`, `nvdata`, ... |
+| `/media/android-parts/elabel` | ro | 512-byte-sector loop over raw `elabel` | Lenovo factory data |
 
 SD cards and USB storage are **not** handled here. udisks2/Nautilus mount them
 under `/run/media/user/` as usual.
@@ -79,6 +80,22 @@ vendor_dlkm_a   offset 7517241344  size 104857600
 system_dlkm_a   offset 7622098944  size 104857600
 odm_dlkm_a      offset 7726956544  size 104857600
 ```
+
+## elabel sector-size workaround
+
+The raw `elabel` partition advertises 4096-byte logical sectors but contains an
+ext4 filesystem built with 512-byte sectors.  `blkid` therefore reports no
+filesystem for the partition and a direct mount fails.  The service puts it
+behind a read-only 512-byte-sector loop device and mounts that with
+`ro,noload`:
+
+```
+losetup --find --show --read-only --sector-size 512 /dev/sdc61
+mount -t ext4 -o ro,noload /dev/loopN /media/android-parts/elabel
+```
+
+The loop device is recorded in `/run/pmos-storage/loops`, so
+`pmos-storage-umount.sh` detaches it together with the super-partition loops.
 
 ## Troubleshooting
 
