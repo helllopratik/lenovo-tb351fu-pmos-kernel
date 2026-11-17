@@ -66,3 +66,13 @@ CONFIG_USB_NET_CDC_NCM=y
 CONFIG_USB_NET_RNDIS_HOST=y
 CONFIG_USB_RTL8152=y
 CONFIG_USB_NET_AX88179_178A=y
+
+# ---------------------------------------------------------------------------
+# MediaTek Camera (ISP3.0 SENINF + CAMSV) & Device Tree Overlay support
+# ---------------------------------------------------------------------------
+CONFIG_MTK_SENINF30=m
+CONFIG_MTK_CAMSV=m
+CONFIG_PHY_MTK_MIPI_CSI_0_5=m
+CONFIG_OF_OVERLAY=y
+CONFIG_OF_CONFIGFS=y
+

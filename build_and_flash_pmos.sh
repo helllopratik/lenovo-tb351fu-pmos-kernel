@@ -61,7 +61,7 @@ echo "========================================================================"
 # Re-apply the TB351FU feature fragment (nftables + built-in zram) before
 # every build so these options cannot be lost by a config regeneration.
 "$COMMON_DIR/apply_pmos_kernel_config.sh"
-make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 -j$(nproc) Image
+make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 -j$(nproc) Image modules
 
 # Built-in modules (notably zram) are invisible to kmod unless the
 # per-release modules.builtin index exists.  Stage it for the installer
