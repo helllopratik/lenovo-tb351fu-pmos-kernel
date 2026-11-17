@@ -102,8 +102,11 @@ static const struct mtk_clk_desc cam_rb_desc = {
 
 static const struct of_device_id of_match_clk_mt6789_cam[] = {
 	{ .compatible = "mediatek,mt6789-camsys", .data = &cam_m_desc },
+	{ .compatible = "mediatek,mt6789-camsys_main", .data = &cam_m_desc },
 	{ .compatible = "mediatek,mt6789-camsys-rawa", .data = &cam_ra_desc },
+	{ .compatible = "mediatek,mt6789-camsys_rawa", .data = &cam_ra_desc },
 	{ .compatible = "mediatek,mt6789-camsys-rawb", .data = &cam_rb_desc },
+	{ .compatible = "mediatek,mt6789-camsys_rawb", .data = &cam_rb_desc },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_match_clk_mt6789_cam);
