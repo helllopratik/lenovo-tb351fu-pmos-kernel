@@ -26,6 +26,10 @@
 
 #define MTK_CAMSV_AUTOSUSPEND_DELAY_MS 100
 
+static bool no_iommu = true;
+module_param(no_iommu, bool, 0644);
+MODULE_PARM_DESC(no_iommu, "Allow probing without IOMMU (CMA contiguous buffers)");
+
 static const struct mtk_cam_conf camsv_conf = {
 	.tg_sen_mode = CAMSV_TG_SEN_MODE_DBL_DATA_BUS_EN,
 	.module_en = CAMSV_MODULE_EN_DB_EN | CAMSV_MODULE_EN_TG_EN,
@@ -275,10 +279,11 @@ static int mtk_camsv_probe(struct platform_device *pdev)
 
 	struct mtk_cam_dev *cam_dev;
 	struct device *dev = &pdev->dev;
+	struct resource *res;
 	unsigned int i;
 	int ret;
 
-	if (!device_iommu_mapped(dev))
+	if (!no_iommu && !device_iommu_mapped(dev))
 		return -EPROBE_DEFER;
 
 	cam_dev = devm_kzalloc(dev, sizeof(*cam_dev), GFP_KERNEL);
@@ -292,20 +297,32 @@ static int mtk_camsv_probe(struct platform_device *pdev)
 	cam_dev->dev = dev;
 	dev_set_drvdata(dev, cam_dev);
 
-	cam_dev->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(cam_dev->regs))
-		return dev_err_probe(dev, PTR_ERR(cam_dev->regs),
-				     "failed to map register base\n");
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (res) {
+		cam_dev->regs = devm_platform_ioremap_resource(pdev, 0);
+		if (IS_ERR(cam_dev->regs))
+			return dev_err_probe(dev, PTR_ERR(cam_dev->regs),
+					     "failed to map register base\n");
 
-	cam_dev->regs_img0 = devm_platform_ioremap_resource(pdev, 1);
-	if (IS_ERR(cam_dev->regs_img0))
-		return dev_err_probe(dev, PTR_ERR(cam_dev->regs_img0),
-				     "failed to map img0 register base\n");
+		cam_dev->regs_img0 = devm_platform_ioremap_resource(pdev, 1);
+		if (IS_ERR(cam_dev->regs_img0))
+			return dev_err_probe(dev, PTR_ERR(cam_dev->regs_img0),
+					     "failed to map img0 register base\n");
 
-	cam_dev->regs_tg = devm_platform_ioremap_resource(pdev, 2);
-	if (IS_ERR(cam_dev->regs_tg))
-		return dev_err_probe(dev, PTR_ERR(cam_dev->regs_tg),
-				     "failed to map TG register base\n");
+		cam_dev->regs_tg = devm_platform_ioremap_resource(pdev, 2);
+		if (IS_ERR(cam_dev->regs_tg))
+			return dev_err_probe(dev, PTR_ERR(cam_dev->regs_tg),
+					     "failed to map TG register base\n");
+	} else {
+		void __iomem *base = devm_platform_ioremap_resource(pdev, 0);
+
+		if (IS_ERR(base))
+			return dev_err_probe(dev, PTR_ERR(base),
+					     "failed to map register base\n");
+		cam_dev->regs = base + 0x40;
+		cam_dev->regs_img0 = base + 0x208;
+		cam_dev->regs_tg = base + 0x400;
+	}
 
 	cam_dev->num_clks = ARRAY_SIZE(clk_names);
 	cam_dev->clks = devm_kcalloc(dev, cam_dev->num_clks,
@@ -316,7 +333,7 @@ static int mtk_camsv_probe(struct platform_device *pdev)
 	for (i = 0; i < cam_dev->num_clks; ++i)
 		cam_dev->clks[i].id = clk_names[i];
 
-	ret = devm_clk_bulk_get(dev, cam_dev->num_clks, cam_dev->clks);
+	ret = devm_clk_bulk_get_optional(dev, cam_dev->num_clks, cam_dev->clks);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to get clocks: %i\n",
 				     ret);
@@ -419,6 +436,13 @@ static const struct dev_pm_ops mtk_camsv_pm_ops = {
 
 static const struct of_device_id mtk_camsv_of_ids[] = {
 	{ .compatible = "mediatek,mt8365-camsv", .data = &camsv_conf },
+	{ .compatible = "mediatek,mt6789-camsv", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv2_legacy", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv3_legacy", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv4_legacy", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv5_legacy", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv6_legacy", .data = &camsv_conf },
+	{ .compatible = "mediatek,camsv7_legacy", .data = &camsv_conf },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mtk_camsv_of_ids);

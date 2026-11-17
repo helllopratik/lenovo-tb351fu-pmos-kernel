@@ -28,7 +28,7 @@
 #define SENINF_SETTLE_DELAY		0x15
 #define SENINF_HS_TRAIL_PARAMETER	0x8
 
-#define SENINF_MAX_NUM_INPUTS		4
+#define SENINF_MAX_NUM_INPUTS		6
 #define SENINF_MAX_NUM_OUTPUTS		6
 #define SENINF_MAX_NUM_MUXES		6
 #define SENINF_MAX_NUM_PADS		(SENINF_MAX_NUM_INPUTS + \
@@ -55,20 +55,33 @@ enum mtk_seninf_port {
 	CSI_PORT_1,	/* 4D1C */
 	CSI_PORT_2,	/* 4D1C */
 	CSI_PORT_0B,	/* 2D1C */
+	CSI_PORT_1B,
+	CSI_PORT_2B,
 };
 
 enum mtk_seninf_id {
 	SENINF_1 = 0,
 	SENINF_2 = 1,
 	SENINF_3 = 2,
+	SENINF_4 = 3,
 	SENINF_5 = 4,
+	SENINF_6 = 5,
 };
 
-static const u32 port_to_seninf_id[] = {
+static const u32 port_to_seninf_id_8365[] = {
 	[CSI_PORT_0] = SENINF_1,
 	[CSI_PORT_1] = SENINF_3,
 	[CSI_PORT_2] = SENINF_5,
 	[CSI_PORT_0B] = SENINF_2,
+};
+
+static const u32 port_to_seninf_id_6789[] = {
+	[0] = SENINF_1,
+	[1] = SENINF_2,
+	[2] = SENINF_3,
+	[3] = SENINF_4,
+	[4] = SENINF_5,
+	[5] = SENINF_6,
 };
 
 enum mtk_seninf_phy_mode {
@@ -96,6 +109,7 @@ struct mtk_seninf_conf {
 	u8 nb_inputs;
 	u8 nb_muxes;
 	u8 nb_outputs;
+	bool is_mt6789;
 };
 
 /**
@@ -448,6 +462,9 @@ static void __mtk_seninf_mux_update(struct mtk_seninf_mux *mux, u32 reg,
 
 static void mtk_seninf_csi2_setup_phy(struct mtk_seninf *priv)
 {
+	if (priv->conf->is_mt6789)
+		return;
+
 	/* CSI0 */
 	if (priv->inputs[CSI_PORT_0].phy) {
 		const struct mtk_seninf_input *input = &priv->inputs[CSI_PORT_0];
@@ -623,6 +640,14 @@ static void mtk_seninf_input_setup_csi2(struct mtk_seninf_input *input,
 	mtk_seninf_input_update(input, SENINF_CTRL, CSI2_SW_RST, 1);
 	udelay(1);
 	mtk_seninf_input_update(input, SENINF_CTRL, CSI2_SW_RST, 0);
+
+	if (input->seninf->conf->is_mt6789) {
+		unsigned int ch;
+
+		for (ch = 0; ch < num_data_lanes; ch++)
+			mtk_seninf_input_write(input, SENINF_CSI2_CH0_CTRL + 0x4 * ch,
+					       BIT(8 + ch));
+	}
 }
 
 static void mtk_seninf_mux_setup(struct mtk_seninf_mux *mux,
@@ -684,6 +709,11 @@ static void mtk_seninf_mux_setup(struct mtk_seninf_mux *mux,
 	/* SPARE field meaning is unknown */
 	val |= 0xc0000;
 	mtk_seninf_mux_write(mux, SENINF_MUX_SPARE, val);
+
+	if (mux->seninf->conf->is_mt6789) {
+		mtk_seninf_mux_write(mux, SENINF_MUX_CTRL_1, 0x001f0200);
+		mtk_seninf_mux_write(mux, SENINF_MUX_IRQ_EN, 0x80000000);
+	}
 }
 
 static void mtk_seninf_top_mux_setup(struct mtk_seninf *priv,
@@ -691,6 +721,32 @@ static void mtk_seninf_top_mux_setup(struct mtk_seninf *priv,
 				     const struct mtk_seninf_mux *mux)
 {
 	unsigned int val;
+
+	if (priv->conf->is_mt6789) {
+		unsigned int reg = SENINF_TOP_MUX_CTRL_0 + 4 * (mux->mux_id / 4);
+		unsigned int shift = (mux->mux_id % 4) * 8;
+		int k;
+
+		val = mtk_seninf_read(priv, reg);
+		val &= ~(0x1f << shift);
+		val |= (seninf_id & 0x1f) << shift;
+		mtk_seninf_write(priv, reg, val);
+
+		/* CAM MUX: 16 muxes, 8-bit stride, identity routing */
+		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_0, 0x03020100);
+		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_1, 0x07060504);
+		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_2, 0x0b0a0908);
+		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_3, 0x0f0e0d0c);
+
+		/* CAM MUX enable bitmap (16 muxes) */
+		mtk_seninf_write(priv, SENINF_CAM_MUX_ENABLE, 0x0000ffff);
+		mtk_seninf_write(priv, SENINF_CAM_MUX_ENABLE_2, 0x0000ffff);
+
+		/* CAM MUX CHK_CTL_0 @ 0x500 + 0x10*k = 0x02 */
+		for (k = 0; k < 16; k++)
+			mtk_seninf_write(priv, SENINF_CAM_MUX_CHK_CTL_0 + 0x10 * k, 0x02);
+		return;
+	}
 
 	/*
 	 * Use the top mux (from SENINF input to MUX) to configure routing, and
@@ -1087,7 +1143,7 @@ struct mtk_seninf_async_subdev {
 static int mtk_seninf_fwnode_parse(struct device *dev, unsigned int id)
 {
 	static const char * const phy_names[] = {
-		"csi0", "csi1", "csi2", "csi0b"
+		"csi0", "csi1", "csi2", "csi3", "csi4", "csi5"
 	};
 	struct mtk_seninf *priv = dev_get_drvdata(dev);
 	struct fwnode_handle *ep, *fwnode;
@@ -1127,17 +1183,35 @@ static int mtk_seninf_fwnode_parse(struct device *dev, unsigned int id)
 	input = &priv->inputs[port];
 
 	input->pad = port;
-	input->seninf_id = port_to_seninf_id[port];
+	if (priv->conf->is_mt6789) {
+		if (port < ARRAY_SIZE(port_to_seninf_id_6789))
+			input->seninf_id = port_to_seninf_id_6789[port];
+		else
+			input->seninf_id = port;
+	} else {
+		if (port < ARRAY_SIZE(port_to_seninf_id_8365))
+			input->seninf_id = port_to_seninf_id_8365[port];
+		else
+			input->seninf_id = 0;
+	}
 	input->base = priv->base + 0x1000 * input->seninf_id;
 	input->seninf = priv;
 
 	input->bus = vep.bus.mipi_csi2;
 
-	input->phy = devm_phy_get(dev, phy_names[port]);
+	if (port < ARRAY_SIZE(phy_names))
+		input->phy = devm_phy_get(dev, phy_names[port]);
+	else
+		input->phy = ERR_PTR(-ENODEV);
+
 	if (IS_ERR(input->phy)) {
-		dev_err(dev, "failed to get phy: %ld\n", PTR_ERR(input->phy));
-		ret = PTR_ERR(input->phy);
-		goto out;
+		if (PTR_ERR(input->phy) == -ENODEV) {
+			input->phy = NULL;
+		} else {
+			dev_err(dev, "failed to get phy: %ld\n", PTR_ERR(input->phy));
+			ret = PTR_ERR(input->phy);
+			goto out;
+		}
 	}
 	input->phy_mode = SENINF_PHY_MODE_4D1C;
 
@@ -1367,6 +1441,7 @@ static int seninf_probe(struct platform_device *pdev)
 {
 	static const char * const clk_names[] = { "camsys", "top_mux" };
 	struct device *dev = &pdev->dev;
+	struct resource *res;
 	struct mtk_seninf *priv;
 	unsigned int i;
 	int ret;
@@ -1380,9 +1455,14 @@ static int seninf_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, priv);
 	priv->dev = dev;
 
-	priv->base = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(priv->base))
-		return PTR_ERR(priv->base);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENODEV;
+
+	priv->base = devm_ioremap(dev, res->start,
+				  max_t(resource_size_t, resource_size(res), 0x6000));
+	if (!priv->base)
+		return -ENOMEM;
 
 	priv->num_clks = ARRAY_SIZE(clk_names);
 	priv->clks = devm_kcalloc(dev, priv->num_clks,
@@ -1393,7 +1473,7 @@ static int seninf_probe(struct platform_device *pdev)
 	for (i = 0; i < priv->num_clks; ++i)
 		priv->clks[i].id = clk_names[i];
 
-	ret = devm_clk_bulk_get(dev, priv->num_clks, priv->clks);
+	ret = devm_clk_bulk_get_optional(dev, priv->num_clks, priv->clks);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to get seninf clocks\n");
 
@@ -1429,10 +1509,21 @@ static const struct mtk_seninf_conf seninf_8365_conf = {
 	.nb_inputs = 4,
 	.nb_muxes = 6,
 	.nb_outputs = 4,
+	.is_mt6789 = false,
+};
+
+static const struct mtk_seninf_conf seninf_6789_conf = {
+	.model = "mtk-seninf-6789",
+	.nb_inputs = 6,
+	.nb_muxes = 6,
+	.nb_outputs = 6,
+	.is_mt6789 = true,
 };
 
 static const struct of_device_id mtk_seninf_of_match[] = {
 	{ .compatible = "mediatek,mt8365-seninf", .data = &seninf_8365_conf },
+	{ .compatible = "mediatek,mt6789-seninf", .data = &seninf_6789_conf },
+	{ .compatible = "mediatek,seninf_top", .data = &seninf_6789_conf },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, mtk_seninf_of_match);

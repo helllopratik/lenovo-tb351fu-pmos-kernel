@@ -111,4 +111,24 @@
 #define SENINF_MUX_CTRL_EXT_SENINF_SRC_SEL_EXT				GENMASK(1, 0)
 #define SENINF_MUX_CTRL_EXT_SENINF_PIX_SEL_EXT				BIT(4)
 
+/* MT6789 TOP MUX registers (8-bit stride, 4 muxes per 32-bit register) */
+#define SENINF_TOP_MUX_CTRL_0						0x0010
+#define SENINF_TOP_MUX_CTRL_1						0x0014
+
+/* MT6789 CAM MUX crossbar (8-bit stride, 4 muxes per register, 16 muxes) */
+#define SENINF_CAM_MUX_CTRL_0						0x0400
+#define SENINF_CAM_MUX_CTRL_1						0x0404
+#define SENINF_CAM_MUX_CTRL_2						0x0408
+#define SENINF_CAM_MUX_CTRL_3						0x040c
+#define SENINF_CAM_MUX_ENABLE						0x0410
+#define SENINF_CAM_MUX_ENABLE_2						0x0418
+#define SENINF_CAM_MUX_CHK_CTL_0					0x0500
+
+/* MT6789 CSI2 per-channel control (inside 0x0a00 CSI2 rx block) */
+#define SENINF_CSI2_CH0_CTRL						0x0a60
+
+/* MT6789 MUX control 1 & IRQ enable (inside 0x0d00 MUX block) */
+#define SENINF_MUX_CTRL_1						0x0d04
+#define SENINF_MUX_IRQ_EN						0x0d10
+
 #endif /* __SENINF_REG_H__ */
