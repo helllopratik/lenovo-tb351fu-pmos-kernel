@@ -44,6 +44,7 @@ struct mm8013_chip {
 	struct regmap *regmap;
 	struct power_supply *psy;
 	struct delayed_work work;
+	int last_status;
 };
 
 static int mm8013_checkdevice(struct mm8013_chip *chip)
@@ -178,16 +179,34 @@ static int mm8013_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
+		/*
+		 * The MM8013 flags alone are not reliable on this board: the
+		 * charger keeps CHG asserted while the pack is actually
+		 * supplying the system (current is negative), and the gauge
+		 * occasionally reports exactly 0 mA between samples.  Using the
+		 * flags for those samples made UPower flap between charging and
+		 * discharging every few seconds.
+		 *
+		 * Resolve status from current with hysteresis and keep the last
+		 * known state while the current is inside the dead band.  The
+		 * FC/CHG_INH flags still win when they are meaningful.
+		 */
 		{
+			s16 cur_ma = 0;
 			u32 cur_raw = 0;
-			int cur_ret = regmap_read(chip->regmap, REG_AVERAGE_CURRENT, &cur_raw);
-			if (!cur_ret) {
-				s16 cur_ma = (s16)cur_raw;
+
+			ret = regmap_read(chip->regmap, REG_AVERAGE_CURRENT,
+					  &cur_raw);
+			if (!ret) {
+				cur_ma = (s16)cur_raw;
 				if (cur_ma > 20) {
 					val->intval = POWER_SUPPLY_STATUS_CHARGING;
+					chip->last_status = val->intval;
 					break;
-				} else if (cur_ma < -20) {
+				}
+				if (cur_ma < -20) {
 					val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+					chip->last_status = val->intval;
 					break;
 				}
 			}
@@ -195,14 +214,15 @@ static int mm8013_get_property(struct power_supply *psy,
 
 		if (regval & MM8013_FLAG_FC)
 			val->intval = POWER_SUPPLY_STATUS_FULL;
-		else if (regval & MM8013_FLAG_CHG)
-			val->intval = POWER_SUPPLY_STATUS_CHARGING;
-		else if (regval & MM8013_FLAG_DSG)
-			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 		else if (regval & MM8013_FLAG_CHG_INH)
 			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		else if (chip->last_status)
+			val->intval = chip->last_status;
+		else if (regval & MM8013_FLAG_DSG)
+			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 		else
 			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+		chip->last_status = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -311,6 +331,9 @@ static int mm8013_probe(struct i2c_client *client)
 
 	psy_cfg.drv_data = chip;
 	psy_cfg.of_node = dev->of_node;
+
+	/* Start pessimistic; the first real current sample corrects this. */
+	chip->last_status = POWER_SUPPLY_STATUS_DISCHARGING;
 
 	psy = devm_power_supply_register(dev, &mm8013_desc, &psy_cfg);
 	if (IS_ERR(psy))
