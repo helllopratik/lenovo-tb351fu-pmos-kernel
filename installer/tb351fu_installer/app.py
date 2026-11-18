@@ -516,17 +516,28 @@ class InstallerWindow(Gtk.ApplicationWindow):
         else:
             mode = "Android (adb)" if device.mode == "adb" else "Fastboot"
             self.device_status.set_markup(f"<b>Device ready</b> — {mode}")
-            self.device_hint.set_text(
-                "Root access confirmed. The installer can flash slot B and install the rootfs."
-                if device.root else
-                "Root access is not available. Boot flash only; rootfs installation requires root adb.")
+            if device.mode == "fastboot":
+                self.device_hint.set_text(
+                    "Fastboot mode: the slot-B boot chain can be flashed. Boot "
+                    "Android with root adb to install the rootfs.")
+            elif device.root:
+                self.device_hint.set_text(
+                    "Root access confirmed. The installer can flash slot B and "
+                    "install the rootfs.")
+            else:
+                self.device_hint.set_text(
+                    "Root access is not available. Boot flash only; rootfs "
+                    "installation requires root adb.")
         values = {
             "Mode": (device.mode if device else "—"),
             "Serial": (device.serial if device else "—"),
             "Model": (device.model if device else "—"),
             "Codename": (device.codename if device else "—"),
             "Active slot": (device.slot.upper() if device and device.slot else "—"),
-            "Root access": ("Yes" if device and device.root else ("No" if device else "—")),
+            "Root access": (
+                "n/a" if device and device.mode == "fastboot"
+                else "Yes" if device and device.root
+                else "No" if device else "—"),
             "Android": (device.android if device and device.android else "—"),
             "Battery": (f"{device.battery}%" if device and device.battery is not None else "—"),
         }
