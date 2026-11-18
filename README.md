@@ -453,3 +453,6 @@ Kernel and original project code are licensed under **GPL-2.0** (see `COPYING`).
 postmarketOS, Phosh, GNOME, Alpine, and the Linux kernel are the work of their
 respective communities. MediaTek vendor modules, firmware, and other proprietary
 blobs remain the property of their owners and are not relicensed by this project.
+
+See [`CREDITS.md`](CREDITS.md) for the upstream camera-patch authors whose work
+this tree builds on.
