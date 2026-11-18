@@ -9,8 +9,13 @@ without repartitioning UFS and without touching the Android slot.
   `vendor_boot_a`, `dtbo_a`, `vbmeta*_a`, `super`, or any Android logical
   partition.
 - **Only slot B is flashed:** `boot_b`, `init_boot_b`, `vbmeta_b`,
-  `vbmeta_system_b`, `vbmeta_vendor_b`. Empty `vendor_boot_b` / `dtbo_b`
-  partitions are provisioned from slot A so the slot-B boot chain is complete.
+  `vbmeta_system_b`, `vbmeta_vendor_b`, `vendor_boot_b` and `dtbo_b`. The
+  stock `vendor_boot` and `dtbo` images come from the slot-B bundle, so the
+  postmarketOS kernel gets the DTB, bootconfig and hardware overlays it needs.
+- **Firmware is opt-in:** with the firmware checkbox enabled, the installer
+  also writes `lk_b`, `tee_b`, `gz_b`, `scp_b`, `sspm_b`, `mcupm_b`, `dpm_b`,
+  `spmfw_b` and `pi_img_b` from the same bundle. Slot A firmware is never
+  touched.
 - **The rootfs is a file, not a partition:** `/data/pmos/rootfs.img`, a
   loopback ext4 image inside Android userdata. The size is selectable and can
   be resized later with the normal rootfs tools.
@@ -34,7 +39,17 @@ Host:
 | boot | `images/boot_b.img` |
 | init_boot | `images/init_boot_b.img` |
 | vbmeta | `images/vbmeta_b.img` |
+| vendor_boot | `slot_b_bundle/vendor_boot.img` |
+| dtbo | `slot_b_bundle/dtbo.img` |
+| slot-B firmware | `slot_b_bundle/{lk,tee,gz,scp,sspm,mcupm,dpm,spmfw,pi_img}.img` |
 | rootfs | `images/rootfs_base.img.zst` (release asset), then `images/rootfs_base.img` |
+
+The default bundle location is `/mnt/Nvme/slot_b_bundle`; set
+`TB351FU_BUNDLE_DIR` to use another folder. `vendor_boot` and `dtbo` are
+required. The nine firmware images are optional but recommended for a fresh
+slot B. If the vendor_boot/dtbo fields are left empty, the flasher still falls
+back to copying the matching slot-A partitions only when the slot-B partition is
+completely empty.
 
 Tablet:
 
@@ -75,10 +90,11 @@ reinstalling.
 2. **Partitions and size** — lists every by-name partition with size, slot,
    role and block node, reads `/data` usage, then suggests a rootfs size. You
    can lower or raise it (4 GiB–256 GiB) before continuing.
-3. **Images** — auto-detects the boot chain under `images/` (or `artifacts/`)
-   and the rootfs, validates magic and partition limits, and lets you override
-   each path. Choose whether to flash the boot chain, install the rootfs, and
-   switch to slot B.
+3. **Images** — asks for the slot-B bundle folder (default
+   `/mnt/Nvme/slot_b_bundle`) and auto-detects the boot chain, `vendor_boot`,
+   `dtbo`, the slot-B firmware and the rootfs. It validates magic and partition
+   limits, and lets you override each path. Choose whether to flash the boot
+   chain, provision the firmware, install the rootfs, and switch to slot B.
 4. **Install** — shows the exact plan in a confirmation dialog, then streams
    the helper output with progress. Slot B is only written after you confirm.
 
@@ -101,6 +117,7 @@ tb351fu-installer --version
 | Variable | Meaning |
 | --- | --- |
 | `TB351FU_COMMON_DIR` | pmOS `common/` checkout with the helper scripts |
+| `TB351FU_BUNDLE_DIR` | slot-B bundle with vendor_boot, dtbo and firmware |
 | `TB351FU_ROOTFS_IMAGE` | override the auto-detected rootfs image |
 | `ARTIFACTS_DIR` | override the boot/init_boot/vbmeta directory |
 | `ANDROID_SERIAL` | target a specific adb/fastboot serial |
@@ -113,15 +130,30 @@ The GUI is a front end for the proven scripts; they remain usable directly:
 # rootfs only (Android + root adb)
 ../install_pmos_rootfs.sh --image /path/to/pmos.img --size 64G
 
-# slot-B boot chain only
-../deploy/scripts/flash_slot_b.sh --dry-run
-../deploy/scripts/flash_slot_b.sh
+# slot-B boot chain only (bundle images)
+../deploy/scripts/flash_slot_b.sh \
+  --boot ../images/boot_b.img \
+  --init-boot ../images/init_boot_b.img \
+  --vbmeta ../images/vbmeta_b.img \
+  --vendor-boot /mnt/Nvme/slot_b_bundle/vendor_boot.img \
+  --dtbo /mnt/Nvme/slot_b_bundle/dtbo.img \
+  --dry-run
+
+# also provision the slot-B firmware
+../deploy/scripts/flash_slot_b.sh \
+  --boot ../images/boot_b.img \
+  --init-boot ../images/init_boot_b.img \
+  --vbmeta ../images/vbmeta_b.img \
+  --vendor-boot /mnt/Nvme/slot_b_bundle/vendor_boot.img \
+  --dtbo /mnt/Nvme/slot_b_bundle/dtbo.img \
+  --firmware-dir /mnt/Nvme/slot_b_bundle
 ```
 
 `flash_slot_b.sh` auto-detects adb vs fastboot. In adb mode it checks root,
 verifies partition capacity, writes only slot B, and compares a checksum of
 exactly the bytes written. In fastboot mode it flashes slot B and can
-`--set-active b` and `--reboot` when asked.
+`--set-active b` and `--reboot` when asked. Without `--vendor-boot` / `--dtbo`
+it keeps the old fallback: copy the slot-A partition only when slot B is empty.
 
 ## Troubleshooting
 
@@ -136,6 +168,9 @@ exactly the bytes written. In fastboot mode it flashes slot B and can
 - **Fastboot reports a different serial**: the installer falls back to the
   only connected fastboot device; if several are connected, use
   `ANDROID_SERIAL`.
+- **Vendor boot / dtbo missing**: point the Images page at
+  `/mnt/Nvme/slot_b_bundle` and press **Use bundle images**. A boot chain
+  without them may hand the kernel the wrong DTB or no overlays.
 - **Slot switch fails**: run `fastboot set_active b` manually and reboot.
 
 ## Tests

@@ -18,9 +18,17 @@ limit and is published as a release asset.
 | `vbmeta_b.img` | `vbmeta_b`, `vbmeta_system_b`, `vbmeta_vendor_b` | 4,096 B (4 KiB) | AVB vbmeta with verification flags `3` (verification and dm-verity disabled for slot B). The same 4 KiB image is written to all three partitions. |
 | `rootfs_base.img.zst` | **not a partition** | 734,090,277 B (700 MiB) | Zstd-compressed raw ext4 rootfs (2,517,630,976 B uncompressed). Decompress to `/data/pmos/rootfs.img` on Android userdata. This is the base postmarketOS Phosh aarch64 rootfs (GPT partition 2 of `pmos-phosh-aarch64.img`); `install_pmos_rootfs.sh` resizes it and installs the TB351FU modules, firmware, services, and configs. |
 
-`vendor_boot_b` and `dtbo_b` have no separate files here. `flash_slot_b.sh` copies
-`vendor_boot_a` → `vendor_boot_b` and `dtbo_a` → `dtbo_b` only when the B partition
-is empty. They carry the stock DTB/bootconfig and hardware overlays that LK needs.
+`vendor_boot_b` and `dtbo_b` are stock images and are not committed here. They
+carry the DTB/bootconfig and hardware overlays that LK needs, so the installer and
+`flash_slot_b.sh --vendor-boot/--dtbo` take them from `/mnt/Nvme/slot_b_bundle`
+(or `TB351FU_BUNDLE_DIR`). If no explicit image is supplied, the flasher keeps the
+old fallback: copy `vendor_boot_a` → `vendor_boot_b` and `dtbo_a` → `dtbo_b` only
+when the slot-B partition is completely empty.
+
+The same bundle contains the slot-B firmware (`lk`, `tee`, `gz`, `scp`, `sspm`,
+`mcupm`, `dpm`, `spmfw`, `pi_img`). `flash_slot_b.sh --firmware-dir` writes those
+to the matching `*_b` partitions only, which is what a fresh slot B needs before it
+can boot.
 
 `Image.lz4` and the initramfs CPIO are payloads inside `boot_b.img` and
 `init_boot_b.img`; they are not flashed separately. A freshly built `Image.lz4` is
@@ -55,37 +63,61 @@ root adb, and `adb`/`fastboot` in `PATH`.
 From the repository root:
 
 ```bash
+BUNDLE=/mnt/Nvme/slot_b_bundle
+
 # Always dry-run first
 ./deploy/scripts/flash_slot_b.sh \
   --boot images/boot_b.img \
   --init-boot images/init_boot_b.img \
   --vbmeta images/vbmeta_b.img \
+  --vendor-boot "$BUNDLE/vendor_boot.img" \
+  --dtbo "$BUNDLE/dtbo.img" \
   --dry-run
 
-# Write only slot B
+# Write the slot-B boot chain, without touching firmware
 ./deploy/scripts/flash_slot_b.sh \
   --boot images/boot_b.img \
   --init-boot images/init_boot_b.img \
-  --vbmeta images/vbmeta_b.img
+  --vbmeta images/vbmeta_b.img \
+  --vendor-boot "$BUNDLE/vendor_boot.img" \
+  --dtbo "$BUNDLE/dtbo.img"
+
+# Also provision the slot-B firmware (fresh slot B)
+./deploy/scripts/flash_slot_b.sh \
+  --boot images/boot_b.img \
+  --init-boot images/init_boot_b.img \
+  --vbmeta images/vbmeta_b.img \
+  --vendor-boot "$BUNDLE/vendor_boot.img" \
+  --dtbo "$BUNDLE/dtbo.img" \
+  --firmware-dir "$BUNDLE"
 ```
 
 The ADB path checks root, validates that each image fits its target partition,
-provisions empty `vendor_boot_b`/`dtbo_b` from slot A, writes
-`vbmeta_b`/`vbmeta_system_b`/`vbmeta_vendor_b`, `boot_b`, and `init_boot_b`, then
-compares a checksum of exactly the bytes written. It does not reboot unless you pass
-`--reboot`.
+writes `vbmeta_b`/`vbmeta_system_b`/`vbmeta_vendor_b`, `vendor_boot_b`, `dtbo_b`,
+`boot_b`, and `init_boot_b`, then compares a checksum of exactly the bytes written.
+With `--firmware-dir` it also writes `lk_b`, `tee_b`, `gz_b`, `scp_b`, `sspm_b`,
+`mcupm_b`, `dpm_b`, `spmfw_b` and `pi_img_b` first. It does not reboot unless you
+pass `--reboot`.
 
 Fastboot alternative (device already in bootloader/fastbootd):
 
 ```bash
+BUNDLE=/mnt/Nvme/slot_b_bundle
 fastboot flash vbmeta_b images/vbmeta_b.img
 fastboot flash vbmeta_system_b images/vbmeta_b.img
 fastboot flash vbmeta_vendor_b images/vbmeta_b.img
+fastboot flash vendor_boot_b "$BUNDLE/vendor_boot.img"
+fastboot flash dtbo_b "$BUNDLE/dtbo.img"
 fastboot flash boot_b images/boot_b.img
 fastboot flash init_boot_b images/init_boot_b.img
+# Optional fresh-slot-B firmware
+for p in lk tee gz scp sspm mcupm dpm spmfw pi_img; do
+  fastboot flash "${p}_b" "$BUNDLE/$p.img"
+done
 ```
 
-Never substitute `boot_a`, `init_boot_a`, `vbmeta_a`, or any `*_a` partition.
+Never substitute `boot_a`, `init_boot_a`, `vendor_boot_a`, `dtbo_a`, `vbmeta_a`,
+or any other `*_a` partition.
 
 ## Install the rootfs
 
@@ -134,5 +166,8 @@ with `pmos-reboot android`.
   `pmos-phosh-aarch64.img` is not shipped.
 - **Stock Android images:** slot A is preserved on the device. Do not overwrite it
   with anything from this folder.
-- **Vendor firmware/modules:** these are provided by the repository's `deploy/`
+- **Stock slot-B firmware and vendor_boot/dtbo:** these come from the external
+  `/mnt/Nvme/slot_b_bundle` and are not committed here. The installer and
+  `flash_slot_b.sh` can write the `*_b` copies without touching slot A.
+- **Vendor rootfs modules:** these are provided by the repository's `deploy/`
   payload and remain subject to their own licenses.

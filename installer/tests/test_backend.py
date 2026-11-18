@@ -51,6 +51,9 @@ class ImageTests(unittest.TestCase):
     def test_validation(self):
         selftest.check_validate_images()
 
+    def test_bundle_scan(self):
+        selftest.check_bundle_scan()
+
     def test_roles(self):
         selftest.check_partition_roles()
 

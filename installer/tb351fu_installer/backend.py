@@ -25,11 +25,27 @@ KIB = 1024
 
 BOOT_PART_SIZE = 64 * MIB
 INIT_BOOT_PART_SIZE = 8 * MIB
+VENDOR_BOOT_PART_SIZE = 64 * MIB
+DTBO_PART_SIZE = 8 * MIB
 # Leave Android enough room to keep running; the rootfs is a file inside
 # /data, so this reserve is what keeps the system usable after installation.
 DEFAULT_RESERVE = 8 * GIB
 DEFAULT_CAP = 64 * GIB
 DEFAULT_MINIMUM = 8 * GIB
+
+# Firmware that belongs to slot B's boot chain.  The stock images come from
+# the Lenovo TB351FU bundle and are written only to the *_b partitions.
+SLOT_B_FIRMWARE = {
+    "lk": "lk.img",
+    "tee": "tee.img",
+    "gz": "gz.img",
+    "scp": "scp.img",
+    "sspm": "sspm.img",
+    "mcupm": "mcupm.img",
+    "dpm": "dpm.img",
+    "spmfw": "spmfw.img",
+    "pi_img": "pi_img.img",
+}
 
 
 class InstallerError(RuntimeError):
@@ -83,9 +99,13 @@ class ImageSet:
     boot: Optional[Path] = None
     init_boot: Optional[Path] = None
     vbmeta: Optional[Path] = None
+    vendor_boot: Optional[Path] = None
+    dtbo: Optional[Path] = None
     rootfs: Optional[Path] = None
     modules: Optional[Path] = None
     firmware: Optional[Path] = None
+    bundle_dir: Optional[Path] = None
+    slot_b_firmware: dict[str, Path] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -94,6 +114,7 @@ class InstallOptions:
     images: ImageSet
     size_bytes: int
     flash_boot: bool = True
+    flash_firmware: bool = False
     install_rootfs: bool = True
     switch_slot: bool = True
     reboot_after_switch: bool = True
@@ -228,17 +249,136 @@ def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
     return None
 
 
+# Names used by the Lenovo slot-B bundle and by the repository's images/ dir.
+# Stock boot.img/init_boot.img are deliberately excluded: they are Android
+# images, not the postmarketOS boot chain.
+BUNDLE_IMAGES = {
+    "boot": ("boot_pmos.img", "boot_b.img"),
+    "init_boot": ("init_boot_pmos.img", "init_boot_b.img"),
+    "vbmeta": ("vbmeta_disabled.img", "vbmeta_b.img", "vbmeta.img"),
+    "vendor_boot": ("vendor_boot_b.img", "vendor_boot.img"),
+    "dtbo": ("dtbo_b.img", "dtbo.img"),
+}
+
+
+def _first_in(directory: Path, names: Iterable[str]) -> Optional[Path]:
+    for name in names:
+        path = directory / name
+        if path.is_file():
+            return path
+    return None
+
+
+def bundle_directories() -> list[Path]:
+    """Directories that may hold the stock slot-B bundle."""
+    dirs: list[Path] = []
+    env_bundle = os.environ.get("TB351FU_BUNDLE_DIR")
+    if env_bundle:
+        dirs.append(Path(env_bundle).expanduser())
+    dirs.append(Path("/mnt/Nvme/slot_b_bundle"))
+    paths = repo_paths()
+    dirs.append(paths["pmos"] / "slot_b_bundle")
+    dirs.append(paths["common"] / "images")
+    dirs.append(paths["artifacts"])
+
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for directory in dirs:
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        result.append(resolved)
+    return result
+
+
+def scan_bundle(directory: Path) -> ImageSet:
+    """Discover the boot-chain and firmware images inside one bundle."""
+    directory = directory.expanduser()
+    images = ImageSet(
+        boot=_first_in(directory, BUNDLE_IMAGES["boot"]),
+        init_boot=_first_in(directory, BUNDLE_IMAGES["init_boot"]),
+        vbmeta=_first_in(directory, BUNDLE_IMAGES["vbmeta"]),
+        vendor_boot=_first_in(directory, BUNDLE_IMAGES["vendor_boot"]),
+        dtbo=_first_in(directory, BUNDLE_IMAGES["dtbo"]),
+        bundle_dir=directory if directory.is_dir() else None,
+    )
+    images.slot_b_firmware = {
+        part: directory / name
+        for part, name in SLOT_B_FIRMWARE.items()
+        if (directory / name).is_file()
+    }
+    return images
+
+
+def slot_b_firmware_dir(images: ImageSet) -> Optional[Path]:
+    """Return a single directory containing every selected firmware image."""
+    if not images.slot_b_firmware:
+        return None
+    parents = {path.parent.resolve() for path in images.slot_b_firmware.values()}
+    if len(parents) == 1:
+        directory = next(iter(parents))
+        if all((directory / name).is_file()
+               for name in SLOT_B_FIRMWARE.values()):
+            return directory
+    return None
+
+
 def find_images() -> ImageSet:
     paths = repo_paths()
     artifacts = paths["artifacts"]
-    images = paths["common"] / "images"
+    images_dir = paths["common"] / "images"
     pmos = paths["pmos"]
     deploy = paths["deploy"]
+    bundles = bundle_directories()
+
+    def bundle_image(names: Iterable[str]) -> Optional[Path]:
+        for directory in bundles:
+            path = _first_in(directory, names)
+            if path:
+                return path
+        return None
+
+    # Prefer the directory that carries the complete slot-B firmware set, then
+    # one with vendor_boot/dtbo, so the GUI's bundle field points somewhere
+    # useful.
+    bundle_dir = next(
+        (d for d in bundles
+         if all((d / name).is_file() for name in SLOT_B_FIRMWARE.values())),
+        None,
+    )
+    if bundle_dir is None:
+        bundle_dir = next(
+            (d for d in bundles
+             if (d / "vendor_boot.img").is_file()
+             or (d / "vendor_boot_b.img").is_file()),
+            None,
+        )
+    if bundle_dir is None and bundles:
+        scored = [(sum((d / name).is_file()
+                       for name in SLOT_B_FIRMWARE.values()), d)
+                  for d in bundles]
+        best_score, best_dir = max(scored, key=lambda item: item[0])
+        if best_score:
+            bundle_dir = best_dir
+    if bundle_dir is None and bundles:
+        bundle_dir = bundles[0]
+
+    firmware: dict[str, Path] = {}
+    for part, name in SLOT_B_FIRMWARE.items():
+        path = (bundle_dir / name) if bundle_dir else None
+        if not path or not path.is_file():
+            path = bundle_image((name,))
+        if path:
+            firmware[part] = path
 
     rootfs_candidates = [
         Path(os.environ["TB351FU_ROOTFS_IMAGE"]) if os.environ.get("TB351FU_ROOTFS_IMAGE") else None,
-        images / "rootfs_base.img.zst",
-        images / "rootfs_base.img",
+        images_dir / "rootfs_base.img.zst",
+        images_dir / "rootfs_base.img",
         pmos / "pmos-phosh-aarch64.img",
         Path("/mnt/Nvme/pmos_rootfs_base.img"),
         Path("/mnt/Nvme/pmos_rootfs_base.img.zst"),
@@ -248,28 +388,42 @@ def find_images() -> ImageSet:
 
     return ImageSet(
         boot=_first_existing([
-            images / "boot_b.img",
-            images / "boot_latest.img",
+            images_dir / "boot_b.img",
+            images_dir / "boot_latest.img",
             artifacts / "boot_latest.img",
             artifacts / "boot_pmos.img",
-            Path("/mnt/Nvme/slot_b_bundle/boot_pmos.img"),
+            bundle_image(BUNDLE_IMAGES["boot"]),
         ]),
         init_boot=_first_existing([
-            images / "init_boot_b.img",
-            images / "init_boot_latest.img",
+            images_dir / "init_boot_b.img",
+            images_dir / "init_boot_latest.img",
             artifacts / "init_boot_latest.img",
             artifacts / "init_boot_pmos.img",
-            Path("/mnt/Nvme/slot_b_bundle/init_boot_pmos.img"),
+            bundle_image(BUNDLE_IMAGES["init_boot"]),
         ]),
         vbmeta=_first_existing([
-            images / "vbmeta_b.img",
-            images / "vbmeta_latest.img",
+            images_dir / "vbmeta_b.img",
+            images_dir / "vbmeta_latest.img",
             artifacts / "vbmeta_latest.img",
-            Path("/mnt/Nvme/slot_b_bundle/vbmeta.img"),
+            bundle_image(BUNDLE_IMAGES["vbmeta"]),
+        ]),
+        vendor_boot=_first_existing([
+            images_dir / "vendor_boot_b.img",
+            images_dir / "vendor_boot.img",
+            artifacts / "vendor_boot_latest.img",
+            bundle_image(BUNDLE_IMAGES["vendor_boot"]),
+        ]),
+        dtbo=_first_existing([
+            images_dir / "dtbo_b.img",
+            images_dir / "dtbo.img",
+            artifacts / "dtbo_latest.img",
+            bundle_image(BUNDLE_IMAGES["dtbo"]),
         ]),
         rootfs=_first_existing([p for p in rootfs_candidates if p]),
         modules=_first_existing([deploy / "modules.tar.xz"]),
         firmware=_first_existing([deploy / "firmware.tar.xz"]),
+        bundle_dir=bundle_dir,
+        slot_b_firmware=firmware,
     )
 
 
@@ -336,7 +490,8 @@ def rootfs_content_size(path: Path) -> Optional[int]:
 
 
 def validate_images(images: ImageSet, need_rootfs: bool = True,
-                    need_boot: bool = True) -> list[str]:
+                    need_boot: bool = True,
+                    need_firmware: bool = False) -> list[str]:
     problems: list[str] = []
     if need_boot:
         if not images.boot:
@@ -349,6 +504,23 @@ def validate_images(images: ImageSet, need_rootfs: bool = True,
             problems.append("init_boot image is larger than the 8 MiB partition")
         if not images.vbmeta:
             problems.append("vbmeta image not found (artifacts/vbmeta_latest.img)")
+        if not images.vendor_boot:
+            problems.append(
+                "vendor_boot image not found (slot_b_bundle/vendor_boot.img)")
+        elif images.vendor_boot.stat().st_size > VENDOR_BOOT_PART_SIZE:
+            problems.append(
+                "vendor_boot image is larger than the 64 MiB partition")
+        if not images.dtbo:
+            problems.append("dtbo image not found (slot_b_bundle/dtbo.img)")
+        elif images.dtbo.stat().st_size > DTBO_PART_SIZE:
+            problems.append("dtbo image is larger than the 8 MiB partition")
+    if need_firmware:
+        missing = [part for part in SLOT_B_FIRMWARE
+                   if part not in images.slot_b_firmware]
+        if missing:
+            problems.append(
+                "slot-B firmware image(s) missing: "
+                + ", ".join(f"{part}.img" for part in missing))
     if need_rootfs:
         if not images.rootfs:
             problems.append("postmarketOS rootfs image not found")
@@ -652,11 +824,22 @@ def install(options: InstallOptions, emit: Callable[[str], None],
     env["ARTIFACTS_DIR"] = str(paths["artifacts"])
 
     if options.flash_boot:
-        missing = [name for name in ("boot", "init_boot", "vbmeta")
+        missing = [name for name in ("boot", "init_boot", "vbmeta",
+                                     "vendor_boot", "dtbo")
                    if not getattr(options.images, name)]
         if missing:
             raise InstallerError(
                 "missing boot-chain image(s): " + ", ".join(missing))
+        if options.flash_firmware:
+            missing_fw = [part for part in SLOT_B_FIRMWARE
+                          if part not in options.images.slot_b_firmware]
+            if missing_fw:
+                raise InstallerError(
+                    "missing slot-B firmware image(s): "
+                    + ", ".join(f"{part}.img" for part in missing_fw))
+            if not slot_b_firmware_dir(options.images):
+                raise InstallerError(
+                    "slot-B firmware images are not in one directory")
     if options.install_rootfs and not options.images.rootfs:
         raise InstallerError("missing postmarketOS rootfs image")
 
@@ -704,8 +887,16 @@ def install(options: InstallOptions, emit: Callable[[str], None],
             "--boot", str(options.images.boot),
             "--init-boot", str(options.images.init_boot),
             "--vbmeta", str(options.images.vbmeta),
+            "--vendor-boot", str(options.images.vendor_boot),
+            "--dtbo", str(options.images.dtbo),
             "--serial", options.device.serial,
         ]
+        if options.flash_firmware:
+            firmware_dir = slot_b_firmware_dir(options.images)
+            if not firmware_dir:
+                raise InstallerError(
+                    "slot-B firmware images are not in one directory")
+            argv += ["--firmware-dir", str(firmware_dir)]
         if options.device.mode == "fastboot":
             if options.switch_slot:
                 argv.append("--set-active")
@@ -809,6 +1000,16 @@ def reboot_device(device: Device) -> None:
         _run(["fastboot", "-s", device.serial, "reboot"], timeout=20, check=False)
 
 
+def _images_json(images: ImageSet) -> dict:
+    payload = {}
+    for key, value in dataclasses.asdict(images).items():
+        if isinstance(value, dict):
+            payload[key] = {name: str(path) for name, path in value.items()}
+        else:
+            payload[key] = str(value) if value else None
+    return payload
+
+
 def detect_json() -> str:
     devices = detect_devices()
     payload = []
@@ -819,6 +1020,6 @@ def detect_json() -> str:
             "device": dataclasses.asdict(dev),
             "data": dataclasses.asdict(space) if space else None,
             "partitions": [dataclasses.asdict(p) for p in parts],
-            "images": {k: str(v) if v else None for k, v in dataclasses.asdict(find_images()).items()},
+            "images": _images_json(find_images()),
         })
     return json.dumps(payload, indent=2)

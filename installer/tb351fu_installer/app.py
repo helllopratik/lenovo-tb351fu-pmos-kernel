@@ -269,9 +269,32 @@ class InstallerWindow(Gtk.ApplicationWindow):
         page = self._page()
         page.append(_label("Installation images", css="page-title"))
         page.append(_label(
-            "These are prebuilt images. Auto-detect looks in images/ and artifacts/; "
-            "you can override any path.",
+            "Auto-detect looks in the slot-B bundle, images/ and artifacts/. "
+            "The bundle supplies the stock vendor_boot, dtbo and slot-B firmware "
+            "needed for boot_b to boot properly.",
             wrap=True, css="dim"))
+
+        bundle_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        bundle_box.append(_section(
+            "Slot-B image bundle",
+            "Folder containing boot_pmos.img, init_boot_pmos.img, vbmeta.img, "
+            "vendor_boot.img, dtbo.img and the slot-B firmware images."))
+        bundle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.bundle_entry = Gtk.Entry()
+        self.bundle_entry.set_hexpand(True)
+        self.bundle_entry.set_placeholder_text("/mnt/Nvme/slot_b_bundle")
+        self.bundle_entry.connect("changed", lambda *_: self._on_bundle_changed())
+        self.bundle_browse_btn = Gtk.Button(label="Browse…")
+        self.bundle_browse_btn.connect("clicked", lambda *_: self._browse_bundle())
+        self.bundle_use_btn = Gtk.Button(label="Use bundle images")
+        self.bundle_use_btn.connect("clicked", lambda *_: self._use_bundle())
+        bundle_row.append(self.bundle_entry)
+        bundle_row.append(self.bundle_browse_btn)
+        bundle_row.append(self.bundle_use_btn)
+        bundle_box.append(bundle_row)
+        self.bundle_status = _label("", wrap=True, css="dim")
+        bundle_box.append(self.bundle_status)
+        page.append(_card(bundle_box))
 
         grid = Gtk.Grid(column_spacing=10, row_spacing=10)
         self.image_entries: dict[str, Gtk.Entry] = {}
@@ -280,6 +303,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             ("boot", "Boot image (boot_b)", "boot_b.img"),
             ("init_boot", "Init_boot image (init_boot_b)", "init_boot_b.img"),
             ("vbmeta", "VBMeta image", "vbmeta_b.img"),
+            ("vendor_boot", "Vendor boot (vendor_boot_b)", "vendor_boot.img"),
+            ("dtbo", "DTB overlays (dtbo_b)", "dtbo.img"),
             ("rootfs", "postmarketOS rootfs", "rootfs_base.img.zst"),
         ]
         for row, (key, title, hint) in enumerate(rows):
@@ -298,6 +323,16 @@ class InstallerWindow(Gtk.ApplicationWindow):
             self.image_entries[key] = entry
             self.image_status[key] = status
         page.append(_card(grid))
+
+        self.chk_firmware = Gtk.CheckButton(
+            label="Provision the slot-B firmware from the bundle "
+                  "(lk, tee, gz, scp, sspm, mcupm, dpm, spmfw, pi_img)")
+        self.chk_firmware.set_active(False)
+        self.chk_firmware.set_sensitive(False)
+        self.chk_firmware.connect("toggled", lambda *_: self._on_images_changed())
+        page.append(self.chk_firmware)
+        self.firmware_status = _label("", wrap=True, css="dim")
+        page.append(self.firmware_status)
 
         options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.chk_flash = Gtk.CheckButton(label="Flash the pmOS boot chain to slot B")
@@ -632,10 +667,14 @@ class InstallerWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _apply_images(self, images: backend.ImageSet) -> None:
+        if images.bundle_dir and not self.bundle_entry.get_text().strip():
+            self.bundle_entry.set_text(str(images.bundle_dir))
         mapping = {
             "boot": images.boot,
             "init_boot": images.init_boot,
             "vbmeta": images.vbmeta,
+            "vendor_boot": images.vendor_boot,
+            "dtbo": images.dtbo,
             "rootfs": images.rootfs,
         }
         for key, path in mapping.items():
@@ -643,16 +682,133 @@ class InstallerWindow(Gtk.ApplicationWindow):
             if path and not entry.get_text().strip():
                 entry.set_text(str(path))
         self._update_image_status()
+        self._update_firmware_status()
+        if (self.chk_flash.get_active()
+                and len(images.slot_b_firmware) == len(backend.SLOT_B_FIRMWARE)):
+            self.chk_firmware.set_active(True)
 
     def _auto_images(self) -> None:
         images = backend.find_images()
+        if images.bundle_dir:
+            self.bundle_entry.set_text(str(images.bundle_dir))
         for key, path in {
             "boot": images.boot, "init_boot": images.init_boot,
-            "vbmeta": images.vbmeta, "rootfs": images.rootfs,
+            "vbmeta": images.vbmeta, "vendor_boot": images.vendor_boot,
+            "dtbo": images.dtbo, "rootfs": images.rootfs,
         }.items():
             if path:
                 self.image_entries[key].set_text(str(path))
         self._update_image_status()
+        self._update_firmware_status()
+        if (self.chk_flash.get_active()
+                and len(images.slot_b_firmware) == len(backend.SLOT_B_FIRMWARE)):
+            self.chk_firmware.set_active(True)
+
+    def _bundle_path(self) -> Optional[Path]:
+        text = (self.bundle_entry.get_text().strip()
+                if hasattr(self, "bundle_entry") else "")
+        return Path(text).expanduser() if text else None
+
+    def _bundle_images(self) -> backend.ImageSet:
+        path = self._bundle_path()
+        if path is None:
+            return self.state.images
+        if not path.is_dir():
+            return backend.ImageSet()
+        return backend.scan_bundle(path)
+
+    def _browse_bundle(self) -> None:
+        dialog = Gtk.FileDialog(title="Select the slot-B image bundle")
+        dialog.select_folder(self, None, self._on_bundle_chosen)
+
+    def _on_bundle_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        if folder and folder.get_path():
+            self.bundle_entry.set_text(folder.get_path())
+
+    def _on_bundle_changed(self) -> None:
+        if not hasattr(self, "bundle_status"):
+            return
+        path = self._bundle_path()
+        if not path:
+            self.bundle_status.set_text(
+                "No bundle selected. vendor_boot, dtbo and the slot-B firmware "
+                "are required for a complete boot_b.")
+            self.bundle_status.remove_css_class("error")
+        elif not path.is_dir():
+            self.bundle_status.set_text(f"Not a directory: {path}")
+            self.bundle_status.add_css_class("error")
+        else:
+            images = backend.scan_bundle(path)
+            found = [name for name, value in (
+                ("boot", images.boot), ("init_boot", images.init_boot),
+                ("vbmeta", images.vbmeta),
+                ("vendor_boot", images.vendor_boot), ("dtbo", images.dtbo),
+            ) if value]
+            firmware = len(images.slot_b_firmware)
+            self.bundle_status.set_text(
+                f"{len(found)}/5 boot images and {firmware}/"
+                f"{len(backend.SLOT_B_FIRMWARE)} firmware images found.")
+            self.bundle_status.remove_css_class("error")
+        self._update_firmware_status()
+        self._refresh_summary()
+
+    def _use_bundle(self) -> None:
+        path = self._bundle_path()
+        if not path or not path.is_dir():
+            self._alert(
+                "Bundle not found",
+                "Select the folder containing the slot-B images, for example "
+                "/mnt/Nvme/slot_b_bundle.")
+            return
+        images = backend.scan_bundle(path)
+        if not any((images.boot, images.init_boot, images.vbmeta,
+                    images.vendor_boot, images.dtbo)):
+            self._alert(
+                "No boot images in this folder",
+                "Expected boot_pmos.img, init_boot_pmos.img, vbmeta.img, "
+                "vendor_boot.img and dtbo.img.")
+            return
+        for key, value in {
+            "boot": images.boot, "init_boot": images.init_boot,
+            "vbmeta": images.vbmeta, "vendor_boot": images.vendor_boot,
+            "dtbo": images.dtbo,
+        }.items():
+            if value:
+                self.image_entries[key].set_text(str(value))
+        self._update_image_status()
+        self._update_firmware_status()
+        self._on_images_changed()
+
+    def _update_firmware_status(self) -> None:
+        if not hasattr(self, "firmware_status"):
+            return
+        images = self._bundle_images()
+        if not self.chk_flash.get_active():
+            self.chk_firmware.set_active(False)
+            self.chk_firmware.set_sensitive(False)
+            self.firmware_status.set_text(
+                "Slot-B firmware is only written together with the boot chain.")
+            self.firmware_status.remove_css_class("warning")
+            return
+        missing = [part for part in backend.SLOT_B_FIRMWARE
+                   if part not in images.slot_b_firmware]
+        if missing:
+            self.chk_firmware.set_active(False)
+            self.chk_firmware.set_sensitive(False)
+            self.firmware_status.set_text(
+                "Firmware incomplete; missing "
+                + ", ".join(f"{part}.img" for part in missing) + ".")
+            self.firmware_status.add_css_class("warning")
+            return
+        self.chk_firmware.set_sensitive(True)
+        self.firmware_status.set_text(
+            f"{len(images.slot_b_firmware)} firmware images ready: "
+            + ", ".join(f"{part}_b" for part in backend.SLOT_B_FIRMWARE) + ".")
+        self.firmware_status.remove_css_class("warning")
 
     def _browse_image(self, key: str, title: str) -> None:
         dialog = Gtk.FileDialog(title=title)
@@ -684,6 +840,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
 
     def _on_images_changed(self) -> None:
         self._update_image_status()
+        self._update_firmware_status()
         problems = self._validate_images()
         if problems:
             self.image_problems.set_text("\n".join(f"• {p}" for p in problems))
@@ -714,13 +871,19 @@ class InstallerWindow(Gtk.ApplicationWindow):
             status.set_text(f"{size}, {kind}{extra}")
 
     def _current_images(self) -> backend.ImageSet:
+        bundle_dir = self._bundle_path()
+        bundle_images = self._bundle_images()
         return backend.ImageSet(
             boot=self._image_path("boot"),
             init_boot=self._image_path("init_boot"),
             vbmeta=self._image_path("vbmeta"),
+            vendor_boot=self._image_path("vendor_boot"),
+            dtbo=self._image_path("dtbo"),
             rootfs=self._image_path("rootfs"),
             modules=self.state.images.modules,
             firmware=self.state.images.firmware,
+            bundle_dir=bundle_dir if bundle_dir and bundle_dir.is_dir() else None,
+            slot_b_firmware=bundle_images.slot_b_firmware,
         )
 
     def _validate_images(self) -> list[str]:
@@ -729,6 +892,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             images,
             need_rootfs=self.chk_rootfs.get_active(),
             need_boot=self.chk_flash.get_active(),
+            need_firmware=(self.chk_flash.get_active()
+                           and self.chk_firmware.get_active()),
         )
 
     # ------------------------------------------------------------------
@@ -750,7 +915,10 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.summary_values["RootFS size"].set_text(
             f"{size_gib} GiB" if self.chk_rootfs.get_active() else "Skipped")
         self.summary_values["Boot chain"].set_text(
-            "boot_b + init_boot_b + vbmeta_b" if self.chk_flash.get_active() else "Skipped")
+            "boot_b + init_boot_b + vbmeta_b + vendor_boot_b + dtbo_b"
+            + (f" + {len(images.slot_b_firmware)} firmware images"
+               if self.chk_firmware.get_active() else "")
+            if self.chk_flash.get_active() else "Skipped")
         self.summary_values["Switch slot"].set_text(
             "Yes, set slot B active and reboot" if self.chk_switch.get_active() else "No")
         if data and self.chk_rootfs.get_active():
@@ -769,6 +937,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             images=self._current_images(),
             size_bytes=int(self.size_spin.get_value()) * backend.GIB,
             flash_boot=self.chk_flash.get_active(),
+            flash_firmware=(self.chk_flash.get_active()
+                            and self.chk_firmware.get_active()),
             install_rootfs=self.chk_rootfs.get_active(),
             switch_slot=self.chk_switch.get_active(),
             reboot_after_switch=self.chk_switch.get_active(),
@@ -791,8 +961,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
             lines += [
                 "Will write slot B only:",
                 "  boot_b, init_boot_b, vbmeta_b, vbmeta_system_b, vbmeta_vendor_b",
-                "  vendor_boot_b / dtbo_b are copied from slot A only if empty",
+                "  vendor_boot_b, dtbo_b",
             ]
+            if options.flash_firmware:
+                lines.append(
+                    "  " + ", ".join(f"{part}_b"
+                                     for part in backend.SLOT_B_FIRMWARE))
         if options.install_rootfs:
             lines += [
                 "Will create inside Android /data:",
@@ -834,6 +1008,9 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 ("boot", images.boot, backend.BOOT_PART_SIZE),
                 ("init_boot", images.init_boot, backend.INIT_BOOT_PART_SIZE),
                 ("vbmeta", images.vbmeta, 1024 * 1024),
+                ("vendor_boot", images.vendor_boot,
+                 backend.VENDOR_BOOT_PART_SIZE),
+                ("dtbo", images.dtbo, backend.DTBO_PART_SIZE),
             ):
                 if not path:
                     problems.append(f"{key} image is not selected.")
@@ -841,6 +1018,13 @@ class InstallerWindow(Gtk.ApplicationWindow):
                     problems.append(f"{key} image does not exist: {path}")
                 elif path.stat().st_size > limit:
                     problems.append(f"{key} image is too large for its partition.")
+            if self.chk_firmware.get_active():
+                missing = [part for part in backend.SLOT_B_FIRMWARE
+                           if part not in images.slot_b_firmware]
+                if missing:
+                    problems.append(
+                        "Slot-B firmware image(s) missing: "
+                        + ", ".join(f"{part}.img" for part in missing))
         if self.chk_flash.get_active() and device.mode == "adb" and not device.root:
             problems.append(
                 "Root access is required to write slot B over adb. Grant root "
@@ -898,6 +1082,13 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.refresh_btn.set_sensitive(not installing)
         self.chk_flash.set_sensitive(not installing)
         self.chk_switch.set_sensitive(not installing)
+        self.bundle_entry.set_sensitive(not installing)
+        self.bundle_browse_btn.set_sensitive(not installing)
+        self.bundle_use_btn.set_sensitive(not installing)
+        if installing:
+            self.chk_firmware.set_sensitive(False)
+        else:
+            self._update_firmware_status()
         if installing:
             self.chk_rootfs.set_sensitive(False)
         else:

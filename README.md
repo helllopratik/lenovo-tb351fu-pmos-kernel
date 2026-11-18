@@ -22,8 +22,9 @@ Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
   `vbmeta*_a`, `super`, and Android logical partitions are off limits. The installer
   refuses to write them.
 - **Only slot B is written:** `boot_b`, `init_boot_b`, `vbmeta_b`,
-  `vbmeta_system_b`, and `vbmeta_vendor_b`. Empty `vendor_boot_b` / `dtbo_b`
-  partitions are populated from slot A so the slot-B boot chain is complete.
+  `vbmeta_system_b`, `vbmeta_vendor_b`, `vendor_boot_b` and `dtbo_b`. The stock
+  `vendor_boot`, `dtbo` and optional slot-B firmware images come from
+  `/mnt/Nvme/slot_b_bundle`; the flasher never writes their slot-A counterparts.
 - **Flashing is explicit.** The GUI shows the exact plan and asks for confirmation.
   The helper scripts support `--dry-run`; use it first. Do not run any flash command
   until you have verified the target device, slot, and image.
@@ -82,10 +83,10 @@ Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
 Slot A (untouched)                 Slot B (postmarketOS)
 ┌──────────────────────┐           ┌──────────────────────────────┐
 │ boot_a               │           │ boot_b       kernel Image.lz4│
-│ init_boot_a          │           │ init_boot_b  freestanding /init│
-│ vendor_boot_a        │  copied   │ vendor_boot_b  (from A if empty)│
-│ dtbo_a               │ ────────► │ dtbo_b         (from A if empty)│
-│ vbmeta*_a            │           │ vbmeta*_b    verification off │
+│ init_boot_a          │           │ init_boot_b  pmOS /init      │
+│ vendor_boot_a        │  bundle   │ vendor_boot_b  stock DTB     │
+│ dtbo_a               │  bundle   │ dtbo_b         stock overlays│
+│ vbmeta*_a            │           │ vbmeta*_b    verify off      │
 │ Android system/data  │           └──────────────┬───────────────┘
 └──────────────────────┘                          │
                                                   ▼
@@ -195,18 +196,26 @@ Android with root adb to install the rootfs.
 With Android booted on slot A and root adb authorized:
 
 ```bash
+BUNDLE=/mnt/Nvme/slot_b_bundle
+
 # 1) Check the boot-chain plan without writing anything
 ./deploy/scripts/flash_slot_b.sh \
   --boot images/boot_b.img \
   --init-boot images/init_boot_b.img \
   --vbmeta images/vbmeta_b.img \
+  --vendor-boot "$BUNDLE/vendor_boot.img" \
+  --dtbo "$BUNDLE/dtbo.img" \
   --dry-run
 
 # 2) Write the slot-B boot chain
+#    (add --firmware-dir "$BUNDLE" for a fresh slot B)
 ./deploy/scripts/flash_slot_b.sh \
   --boot images/boot_b.img \
   --init-boot images/init_boot_b.img \
-  --vbmeta images/vbmeta_b.img
+  --vbmeta images/vbmeta_b.img \
+  --vendor-boot "$BUNDLE/vendor_boot.img" \
+  --dtbo "$BUNDLE/dtbo.img" \
+  --firmware-dir "$BUNDLE"
 
 # 3) Decompress, resize, provision, and verify the rootfs
 ./install_pmos_rootfs.sh --image images/rootfs_base.img.zst --size 64G
@@ -273,11 +282,18 @@ The committed bundle is intentionally small:
 | `images/boot_b.img` | `boot_b` | 64 MiB | LZ4-legacy kernel `Image`, boot header v4, AVB hash footer. |
 | `images/init_boot_b.img` | `init_boot_b` | 8 MiB | Freestanding pmOS `/init` + `cpio.lz4` initramfs, AVB hash footer. |
 | `images/vbmeta_b.img` | `vbmeta_b`, `vbmeta_system_b`, `vbmeta_vendor_b` | 4 KiB | AVB vbmeta with verification flags `3`. |
+| `slot_b_bundle/vendor_boot.img` | `vendor_boot_b` | 64 MiB | Stock DTB/bootconfig; external bundle, not committed. |
+| `slot_b_bundle/dtbo.img` | `dtbo_b` | 8 MiB | Stock hardware overlays; external bundle. |
+| `slot_b_bundle/{lk,tee,gz,scp,sspm,mcupm,dpm,spmfw,pi_img}.img` | matching `*_b` | varies | Optional slot-B firmware for a fresh install; external bundle. |
 | `images/rootfs_base.img.zst` | not a partition | 734 MB | Base ext4 rootfs for `/data/pmos/rootfs.img`; release asset. |
 
-`vendor_boot_b` and `dtbo_b` are not separate files: `flash_slot_b.sh` copies
-`vendor_boot_a` / `dtbo_a` to slot B only if the B partitions are empty. The kernel
-payload inside `boot_b.img` is also available as `artifacts/Image.lz4` after a build.
+`vendor_boot_b` and `dtbo_b` are stock images from `/mnt/Nvme/slot_b_bundle`
+(`TB351FU_BUNDLE_DIR` overrides the path); the installer and `flash_slot_b.sh`
+write them explicitly. If no image is supplied, the flasher only falls back to
+copying slot A when the slot-B partition is completely empty. The same bundle can
+provide the `lk`/`tee`/`gz`/`scp`/`sspm`/`mcupm`/`dpm`/`spmfw`/`pi_img` firmware
+for a fresh slot B. The kernel payload inside `boot_b.img` is also available as
+`artifacts/Image.lz4` after a build.
 
 See [`images/README.md`](images/README.md) for exact commands, checksums, and the
 rootfs release instructions.

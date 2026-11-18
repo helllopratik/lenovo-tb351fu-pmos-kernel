@@ -7,8 +7,10 @@ the GTK import is checked but no window is created.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import struct
 import subprocess
 import tempfile
@@ -125,25 +127,59 @@ def check_validate_images() -> str:
         boot = root / "boot.img"
         init_boot = root / "init_boot.img"
         vbmeta = root / "vbmeta.img"
+        vendor_boot = root / "vendor_boot.img"
+        dtbo = root / "dtbo.img"
         rootfs = root / "rootfs.img"
         modules = root / "modules.tar.xz"
         firmware = root / "firmware.tar.xz"
         boot.write_bytes(b"\x00" * MIB)
         init_boot.write_bytes(b"\x00" * MIB)
         vbmeta.write_bytes(b"\x00" * 4096)
+        vendor_boot.write_bytes(b"\x00" * MIB)
+        dtbo.write_bytes(b"\x00" * MIB)
         rootfs.write_bytes(b"\x00" * MIB)
         modules.write_bytes(b"\x00" * 16)
         firmware.write_bytes(b"\x00" * 16)
+        firmware_images = {}
+        for part in backend.SLOT_B_FIRMWARE:
+            image = root / f"{part}.img"
+            image.write_bytes(b"\x00" * 16)
+            firmware_images[part] = image
 
         images = backend.ImageSet(
             boot=boot, init_boot=init_boot, vbmeta=vbmeta,
+            vendor_boot=vendor_boot, dtbo=dtbo,
             rootfs=rootfs, modules=modules, firmware=firmware,
+            slot_b_firmware=firmware_images,
         )
         assert backend.validate_images(images) == []
+        assert backend.validate_images(images, need_firmware=True) == []
 
         os.truncate(boot, backend.BOOT_PART_SIZE + 1)
         problems = backend.validate_images(images)
         assert any("64 MiB boot partition" in p for p in problems), problems
+
+        # vendor_boot and dtbo are required for a complete slot-B boot chain.
+        problems = backend.validate_images(
+            backend.ImageSet(boot=boot, init_boot=init_boot, vbmeta=vbmeta,
+                             dtbo=dtbo, rootfs=rootfs, modules=modules,
+                             firmware=firmware))
+        assert any("vendor_boot image not found" in p for p in problems), problems
+        problems = backend.validate_images(
+            backend.ImageSet(boot=boot, init_boot=init_boot, vbmeta=vbmeta,
+                             vendor_boot=vendor_boot, rootfs=rootfs,
+                             modules=modules, firmware=firmware))
+        assert any("dtbo image not found" in p for p in problems), problems
+
+        partial = dict(firmware_images)
+        partial.pop("lk")
+        problems = backend.validate_images(
+            backend.ImageSet(boot=boot, init_boot=init_boot, vbmeta=vbmeta,
+                             vendor_boot=vendor_boot, dtbo=dtbo,
+                             slot_b_firmware=partial),
+            need_rootfs=False, need_firmware=True,
+        )
+        assert any("lk.img" in p for p in problems), problems
 
         # Boot-chain checks are skipped when only the rootfs is wanted.
         problems = backend.validate_images(
@@ -158,7 +194,28 @@ def check_validate_images() -> str:
             need_boot=False,
         )
         assert any("firmware.tar.xz" in p for p in problems), problems
-    return "size limits and rootfs payload checks work"
+    return ("size limits, vendor_boot/dtbo and rootfs payload checks work")
+
+
+def check_bundle_scan() -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for name in ("boot_pmos.img", "init_boot_pmos.img", "vbmeta.img",
+                     "vendor_boot.img", "dtbo.img"):
+            (root / name).write_bytes(b"\x00" * MIB)
+        for name in backend.SLOT_B_FIRMWARE.values():
+            (root / name).write_bytes(b"\x00" * 16)
+
+        images = backend.scan_bundle(root)
+        assert images.boot == root / "boot_pmos.img", images.boot
+        assert images.init_boot == root / "init_boot_pmos.img"
+        assert images.vbmeta == root / "vbmeta.img"
+        assert images.vendor_boot == root / "vendor_boot.img"
+        assert images.dtbo == root / "dtbo.img"
+        assert images.bundle_dir == root
+        assert set(images.slot_b_firmware) == set(backend.SLOT_B_FIRMWARE)
+        assert backend.slot_b_firmware_dir(images) == root.resolve()
+    return "slot-B bundle names and firmware directory resolved"
 
 
 def check_partition_roles() -> str:
@@ -202,6 +259,9 @@ def check_scripts() -> str:
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert "--dry-run" in proc.stdout
+    assert "--vendor-boot" in proc.stdout
+    assert "--dtbo" in proc.stdout
+    assert "--firmware-dir" in proc.stdout
 
     proc = subprocess.run([str(flash), "--bogus"],
                           capture_output=True, text=True)
@@ -211,8 +271,10 @@ def check_scripts() -> str:
     assert "%%PMOS_DONE" in text
     assert "/dev/block/by-name/boot_a" not in text
     assert "flash boot_a" not in text
-    assert not re.search(r"of=/dev/block/by-name/(?!vbmeta_|vendor_boot_|dtbo_|boot_b|init_boot_b)[a-z0-9_]+",
-                         text), "unexpected device write target"
+    assert "vendor_boot_b" in text and "dtbo_b" in text
+    assert "FIRMWARE_PARTS" in text and "${part}_b" in text
+    for target in re.findall(r"of=/dev/block/by-name/([^\s'\";]+)", text):
+        assert not target.endswith("_a"), f"slot-A write target: {target}"
 
     rootfs_text = rootfs.read_text()
     assert "%%PMOS_PROGRESS:" in rootfs_text
@@ -242,10 +304,15 @@ def check_repo_paths() -> str:
     if not (paths["common"] / "install_pmos_rootfs.sh").is_file():
         return f"SKIP: checkout not found (common={paths['common']})"
     images = backend.find_images()
-    found = [name for name in ("boot", "init_boot", "vbmeta", "rootfs",
-                               "modules", "firmware")
+    found = [name for name in ("boot", "init_boot", "vbmeta", "vendor_boot",
+                               "dtbo", "rootfs", "modules", "firmware")
              if getattr(images, name)]
-    return f"common={paths['common']}, found: {', '.join(found) or 'none'}"
+    payload = backend._images_json(images)
+    assert json.loads(json.dumps(payload))["bundle_dir"] == (
+        str(images.bundle_dir) if images.bundle_dir else None)
+    return (f"common={paths['common']}, found: {', '.join(found) or 'none'}, "
+            f"firmware: {len(images.slot_b_firmware)}/"
+            f"{len(backend.SLOT_B_FIRMWARE)}")
 
 
 def check_orchestration() -> str:
@@ -256,8 +323,10 @@ def check_orchestration() -> str:
         scripts.mkdir(parents=True)
         flash = scripts / "flash_slot_b.sh"
         rootfs = common / "install_pmos_rootfs.sh"
+        args_file = common / "flash_args.txt"
         flash.write_text(
             "#!/usr/bin/env bash\n"
+            f"printf '%s\\n' \"$@\" > {shlex.quote(str(args_file))}\n"
             "echo '%%PMOS_STEP:write:Writing fake boot'\n"
             "echo '%%PMOS_PROGRESS:50:Halfway'\n"
             "echo '%%PMOS_DONE'\n"
@@ -268,6 +337,14 @@ def check_orchestration() -> str:
             "echo '%%PMOS_PROGRESS:25:Quarter'\n"
             "echo '%%PMOS_DONE'\n"
         )
+        firmware_dir = common / "firmware"
+        firmware_dir.mkdir()
+        firmware_images = {}
+        for part, name in backend.SLOT_B_FIRMWARE.items():
+            image = firmware_dir / name
+            image.write_bytes(b"\x00" * 16)
+            firmware_images[part] = image
+
         old = os.environ.get("TB351FU_COMMON_DIR")
         os.environ["TB351FU_COMMON_DIR"] = str(common)
         try:
@@ -278,12 +355,34 @@ def check_orchestration() -> str:
                     boot=common / "boot.img",
                     init_boot=common / "init_boot.img",
                     vbmeta=common / "vbmeta.img",
+                    vendor_boot=common / "vendor_boot.img",
+                    dtbo=common / "dtbo.img",
                     rootfs=common / "rootfs.img",
                 ),
                 size_bytes=16 * GIB,
                 switch_slot=False,
             )
             backend.install(options, lines.append)
+            args_text = args_file.read_text()
+
+            fw_lines: list[str] = []
+            fw_options = backend.InstallOptions(
+                device=backend.Device(serial="FAKE", mode="adb", root=True),
+                images=backend.ImageSet(
+                    boot=common / "boot.img",
+                    init_boot=common / "init_boot.img",
+                    vbmeta=common / "vbmeta.img",
+                    vendor_boot=common / "vendor_boot.img",
+                    dtbo=common / "dtbo.img",
+                    slot_b_firmware=firmware_images,
+                ),
+                size_bytes=16 * GIB,
+                flash_firmware=True,
+                install_rootfs=False,
+                switch_slot=False,
+            )
+            backend.install(fw_options, fw_lines.append)
+            fw_args_text = args_file.read_text()
         finally:
             if old is None:
                 os.environ.pop("TB351FU_COMMON_DIR", None)
@@ -298,7 +397,13 @@ def check_orchestration() -> str:
     assert "%%PMOS_PROGRESS:100:Installation complete" in lines, lines
     # Child DONE markers must not leak through.
     assert done == ["%%PMOS_DONE"], lines
-    return "two helper phases, scaled progress, one final DONE"
+    for flag in ("--vendor-boot", "--dtbo"):
+        assert flag in args_text.splitlines(), args_text
+    assert "--firmware-dir" not in args_text.splitlines(), args_text
+    assert "--firmware-dir" in fw_args_text.splitlines(), fw_args_text
+    assert str(firmware_dir.resolve()) in fw_args_text.splitlines(), fw_args_text
+    assert fw_lines.count("%%PMOS_DONE") == 1, fw_lines
+    return "two helper phases, bundle args, firmware opt-in, one final DONE"
 
 
 def check_gui_import() -> str:
@@ -317,6 +422,7 @@ CHECKS = [
     ("GPT parsing", check_gpt),
     ("image magic", check_image_kinds),
     ("image validation", check_validate_images),
+    ("bundle discovery", check_bundle_scan),
     ("partition roles", check_partition_roles),
     ("helper scripts", check_scripts),
     ("repository discovery", check_repo_paths),

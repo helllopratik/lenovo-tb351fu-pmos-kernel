@@ -167,6 +167,7 @@ bash build_and_flash_pmos.sh
 2. Compiles GKI 6.12 Linux kernel `Image` using LLVM Clang toolchain.
 3. Compresses `Image.lz4` and packages signed `boot_latest.img` (64 MB), `init_boot_latest.img` (8 MB), and `vbmeta_latest.img` (4 KB).
 4. Flashes partitions to Slot B via `dd` (`boot_b`, `init_boot_b`, `vbmeta_b`, `vbmeta_system_b`, `vbmeta_vendor_b`) and verifies MD5 checksums.
+5. For a complete fresh slot-B chain, the installer/`flash_slot_b.sh` additionally takes `vendor_boot.img` and `dtbo.img` (and optionally `lk`, `tee`, `gz`, `scp`, `sspm`, `mcupm`, `dpm`, `spmfw`, `pi_img`) from `/mnt/Nvme/slot_b_bundle` and writes only the matching `*_b` partitions.
 
 ### Slot Switching Commands:
 ```bash
