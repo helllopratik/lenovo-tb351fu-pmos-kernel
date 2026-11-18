@@ -189,6 +189,7 @@ struct mtk_seninf {
 	unsigned int num_clks;
 	struct clk_bulk_data *clks;
 	void __iomem *base;
+	void __iomem *ana_base;
 
 	struct media_device media_dev;
 	struct v4l2_device v4l2_dev;
@@ -460,6 +461,295 @@ static void __mtk_seninf_mux_update(struct mtk_seninf_mux *mux, u32 reg,
  * MUX and thus no output CAM MUX crossbar switch.
  */
 
+/*
+ * MT6789 MIPI RX analog register layout (vendor phy3_mtk_cam-seninf).
+ * Port 0: ANA A @ +0x0000, ANA B @ +0x1000, D-PHY top @ +0x2000.
+ */
+#define MT6789_ANA_0		0x00
+#define MT6789_ANA_1		0x04
+#define MT6789_ANA_2		0x08
+#define MT6789_ANA_3		0x0c
+#define MT6789_ANA_4		0x10
+#define MT6789_ANA_5		0x14
+#define MT6789_ANA_6		0x18
+#define MT6789_ANA_7		0x1c
+#define MT6789_ANA_8		0x20
+#define MT6789_ANA_SETTING_1	0xf4
+
+#define MT6789_DPHY_LANE_EN		0x00
+#define MT6789_DPHY_LANE_SEL		0x04
+#define MT6789_DPHY_CLK_LANE0_HS	0x10
+#define MT6789_DPHY_CLK_LANE1_HS	0x14
+#define MT6789_DPHY_DATA_LANE0_HS	0x20
+#define MT6789_DPHY_DATA_LANE1_HS	0x24
+#define MT6789_DPHY_DATA_LANE2_HS	0x28
+#define MT6789_DPHY_DATA_LANE3_HS	0x2c
+#define MT6789_DPHY_SPARE0		0xf0
+
+/* Equalizer / calibration bits shared by all lanes of an analog block. */
+#define MT6789_ANA5_EQ_MASK	(0x3 | (0x3 << 2) | BIT(4) | BIT(5) | \
+				 BIT(6) | (0xf << 8) | (0xf << 12))
+#define MT6789_ANA8_CAL_MASK	(0x3f << 16)
+#define MT6789_ANA4_CDR_MASK	((0x7 << 16) | (0x7 << 20) | \
+				 (0x7 << 24) | (0x7 << 28))
+
+static inline void mtk_seninf_ana_update(void __iomem *base, u32 reg,
+					 u32 mask, u32 val)
+{
+	u32 tmp = readl_relaxed(base + reg) & ~mask;
+
+	/* Both mask and val are register-aligned bit patterns. */
+	writel_relaxed(tmp | (val & mask), base + reg);
+}
+
+/* Vendor csirx_phyA_init(): static analog bias / equalizer setup. */
+static void mtk_seninf_mt6789_phy_init(void __iomem *base)
+{
+	/* CPHY CDR first-edge detection off. */
+	mtk_seninf_ana_update(base, MT6789_ANA_0, BIT(21) | BIT(22), 0);
+
+	/* LP receiver thresholds, bandgap VREF, equalizer deserializer VREF. */
+	mtk_seninf_ana_update(base, MT6789_ANA_1,
+			      (0x7 << 0) | (0x7 << 4) | (0xf << 8) | (0x7 << 16),
+			      (0x4 << 0) | (0x4 << 4) | (0x8 << 8) | (0x2 << 16));
+
+	/* ALP RX thresholds, L0 50-ohm termination, CPHY self-cal off. */
+	mtk_seninf_ana_update(base, MT6789_ANA_2,
+			      0x1f | (0x1f << 8) | BIT(16) | BIT(17) |
+			      (0x7 << 24) | (0x7 << 28),
+			      0x10 | (0x10 << 8) | (0x4 << 24) | (0x4 << 28));
+
+	/* L1 and L2 50-ohm termination codes. */
+	mtk_seninf_ana_update(base, MT6789_ANA_3, 0x1f | (0x1f << 8),
+			      0x10 | (0x10 << 8));
+	mtk_seninf_ana_update(base, MT6789_ANA_4, 0x1f | (0x1f << 8),
+			      0x10 | (0x10 << 8));
+
+	/* Equalizer: BW=3, IS=1, latch on, both degeneration legs on. */
+	mtk_seninf_ana_update(base, MT6789_ANA_5, MT6789_ANA5_EQ_MASK,
+			      0x3 | (0x1 << 2) | BIT(4) | BIT(5) | BIT(6));
+
+	/* CPHY CDR widths and clock delay (applies to both trios). */
+	mtk_seninf_ana_update(base, MT6789_ANA_6,
+			      0x3f | (0x3f << 8) | (0x3f << 16) | (0x3f << 24),
+			      0x9 | (0x9 << 8) | (0x9 << 16) | (0x4 << 24));
+	mtk_seninf_ana_update(base, MT6789_ANA_7,
+			      0x3f | (0x3f << 8) | (0x3f << 16) | (0x3f << 24),
+			      0x9 | (0x9 << 8) | (0x9 << 16) | (0x4 << 24));
+}
+
+/*
+ * Vendor csirx_dphy_init(): HS settle/trail timing. The vendor code is built
+ * with FIX_DPHY_SETTLE=1 and __SMT=0, so all lanes use a fixed 0x1c settle,
+ * zero prepare and no trailing-byte workaround.
+ */
+static void mtk_seninf_mt6789_dphy_init(void __iomem *dphy)
+{
+	u32 settle = 0x1c << 16;
+
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_CLK_LANE0_HS, 0xff << 16, settle);
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_CLK_LANE1_HS, 0xff << 16, settle);
+
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_DATA_LANE0_HS,
+			      0xff | (0xff << 8) | (0xff << 16) | BIT(29),
+			      settle);
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_DATA_LANE1_HS,
+			      0xff | (0xff << 8) | (0xff << 16) | BIT(29),
+			      settle);
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_DATA_LANE2_HS,
+			      0xff | (0xff << 8) | (0xff << 16) | BIT(29),
+			      settle);
+	mtk_seninf_ana_update(dphy, MT6789_DPHY_DATA_LANE3_HS,
+			      0xff | (0xff << 8) | (0xff << 16) | BIT(29),
+			      settle);
+}
+
+/* Vendor csirx_phyA_power_on(): bandgap + equalizer offset calibration. */
+static void mtk_seninf_mt6789_phy_on(void __iomem *base)
+{
+	mtk_seninf_ana_update(base, MT6789_ANA_8, MT6789_ANA8_CAL_MASK, 0);
+	mtk_seninf_ana_update(base, MT6789_ANA_0, BIT(0) | BIT(1), 0);
+	udelay(200);
+
+	mtk_seninf_ana_update(base, MT6789_ANA_0, BIT(0), BIT(0));
+	udelay(30);
+	mtk_seninf_ana_update(base, MT6789_ANA_0, BIT(1), BIT(1));
+	udelay(1);
+	mtk_seninf_ana_update(base, MT6789_ANA_8, MT6789_ANA8_CAL_MASK,
+			      MT6789_ANA8_CAL_MASK);
+	udelay(1);
+}
+
+/*
+ * Vendor csirx_phyA_setting() + csirx_dphy_setting() for a 4D1C D-PHY
+ * configuration at less than 2.5 Gbps per lane (both sensors run far below
+ * that). Lane 2 of port A is the clock lane.
+ */
+static void mtk_seninf_mt6789_phy_setting(void __iomem *portA,
+					  void __iomem *portB,
+					  void __iomem *dphy)
+{
+	/* Non-legacy PHY: dummy-valid AFIFO workaround. */
+	mtk_seninf_ana_update(portA, MT6789_ANA_SETTING_1,
+			      BIT(2) | (0xf << 4) | (0xf << 16) | (0xf << 20),
+			      BIT(2) | (0x5 << 4) | (0x4 << 16) | (0x1 << 20));
+
+	/* Port A: D-PHY mode, lane 2 is the clock. */
+	mtk_seninf_ana_update(portA, MT6789_ANA_0,
+			      BIT(20) | (0x7 << 8) | (0x7 << 12) |
+			      BIT(6) | BIT(7),
+			      (0x7 << 8) | BIT(14) | BIT(6) | BIT(7));
+	/* Port B: D-PHY mode, no clock lane. */
+	mtk_seninf_ana_update(portB, MT6789_ANA_0,
+			      BIT(20) | (0x7 << 8) | (0x7 << 12) |
+			      BIT(6) | BIT(7),
+			      (0x7 << 8) | BIT(6) | BIT(7));
+
+	/*
+	 * Equalizer tuned for 560-700 Mbps: BW=0, IS=1, latch on, no
+	 * degeneration, no slew-rate boost. CPHY CDR codes and delay also
+	 * match the vendor <2.5 Gbps branch.
+	 */
+	mtk_seninf_ana_update(portA, MT6789_ANA_5, MT6789_ANA5_EQ_MASK,
+			      (0x1 << 2) | BIT(6));
+	mtk_seninf_ana_update(portB, MT6789_ANA_5, MT6789_ANA5_EQ_MASK,
+			      (0x1 << 2) | BIT(6));
+	mtk_seninf_ana_update(portA, MT6789_ANA_4, MT6789_ANA4_CDR_MASK,
+			      (0x1 << 16) | (0x2 << 20) | (0x1 << 24) | (0x2 << 28));
+	mtk_seninf_ana_update(portB, MT6789_ANA_4, MT6789_ANA4_CDR_MASK,
+			      (0x1 << 16) | (0x2 << 20) | (0x1 << 24) | (0x2 << 28));
+	mtk_seninf_ana_update(portA, MT6789_ANA_6, 0x3f << 24, 0xa << 24);
+	mtk_seninf_ana_update(portA, MT6789_ANA_7, 0x3f << 24, 0xa << 24);
+	mtk_seninf_ana_update(portB, MT6789_ANA_6, 0x3f << 24, 0xa << 24);
+	mtk_seninf_ana_update(portB, MT6789_ANA_7, 0x3f << 24, 0xa << 24);
+
+	/* Power on both analog halves only after they are configured. */
+	mtk_seninf_mt6789_phy_on(portA);
+	mtk_seninf_mt6789_phy_on(portB);
+
+	/* 4D1C D-PHY lane mapping: LC0=2, LD0=1, LD1=3, LD2=0, LD3=4. */
+	writel_relaxed(BIT(0) | (0xf << 8), dphy + MT6789_DPHY_LANE_EN);
+	writel_relaxed(BIT(31) | (4 << 20) | (0 << 16) | (3 << 12) |
+		       (1 << 8) | (2 << 0), dphy + MT6789_DPHY_LANE_SEL);
+	writel_relaxed(0xf1, dphy + MT6789_DPHY_SPARE0);
+}
+
+static void mtk_seninf_setup_phy_mt6789(struct mtk_seninf *priv,
+					unsigned int port,
+					unsigned int num_lanes)
+{
+	void __iomem *portA, *portB, *dphy_top, *top_phy_reg;
+	u32 val;
+
+	if (!priv->ana_base) {
+		pr_emerg("mtk_seninf: ana_base is NULL, cannot setup PHY\n");
+		return;
+	}
+
+	pr_emerg("mtk_seninf: setting up MT6789 PHY for port %u (%u lanes)\n",
+		 port, num_lanes);
+
+	switch (port) {
+	case CSI_PORT_0:
+	case CSI_PORT_0B:
+	default:
+		portA = priv->ana_base + 0x0000;
+		portB = priv->ana_base + 0x1000;
+		dphy_top = priv->ana_base + 0x2000;
+		top_phy_reg = priv->base + 0x0040;
+		break;
+	case CSI_PORT_1:
+	case CSI_PORT_1B:
+		portA = priv->ana_base + 0x10000;
+		portB = priv->ana_base + 0x11000;
+		dphy_top = priv->ana_base + 0x12000;
+		top_phy_reg = priv->base + 0x0044;
+		break;
+	case CSI_PORT_2:
+	case CSI_PORT_2B:
+		portA = priv->ana_base + 0x4000;
+		portB = priv->ana_base + 0x5000;
+		dphy_top = priv->ana_base + 0x6000;
+		top_phy_reg = priv->base + 0x0048;
+		break;
+	}
+
+	/*
+	 * 1. Vendor csirx_seninf_top_setting(): for a 4-lane D-PHY port
+	 *    DPHY_EN is bit 0, CPHY_EN is bit 1 and CPHY_MODE is bits 8-9.
+	 */
+	val = readl_relaxed(top_phy_reg);
+	val |= BIT(0);
+	val &= ~(BIT(1) | (0x3 << 8));
+	writel_relaxed(val, top_phy_reg);
+
+	/* 2. Vendor csirx_phyA_init() + csirx_dphy_init(). */
+	mtk_seninf_mt6789_phy_init(portA);
+	mtk_seninf_mt6789_phy_init(portB);
+	mtk_seninf_mt6789_dphy_init(dphy_top);
+
+	/* 3. Vendor csirx_phyA_setting() + csirx_dphy_setting(). */
+	mtk_seninf_mt6789_phy_setting(portA, portB, dphy_top);
+
+	pr_emerg("mtk_seninf: MT6789 PHY done: ANA0_A=0x%08x ANA1_A=0x%08x ANA2_A=0x%08x ANA4_A=0x%08x ANA5_A=0x%08x ANA8_A=0x%08x DPHY_EN=0x%08x DPHY_SEL=0x%08x SPARE0=0x%08x TOP_PHY=0x%08x\n",
+		 readl_relaxed(portA + MT6789_ANA_0),
+		 readl_relaxed(portA + MT6789_ANA_1),
+		 readl_relaxed(portA + MT6789_ANA_2),
+		 readl_relaxed(portA + MT6789_ANA_4),
+		 readl_relaxed(portA + MT6789_ANA_5),
+		 readl_relaxed(portA + MT6789_ANA_8),
+		 readl_relaxed(dphy_top + MT6789_DPHY_LANE_EN),
+		 readl_relaxed(dphy_top + MT6789_DPHY_LANE_SEL),
+		 readl_relaxed(dphy_top + MT6789_DPHY_SPARE0),
+		 readl_relaxed(top_phy_reg));
+}
+
+static void mtk_seninf_poweroff_phy_mt6789(struct mtk_seninf *priv,
+					   unsigned int port)
+{
+	void __iomem *portA, *portB, *dphy_top, *top_phy_reg;
+
+	if (!priv->ana_base)
+		return;
+
+	switch (port) {
+	case CSI_PORT_0:
+	case CSI_PORT_0B:
+	default:
+		portA = priv->ana_base + 0x0000;
+		portB = priv->ana_base + 0x1000;
+		dphy_top = priv->ana_base + 0x2000;
+		top_phy_reg = priv->base + 0x0040;
+		break;
+	case CSI_PORT_1:
+	case CSI_PORT_1B:
+		portA = priv->ana_base + 0x10000;
+		portB = priv->ana_base + 0x11000;
+		dphy_top = priv->ana_base + 0x12000;
+		top_phy_reg = priv->base + 0x0044;
+		break;
+	case CSI_PORT_2:
+	case CSI_PORT_2B:
+		portA = priv->ana_base + 0x4000;
+		portB = priv->ana_base + 0x5000;
+		dphy_top = priv->ana_base + 0x6000;
+		top_phy_reg = priv->base + 0x0048;
+		break;
+	}
+
+	/* Disable top PHY bridge (DPHY_EN only, keep other settings) */
+	writel_relaxed(readl_relaxed(top_phy_reg) & ~BIT(0), top_phy_reg);
+
+	/* Disable DPHY lanes */
+	writel_relaxed(0x0, dphy_top + 0x0000);
+
+	/* Clear calibration and power off bandgap */
+	writel_relaxed(readl_relaxed(portA + 0x20) & ~(0x3f << 16), portA + 0x20);
+	writel_relaxed(readl_relaxed(portA + 0x00) & ~0x3, portA + 0x00);
+	writel_relaxed(readl_relaxed(portB + 0x20) & ~(0x3f << 16), portB + 0x20);
+	writel_relaxed(readl_relaxed(portB + 0x00) & ~0x3, portB + 0x00);
+}
+
 static void mtk_seninf_csi2_setup_phy(struct mtk_seninf *priv)
 {
 	if (priv->conf->is_mt6789)
@@ -548,6 +838,138 @@ static s64 mtk_seninf_get_clk_divider(struct mtk_seninf_input *input,
 	return div_u64(clk_get_rate(input->seninf->clks[0].clk), pixel_clock) - 1;
 }
 
+static u64 mtk_seninf_mt6789_pixel_rate(struct mtk_seninf_input *input)
+{
+	struct v4l2_ctrl *ctrl;
+	s64 rate;
+
+	if (!input->source_sd)
+		return 280000000;
+
+	ctrl = v4l2_ctrl_find(input->source_sd->ctrl_handler,
+			      V4L2_CID_PIXEL_RATE);
+	if (!ctrl)
+		return 280000000;
+
+	rate = v4l2_ctrl_g_ctrl_int64(ctrl);
+	return rate > 0 ? rate : 280000000;
+}
+
+/* MIPI CSI-2 data type matching the sensor output format. */
+static u32 mtk_seninf_mt6789_mbus_dt(struct mtk_seninf_input *input,
+				     struct v4l2_subdev_state *state)
+{
+	const struct mtk_seninf_format_info *fmtinfo;
+	const struct v4l2_mbus_framefmt *format;
+
+	format = v4l2_subdev_state_get_format(state, input->pad, 0);
+	fmtinfo = mtk_seninf_format_info(format->code);
+
+	switch (fmtinfo->bpp) {
+	case 8:
+		return 0x2a;	/* RAW8 */
+	case 12:
+		return 0x2c;	/* RAW12 */
+	case 14:
+		return 0x2d;	/* RAW14 */
+	case 10:
+	default:
+		return 0x2b;	/* RAW10 */
+	}
+}
+
+/*
+ * MT6789 CSI2 receiver setup. The MT6789 CSI2 block has a completely
+ * different register layout from the MT8365 one: the lane enables live at
+ * +0x0a00, the data-type mapping at +0x0a20 and the resync control at
+ * +0x0a10. The interface enable is a separate register at +0x0210.
+ */
+static void mtk_seninf_input_setup_csi2_mt6789(struct mtk_seninf_input *input,
+					       struct v4l2_subdev_state *state)
+{
+	const struct mtk_seninf_format_info *fmtinfo;
+	const struct v4l2_mbus_framefmt *format;
+	unsigned int num_data_lanes = input->bus.num_data_lanes;
+	u64 pixel_rate, data_rate, cycles;
+	u32 val, dt;
+	unsigned int i;
+
+	format = v4l2_subdev_state_get_format(state, input->pad, 0);
+	fmtinfo = mtk_seninf_format_info(format->code);
+
+	if (!num_data_lanes)
+		num_data_lanes = 4;
+
+	dt = mtk_seninf_mt6789_mbus_dt(input, state);
+
+	/* Reset the CSI2 receiver before reconfiguring it. */
+	__mtk_seninf_input_update(input, MT6789_SENINF_CSI2_CTRL,
+				  MT6789_SENINF_CSI2_CTRL_SW_RST,
+				  MT6789_SENINF_CSI2_CTRL_SW_RST);
+	udelay(1);
+	__mtk_seninf_input_update(input, MT6789_SENINF_CSI2_CTRL,
+				  MT6789_SENINF_CSI2_CTRL_SW_RST, 0);
+
+	/* Clear the data-type and channel mapping. */
+	for (i = 0; i < 8; i++)
+		mtk_seninf_input_write(input, MT6789_CSI2_S_DI_CTRL(i), 0);
+	for (i = 0; i < 4; i++)
+		mtk_seninf_input_write(input, MT6789_CSI2_CH_CTRL(i), 0);
+
+	/* Stream 0 carries VC 0 with the sensor data type. */
+	val = MT6789_CSI2_DI_VC_INTERLEAVE_EN |
+	      FIELD_PREP(MT6789_CSI2_DI_DT_INTERLEAVE_MODE, 1) |
+	      FIELD_PREP(MT6789_CSI2_DI_DT_SEL, dt);
+	mtk_seninf_input_write(input, MT6789_CSI2_S0_DI_CTRL, val);
+	mtk_seninf_input_write(input, MT6789_CSI2_CH0_CTRL,
+			       MT6789_CSI2_CH_S_GRP_EN(0));
+
+	/* D-PHY, no HDR, no DPCM. */
+	mtk_seninf_input_write(input, MT6789_CSI2_OPT, 0);
+	mtk_seninf_input_write(input, MT6789_CSI2_HDR_MODE_0, 0);
+	mtk_seninf_input_write(input, MT6789_CSI2_HDR_MODE_1, 0);
+	mtk_seninf_input_write(input, MT6789_CSI2_DPCM_CTRL, 0);
+	mtk_seninf_input_write(input, MT6789_CSI2_DBG_CTRL,
+			       MT6789_CSI2_DBG_PACKET_CNT_EN);
+
+	/* Enable the data lanes used by the sensor. */
+	mtk_seninf_input_write(input, MT6789_CSI2_EN,
+			       BIT(num_data_lanes) - 1);
+
+	/*
+	 * Vendor lane-resync workaround for the non-legacy PHY. The dummy
+	 * cycle count is 64 SENINF clocks divided by the per-lane bit rate.
+	 */
+	pixel_rate = mtk_seninf_mt6789_pixel_rate(input);
+	data_rate = pixel_rate * fmtinfo->bpp / num_data_lanes;
+	cycles = div_u64(64ULL * 273000000ULL, data_rate) + 1;
+	if (cycles > 0xfff)
+		cycles = 0xfff;
+
+	val = 0x2020f106;
+	val &= ~(MT6789_CSI2_RESYNC_DMY_EN |
+		 MT6789_CSI2_RESYNC_DMY_CYCLE |
+		 MT6789_CSI2_RESYNC_DMY_CNT);
+	val |= FIELD_PREP(MT6789_CSI2_RESYNC_DMY_EN,
+			  BIT(num_data_lanes) - 1);
+	val |= FIELD_PREP(MT6789_CSI2_RESYNC_DMY_CNT, 3);
+	val |= FIELD_PREP(MT6789_CSI2_RESYNC_DMY_CYCLE, cycles);
+	mtk_seninf_input_write(input, MT6789_CSI2_RESYNC_MERGE_CTRL, val);
+
+	__mtk_seninf_input_update(input, MT6789_SENINF_CSI2_CTRL,
+				  MT6789_SENINF_CSI2_CTRL_EN,
+				  MT6789_SENINF_CSI2_CTRL_EN);
+	__mtk_seninf_input_update(input, MT6789_SENINF_CTRL,
+				  MT6789_SENINF_CTRL_EN,
+				  MT6789_SENINF_CTRL_EN);
+
+	pr_emerg("mtk_seninf: MT6789 CSI2 up: lanes=%u dt=0x%02x pixel_rate=%llu data_rate=%llu cycles=%llu EN=0x%08x RESYNC=0x%08x CSI2_CTRL=0x%08x\n",
+		 num_data_lanes, dt, pixel_rate, data_rate, cycles,
+		 readl(input->base + MT6789_CSI2_EN),
+		 readl(input->base + MT6789_CSI2_RESYNC_MERGE_CTRL),
+		 readl(input->base + MT6789_SENINF_CSI2_CTRL));
+}
+
 static void mtk_seninf_input_setup_csi2(struct mtk_seninf_input *input,
 				       struct v4l2_subdev_state *state)
 {
@@ -556,6 +978,11 @@ static void mtk_seninf_input_setup_csi2(struct mtk_seninf_input *input,
 	unsigned int num_data_lanes = input->bus.num_data_lanes;
 	unsigned int val = 0;
 	s64 clock_count;
+
+	if (input->seninf->conf->is_mt6789) {
+		mtk_seninf_input_setup_csi2_mt6789(input, state);
+		return;
+	}
 
 	format = v4l2_subdev_state_get_format(state, input->pad, 0);
 	fmtinfo = mtk_seninf_format_info(format->code);
@@ -666,6 +1093,41 @@ static void mtk_seninf_mux_setup(struct mtk_seninf_mux *mux,
 	format = v4l2_subdev_state_get_format(state, input->pad, 0);
 	fmtinfo = mtk_seninf_format_info(format->code);
 
+	if (mux->seninf->conf->is_mt6789) {
+		/*
+		 * MT6789 layout: source select, pixel mode and FIFO push
+		 * live in CTRL_1, enable/reset in CTRL_0 and the sync
+		 * polarities in OPT.
+		 */
+		mtk_seninf_mux_write(mux, MT6789_SENINF_MUX_CTRL_1,
+				     FIELD_PREP(MT6789_SENINF_MUX_SRC_SEL,
+						MT6789_SENINF_SRC_MIPI_SENSOR) |
+				     FIELD_PREP(MT6789_SENINF_MUX_PIX_MODE_SEL,
+						MT6789_SENINF_DEF_PIXEL_MODE) |
+				     FIELD_PREP(MT6789_SENINF_MUX_FIFO_PUSH_EN,
+						FIFO_PUSH_EN_NORMAL_MODE));
+
+		val = mtk_seninf_mux_read(mux, MT6789_SENINF_MUX_OPT);
+		val &= ~(MT6789_SENINF_MUX_HSYNC_POL |
+			 MT6789_SENINF_MUX_VSYNC_POL);
+		mtk_seninf_mux_write(mux, MT6789_SENINF_MUX_OPT, val);
+
+		val = mtk_seninf_mux_read(mux, MT6789_SENINF_MUX_CTRL_0);
+		mtk_seninf_mux_write(mux, MT6789_SENINF_MUX_CTRL_0,
+				     val | MT6789_SENINF_MUX_IRQ_SW_RST |
+				     MT6789_SENINF_MUX_SW_RST);
+		mtk_seninf_mux_write(mux, MT6789_SENINF_MUX_CTRL_0,
+				     val & ~(MT6789_SENINF_MUX_IRQ_SW_RST |
+					     MT6789_SENINF_MUX_SW_RST));
+
+		mtk_seninf_mux_write(mux, MT6789_SENINF_MUX_IRQ_EN,
+				     MT6789_SENINF_MUX_IRQ_CLR_MODE);
+		__mtk_seninf_mux_update(mux, MT6789_SENINF_MUX_CTRL_0,
+					MT6789_SENINF_MUX_EN,
+					MT6789_SENINF_MUX_EN);
+		return;
+	}
+
 	/* Enable mux */
 	mtk_seninf_mux_update(mux, SENINF_MUX_CTRL, SENINF_MUX_EN, 1);
 	mtk_seninf_mux_update(mux, SENINF_MUX_CTRL, SENINF_SRC_SEL,
@@ -709,42 +1171,58 @@ static void mtk_seninf_mux_setup(struct mtk_seninf_mux *mux,
 	/* SPARE field meaning is unknown */
 	val |= 0xc0000;
 	mtk_seninf_mux_write(mux, SENINF_MUX_SPARE, val);
-
-	if (mux->seninf->conf->is_mt6789) {
-		mtk_seninf_mux_write(mux, SENINF_MUX_CTRL_1, 0x001f0200);
-		mtk_seninf_mux_write(mux, SENINF_MUX_IRQ_EN, 0x80000000);
-	}
 }
 
 static void mtk_seninf_top_mux_setup(struct mtk_seninf *priv,
-				     enum mtk_seninf_id seninf_id,
-				     const struct mtk_seninf_mux *mux)
+				     struct mtk_seninf_input *input,
+				     const struct mtk_seninf_mux *mux,
+				     struct v4l2_subdev_state *state)
 {
 	unsigned int val;
+	unsigned int i;
 
 	if (priv->conf->is_mt6789) {
-		unsigned int reg = SENINF_TOP_MUX_CTRL_0 + 4 * (mux->mux_id / 4);
-		unsigned int shift = (mux->mux_id % 4) * 8;
-		int k;
+		unsigned int reg;
+		unsigned int shift;
 
+		/*
+		 * MT6789 top mux: four 4-bit source select fields per
+		 * register, starting at SENINF_TOP_MUX_CTRL_0.
+		 */
+		reg = SENINF_TOP_MUX_CTRL_0 + 4 * (mux->mux_id / 4);
+		shift = (mux->mux_id % 4) * 8;
 		val = mtk_seninf_read(priv, reg);
-		val &= ~(0x1f << shift);
-		val |= (seninf_id & 0x1f) << shift;
+		val &= ~(MT6789_SENINF_MUX_SRC_MASK << shift);
+		val |= (input->seninf_id & MT6789_SENINF_MUX_SRC_MASK) << shift;
 		mtk_seninf_write(priv, reg, val);
 
-		/* CAM MUX: 16 muxes, 8-bit stride, identity routing */
-		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_0, 0x03020100);
-		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_1, 0x07060504);
-		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_2, 0x0b0a0908);
-		mtk_seninf_write(priv, SENINF_CAM_MUX_CTRL_3, 0x0f0e0d0c);
+		/*
+		 * MT6789 CAM MUX: four 4-bit source select fields per
+		 * register and one option register per CAM MUX. The CAM MUX
+		 * to CAMSV wiring is fixed (CAM MUX n -> CAMSV n) but is not
+		 * described by the vendor DT, so feed every CAM MUX from this
+		 * SENINF MUX while bringing the first sensor up.
+		 */
+		for (i = 0; i < MT6789_SENINF_CAM_MUX_NUM; i++) {
+			reg = MT6789_SENINF_CAM_MUX_CTRL(i);
+			shift = MT6789_SENINF_CAM_MUX_SRC_SHIFT(i);
+			val = mtk_seninf_read(priv, reg);
+			val &= ~(MT6789_SENINF_CAM_MUX_SRC_MASK << shift);
+			val |= (mux->mux_id & MT6789_SENINF_CAM_MUX_SRC_MASK) << shift;
+			mtk_seninf_write(priv, reg, val);
 
-		/* CAM MUX enable bitmap (16 muxes) */
-		mtk_seninf_write(priv, SENINF_CAM_MUX_ENABLE, 0x0000ffff);
-		mtk_seninf_write(priv, SENINF_CAM_MUX_ENABLE_2, 0x0000ffff);
+			/* No VC/DT filtering on the first capture path. */
+			mtk_seninf_write(priv, MT6789_SENINF_CAM_MUX_OPT(i), 0);
+		}
 
-		/* CAM MUX CHK_CTL_0 @ 0x500 + 0x10*k = 0x02 */
-		for (k = 0; k < 16; k++)
-			mtk_seninf_write(priv, SENINF_CAM_MUX_CHK_CTL_0 + 0x10 * k, 0x02);
+		pr_emerg("mtk_seninf: MT6789 CAM MUX mux=%u src=%u CTRL0=0x%08x CTRL1=0x%08x CTRL2=0x%08x CTRL3=0x%08x TOP=0x%08x 0x%08x\n",
+			 mux->mux_id, input->seninf_id,
+			 mtk_seninf_read(priv, MT6789_SENINF_CAM_MUX_CTRL(0)),
+			 mtk_seninf_read(priv, MT6789_SENINF_CAM_MUX_CTRL(4)),
+			 mtk_seninf_read(priv, MT6789_SENINF_CAM_MUX_CTRL(8)),
+			 mtk_seninf_read(priv, MT6789_SENINF_CAM_MUX_CTRL(12)),
+			 mtk_seninf_read(priv, SENINF_TOP_MUX_CTRL_0),
+			 mtk_seninf_read(priv, SENINF_TOP_MUX_CTRL_1));
 		return;
 	}
 
@@ -754,7 +1232,7 @@ static void mtk_seninf_top_mux_setup(struct mtk_seninf *priv,
 	 */
 	val = mtk_seninf_read(priv, SENINF_TOP_MUX_CTRL)
 		    & ~(0xf << (mux->mux_id * 4));
-	val |= (seninf_id & 0xf) << (mux->mux_id * 4);
+	val |= (input->seninf_id & 0xf) << (mux->mux_id * 4);
 	mtk_seninf_write(priv, SENINF_TOP_MUX_CTRL, val);
 
 	/*
@@ -776,18 +1254,34 @@ static void mtk_seninf_start(struct mtk_seninf *priv,
 			    struct mtk_seninf_input *input,
 			    struct mtk_seninf_mux *mux)
 {
-	phy_power_on(input->phy);
+	if (priv->conf->is_mt6789)
+		mtk_seninf_setup_phy_mt6789(priv, input->pad, input->bus.num_data_lanes);
+	else
+		phy_power_on(input->phy);
 
-	mtk_seninf_input_setup_csi2_rx(input);
+	/* MT6789 has its own CSI2 lane mux inside the PHY block. */
+	if (!priv->conf->is_mt6789)
+		mtk_seninf_input_setup_csi2_rx(input);
 	mtk_seninf_input_setup_csi2(input, state);
 
 	mtk_seninf_mux_setup(mux, input, state);
-	mtk_seninf_top_mux_setup(priv, input->seninf_id, mux);
+	mtk_seninf_top_mux_setup(priv, input, mux, state);
 }
 
 static void mtk_seninf_stop(struct mtk_seninf_input *input)
 {
 	unsigned int val;
+
+	if (input->seninf->conf->is_mt6789) {
+		/* Stop the receiver, then its interface and finally PHY. */
+		mtk_seninf_input_write(input, MT6789_CSI2_EN, 0);
+		__mtk_seninf_input_update(input, MT6789_SENINF_CSI2_CTRL,
+					  MT6789_SENINF_CSI2_CTRL_EN, 0);
+		__mtk_seninf_input_update(input, MT6789_SENINF_CTRL,
+					  MT6789_SENINF_CTRL_EN, 0);
+		mtk_seninf_poweroff_phy_mt6789(input->seninf, input->pad);
+		return;
+	}
 
 	/* Disable CSI2(2.5G) first */
 	val = mtk_seninf_inuput_read(input, SENINF_CSI2_CTL);
@@ -816,40 +1310,58 @@ static int seninf_enable_streams(struct v4l2_subdev *sd,
 	u32 sink_pad;
 	int ret;
 
+	pr_emerg("mtk_seninf: seninf_enable_streams on %s pad=%u mask=0x%llx\n",
+		 sd->name, pad, streams_mask);
+
 	/* Stream control can only operate on source pads. */
 	if (pad < priv->conf->nb_inputs ||
-	    pad >= priv->conf->nb_inputs + priv->conf->nb_outputs)
+	    pad >= priv->conf->nb_inputs + priv->conf->nb_outputs) {
+		pr_emerg("mtk_seninf: invalid pad %u (nb_inputs=%u nb_outputs=%u)\n",
+			 pad, priv->conf->nb_inputs, priv->conf->nb_outputs);
 		return -EINVAL;
+	}
 
 	/* Locate the SENINF input and MUX for the source pad. */
 	ret = v4l2_subdev_routing_find_opposite_end(&state->routing, pad,
 						    0, &sink_pad, NULL);
 	if (ret) {
-		dev_dbg(priv->dev, "No sink pad routed to source pad %u\n",
-			pad);
+		pr_emerg("mtk_seninf: No sink pad routed to source pad %u (ret=%d)\n",
+			 pad, ret);
 		return ret;
 	}
 
 	input = &priv->inputs[sink_pad];
 	mux = &priv->muxes[pad - priv->conf->nb_inputs];
 
+	pr_emerg("mtk_seninf: pad %u routed to sink_pad %u (seninf_id=%u), mux_id=%u\n",
+		 pad, sink_pad, input->seninf_id, mux->mux_id);
+
 	ret = pm_runtime_resume_and_get(priv->dev);
 	if (ret < 0) {
-		dev_err(priv->dev, "failed to get pm_runtime: %d\n", ret);
+		pr_emerg("mtk_seninf: failed to get pm_runtime: %d\n", ret);
 		return ret;
 	}
 
 	/* Start the SENINF first and then the source. */
+	pr_emerg("mtk_seninf: starting hardware for input pad %u mux %u\n",
+		 input->pad, mux->mux_id);
 	mtk_seninf_start(priv, state, input, mux);
 
 	source = input->source_sd;
+	if (!source) {
+		pr_emerg("mtk_seninf: ERROR: input->source_sd is NULL for sink_pad %u!\n", sink_pad);
+		return -ENODEV;
+	}
+	pr_emerg("mtk_seninf: starting source %s pad %u\n",
+		 source->entity.name, input->source_pad->index);
 	ret = v4l2_subdev_enable_streams(source, input->source_pad->index, BIT(0));
 	if (ret) {
-		dev_err(priv->dev, "failed to start source %s: %d\n",
-			source->entity.name, ret);
+		pr_emerg("mtk_seninf: failed to start source %s: %d\n",
+			 source->entity.name, ret);
 		goto err_no_stream;
 	}
 
+	pr_emerg("mtk_seninf: seninf_enable_streams SUCCESS for pad %u\n", pad);
 	return 0;
 
 err_no_stream:
@@ -1094,6 +1606,7 @@ static int seninf_subdev_init(struct mtk_seninf *priv)
 	v4l2_subdev_init(sd, &seninf_subdev_ops);
 	sd->internal_ops = &seninf_subdev_internal_ops;
 	sd->dev = priv->dev;
+	sd->fwnode = dev_fwnode(priv->dev);
 	sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	sd->entity.ops = &seninf_media_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS |
@@ -1234,59 +1747,63 @@ static int mtk_seninf_notifier_bound(struct v4l2_async_notifier *notifier,
 	struct mtk_seninf_async_subdev *asd =
 		container_of(asc, struct mtk_seninf_async_subdev, asc);
 	struct device_link *link;
-	int ret;
+	int ret = 0;
 
-	dev_dbg(priv->dev, "%s bound to SENINF port %u\n", sd->entity.name,
+	pr_emerg("mtk_seninf: %s bound to SENINF port %u\n", sd->entity.name,
 		asd->port);
 
 	if (mtk_seninf_pad_is_sink(priv, asd->port)) {
 		struct mtk_seninf_input *input = asd->input;
 		struct media_pad *source_pad;
 
+		pr_emerg("mtk_seninf: creating sink link for port %u\n", asd->port);
 		link = device_link_add(priv->dev, sd->dev,
 				       DL_FLAG_PM_RUNTIME | DL_FLAG_STATELESS);
-		if (!link) {
-			dev_err(priv->dev,
-				"Failed to create device link from source %s\n",
+		if (!link)
+			pr_warn("mtk_seninf: Note: device_link_add from source %s returned NULL (ignoring)\n",
 				sd->name);
-			return -EINVAL;
-		}
 
+		pr_emerg("mtk_seninf: creating fwnode links for sink pad %u\n", input->pad);
 		ret = v4l2_create_fwnode_links_to_pad(sd,
 						      &priv->pads[input->pad],
 						      MEDIA_LNK_FL_IMMUTABLE |
 						      MEDIA_LNK_FL_ENABLED);
+		pr_emerg("mtk_seninf: v4l2_create_fwnode_links_to_pad ret=%d\n", ret);
 
 		source_pad = media_pad_remote_pad_unique(&priv->pads[input->pad]);
 		if (IS_ERR(source_pad)) {
-			dev_err(priv->dev, "No connected sensor pad\n");
+			pr_emerg("mtk_seninf: No connected sensor pad: %ld\n", PTR_ERR(source_pad));
 			return PTR_ERR(source_pad);
 		}
 
 		input->source_pad = source_pad;
 		input->source_sd = sd;
+		pr_emerg("mtk_seninf: input pad %u bound to %s pad %u\n",
+			input->pad, sd->name, source_pad->index);
 	} else {
+		pr_emerg("mtk_seninf: creating source link for output port %u to %s\n",
+			asd->port, sd->entity.name);
 		link = device_link_add(sd->dev, priv->dev,
 				       DL_FLAG_PM_RUNTIME | DL_FLAG_STATELESS);
-		if (!link) {
-			dev_err(priv->dev,
-				"Failed to create device link to output %s\n",
+		if (!link)
+			pr_warn("mtk_seninf: Note: device_link_add to output %s returned NULL (ignoring)\n",
 				sd->name);
-			return -EINVAL;
-		}
 
+		pr_emerg("mtk_seninf: creating fwnode links to output subdev %s\n", sd->name);
 		ret = v4l2_create_fwnode_links_to_pad(&priv->subdev,
 						      &sd->entity.pads[0],
 						      MEDIA_LNK_FL_IMMUTABLE |
 						      MEDIA_LNK_FL_ENABLED);
+		pr_emerg("mtk_seninf: v4l2_create_fwnode_links_to_pad for output ret=%d\n", ret);
 	}
 
 	if (ret) {
-		dev_err(priv->dev, "Failed to create links between SENINF port %u and %s (%d)\n",
+		pr_emerg("mtk_seninf: Failed to create links between SENINF port %u and %s (%d)\n",
 			asd->port, sd->entity.name, ret);
 		return ret;
 	}
 
+	pr_emerg("mtk_seninf: notifier_bound done for %s\n", sd->entity.name);
 	return 0;
 }
 
@@ -1296,13 +1813,14 @@ static int mtk_seninf_notifier_complete(struct v4l2_async_notifier *notifier)
 					       notifier);
 	int ret;
 
+	pr_emerg("mtk_seninf: notifier_complete start\n");
 	ret = v4l2_device_register_subdev_nodes(&priv->v4l2_dev);
 	if (ret) {
-		dev_err(priv->dev, "Failed to register subdev nodes: %d\n",
+		pr_emerg("mtk_seninf: Failed to register subdev nodes: %d\n",
 			ret);
 		return ret;
 	}
-
+	pr_emerg("mtk_seninf: notifier_complete done ret=0\n");
 	return 0;
 }
 
@@ -1371,10 +1889,17 @@ static int mtk_seninf_v4l2_register(struct mtk_seninf *priv)
 		goto err_clean_media;
 	}
 
-	 /* Initialize and register the SENINF subdev. */
+	/* Register media device first so that bound callbacks have registered mdev */
+	ret = media_device_register(&priv->media_dev);
+	if (ret) {
+		dev_err_probe(dev, ret, "Failed to register media device\n");
+		goto err_unreg_v4l2;
+	}
+
+	/* Initialize and register the SENINF subdev. */
 	ret = seninf_subdev_init(priv);
 	if (ret)
-		goto err_unreg_v4l2;
+		goto err_unreg_media;
 
 	/* Set up async device */
 	ret = mtk_seninf_v4l2_async_register(priv);
@@ -1384,19 +1909,12 @@ static int mtk_seninf_v4l2_register(struct mtk_seninf *priv)
 		goto err_subdev_cleanup;
 	}
 
-	/* Register media device */
-	ret = media_device_register(&priv->media_dev);
-	if (ret) {
-		dev_err_probe(dev, ret, "Failed to register media device\n");
-		goto err_unreg_notifier;
-	}
-
 	return 0;
 
-err_unreg_notifier:
-	v4l2_async_nf_unregister(&priv->notifier);
 err_subdev_cleanup:
 	seninf_subdev_cleanup(priv);
+err_unreg_media:
+	media_device_unregister(&priv->media_dev);
 err_unreg_v4l2:
 	v4l2_device_unregister(&priv->v4l2_dev);
 err_clean_media:
@@ -1439,7 +1957,8 @@ static const struct dev_pm_ops runtime_pm_ops = {
 
 static int seninf_probe(struct platform_device *pdev)
 {
-	static const char * const clk_names[] = { "camsys", "top_mux" };
+	static const char * const clk_names[] = { "camsys", "top_mux",
+						  "CAMSYS_SENINF_CGPDN" };
 	struct device *dev = &pdev->dev;
 	struct resource *res;
 	struct mtk_seninf *priv;
@@ -1463,6 +1982,14 @@ static int seninf_probe(struct platform_device *pdev)
 				  max_t(resource_size_t, resource_size(res), 0x6000));
 	if (!priv->base)
 		return -ENOMEM;
+
+	if (priv->conf->is_mt6789) {
+		priv->ana_base = devm_ioremap(dev, 0x11c80000, 0x10000);
+		if (!priv->ana_base)
+			dev_warn(dev, "Failed to map MT6789 ana_base (0x11c80000)\n");
+		else
+			pr_emerg("mtk_seninf: MT6789 ana_base mapped at %p\n", priv->ana_base);
+	}
 
 	priv->num_clks = ARRAY_SIZE(clk_names);
 	priv->clks = devm_kcalloc(dev, priv->num_clks,

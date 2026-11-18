@@ -74,6 +74,7 @@
 #define SENINF_CSI2_DGB_SEL						0x0a18
 #define SENINF_CSI2_DGB_SEL_DEBUG_SEL					GENMASK(7, 0)
 #define SENINF_CSI2_DGB_SEL_DEBUG_EN					BIT(31)
+#define SENINF_CSI2_CH0_CTRL						0x0a60
 #define SENINF_CSI2_SPARE0						0x0a20
 #define SENINF_CSI2_LNRC_FSM						0x0a28
 #define SENINF_CSI2_HS_TRAIL						0x0a40
@@ -115,20 +116,66 @@
 #define SENINF_TOP_MUX_CTRL_0						0x0010
 #define SENINF_TOP_MUX_CTRL_1						0x0014
 
-/* MT6789 CAM MUX crossbar (8-bit stride, 4 muxes per register, 16 muxes) */
-#define SENINF_CAM_MUX_CTRL_0						0x0400
-#define SENINF_CAM_MUX_CTRL_1						0x0404
-#define SENINF_CAM_MUX_CTRL_2						0x0408
-#define SENINF_CAM_MUX_CTRL_3						0x040c
-#define SENINF_CAM_MUX_ENABLE						0x0410
-#define SENINF_CAM_MUX_ENABLE_2						0x0418
-#define SENINF_CAM_MUX_CHK_CTL_0					0x0500
+/*
+ * MT6789 SENINF instance registers. Every SENINF has its own CSI2 and MUX
+ * block at +0x0a00 / +0x0d00, and its own interface control at +0x0200.
+ * These layouts come from the vendor phy3 BSP, which is the only available
+ * description of the MT6789 SENINF1 hardware.
+ */
+#define MT6789_SENINF_CTRL						0x0200
+#define MT6789_SENINF_CTRL_EN						BIT(0)
+#define MT6789_SENINF_CSI2_CTRL						0x0210
+#define MT6789_SENINF_CSI2_CTRL_EN					BIT(0)
+#define MT6789_SENINF_CSI2_CTRL_SW_RST					BIT(4)
 
-/* MT6789 CSI2 per-channel control (inside 0x0a00 CSI2 rx block) */
-#define SENINF_CSI2_CH0_CTRL						0x0a60
+#define MT6789_CSI2_EN							0x0a00
+#define MT6789_CSI2_OPT							0x0a04
+#define MT6789_CSI2_OPT_CPHY_SEL					BIT(0)
+#define MT6789_CSI2_HDR_MODE_0						0x0a08
+#define MT6789_CSI2_HDR_MODE_1						0x0a0c
+#define MT6789_CSI2_RESYNC_MERGE_CTRL					0x0a10
+#define MT6789_CSI2_RESYNC_CYCLE_CNT_OPT				BIT(8)
+#define MT6789_CSI2_RESYNC_DMY_EN					GENMASK(15, 12)
+#define MT6789_CSI2_RESYNC_DMY_CYCLE					GENMASK(27, 16)
+#define MT6789_CSI2_RESYNC_DMY_CNT					GENMASK(31, 28)
+#define MT6789_CSI2_DPCM_CTRL						0x0a18
+#define MT6789_CSI2_S0_DI_CTRL						0x0a20
+#define MT6789_CSI2_S_DI_CTRL(n)					(0x0a20 + 4 * (n))
+#define MT6789_CSI2_DI_VC_INTERLEAVE_EN					BIT(0)
+#define MT6789_CSI2_DI_DT_INTERLEAVE_MODE				GENMASK(5, 4)
+#define MT6789_CSI2_DI_VC_SEL						GENMASK(12, 8)
+#define MT6789_CSI2_DI_DT_SEL						GENMASK(21, 16)
+#define MT6789_CSI2_CH0_CTRL						0x0a60
+#define MT6789_CSI2_CH_CTRL(n)						(0x0a60 + 4 * (n))
+#define MT6789_CSI2_CH_S_GRP_EN(n)					BIT(8 + (n))
+#define MT6789_CSI2_DBG_CTRL						0x0ae0
+#define MT6789_CSI2_DBG_PACKET_CNT_EN					BIT(17)
 
-/* MT6789 MUX control 1 & IRQ enable (inside 0x0d00 MUX block) */
-#define SENINF_MUX_CTRL_1						0x0d04
-#define SENINF_MUX_IRQ_EN						0x0d10
+#define MT6789_SENINF_MUX_CTRL_0					0x0d00
+#define MT6789_SENINF_MUX_EN						BIT(0)
+#define MT6789_SENINF_MUX_IRQ_SW_RST					BIT(1)
+#define MT6789_SENINF_MUX_SW_RST					BIT(2)
+#define MT6789_SENINF_SRC_TEST_MODEL					0x1
+#define MT6789_SENINF_SRC_MIPI_SENSOR					0x8
+#define MT6789_SENINF_DEF_PIXEL_MODE					0x2
+#define MT6789_SENINF_MUX_CTRL_1					0x0d04
+#define MT6789_SENINF_MUX_SRC_SEL					GENMASK(3, 0)
+#define MT6789_SENINF_MUX_PIX_MODE_SEL					GENMASK(9, 8)
+#define MT6789_SENINF_MUX_FIFO_PUSH_EN					GENMASK(21, 16)
+#define MT6789_SENINF_MUX_OPT						0x0d08
+#define MT6789_SENINF_MUX_HSYNC_POL					BIT(16)
+#define MT6789_SENINF_MUX_VSYNC_POL					BIT(17)
+#define MT6789_SENINF_MUX_IRQ_EN					0x0d10
+#define MT6789_SENINF_MUX_IRQ_CLR_MODE					BIT(31)
+#define MT6789_SENINF_MUX_IMG_SIZE					0x0d20
+#define MT6789_SENINF_MUX_SIZE						0x0d30
+
+/* MT6789 CAM MUX: packed source select plus one option register per mux. */
+#define MT6789_SENINF_MUX_SRC_MASK					GENMASK(3, 0)
+#define MT6789_SENINF_CAM_MUX_CTRL(n)					(0x0400 + 4 * ((n) / 4))
+#define MT6789_SENINF_CAM_MUX_SRC_SHIFT(n)				(8 * ((n) % 4))
+#define MT6789_SENINF_CAM_MUX_SRC_MASK					GENMASK(3, 0)
+#define MT6789_SENINF_CAM_MUX_OPT(n)					(0x0420 + 4 * (n))
+#define MT6789_SENINF_CAM_MUX_NUM					13
 
 #endif /* __SENINF_REG_H__ */

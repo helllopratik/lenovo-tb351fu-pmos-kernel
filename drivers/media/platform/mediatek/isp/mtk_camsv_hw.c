@@ -125,21 +125,7 @@ void mtk_camsv_cmos_vf_hw_disable(struct mtk_cam_dev *cam_dev)
 void mtk_camsv_fbc_init(struct mtk_cam_dev *cam_dev,
 				 unsigned int num_buffers)
 {
-	unsigned int fbc_val;
-
-	if (pm_runtime_resume_and_get(cam_dev->dev) < 0) {
-		dev_err(cam_dev->dev, "failed to get pm_runtime\n");
-		return;
-	}
-
-	fbc_val = mtk_camsv_read(cam_dev, CAMSV_IMGO_FBC);
-	fbc_val &= ~CAMSV_IMGO_FBC_FB_NUM;
-	fbc_val |= CAMSV_IMGO_FBC_EN;
-	fbc_val |= FIELD_PREP(CAMSV_IMGO_FBC_FB_NUM, num_buffers);
-	mtk_camsv_write(cam_dev, CAMSV_IMGO_FBC, fbc_val);
-
-	pm_runtime_mark_last_busy(cam_dev->dev);
-	pm_runtime_put_autosuspend(cam_dev->dev);
+	/* Register configuration handled in mtk_camsv_setup when device is active */
 }
 
 void mtk_camsv_fbc_inc(struct mtk_cam_dev *cam_dev)
@@ -161,7 +147,14 @@ void mtk_camsv_setup(struct mtk_cam_dev *cam_dev, unsigned int count,
 	struct mtk_cam_dev_buffer *buf;
 	unsigned long flags;
 	unsigned int i;
+	unsigned int fbc_val;
 	u32 tmp;
+
+	fbc_val = mtk_camsv_read(cam_dev, CAMSV_IMGO_FBC);
+	fbc_val &= ~CAMSV_IMGO_FBC_FB_NUM;
+	fbc_val |= CAMSV_IMGO_FBC_EN;
+	fbc_val |= FIELD_PREP(CAMSV_IMGO_FBC_FB_NUM, count);
+	mtk_camsv_write(cam_dev, CAMSV_IMGO_FBC, fbc_val);
 
 	for (i = 0; i < count; i++)
 		mtk_camsv_fbc_inc(cam_dev);
@@ -246,7 +239,7 @@ static irqreturn_t isp_irq_camsv(int irq, void *data)
 							 struct mtk_cam_dev_buffer,
 							 list);
 		if (processed_buf)
-			list_del(&processed_buf->list);
+			list_del_init(&processed_buf->list);
 
 		buf = list_first_entry_or_null(&cam_dev->buf_list,
 					       struct mtk_cam_dev_buffer,
@@ -346,12 +339,15 @@ static int mtk_camsv_probe(struct platform_device *pdev)
 				     cam_dev->irq);
 
 	spin_lock_init(&cam_dev->buf_list_lock);
+	INIT_LIST_HEAD(&cam_dev->buf_list);
 
 	/* initialise runtime power management */
+	while (dev->power.disable_depth > 1)
+		pm_runtime_enable(dev);
 	pm_runtime_set_autosuspend_delay(dev, MTK_CAMSV_AUTOSUSPEND_DELAY_MS);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_set_suspended(dev);
-	devm_pm_runtime_enable(dev);
+	pm_runtime_enable(dev);
 
 	/* Initialize the v4l2 common part */
 	return mtk_cam_dev_init(cam_dev);
@@ -372,13 +368,6 @@ static void mtk_camsv_remove(struct platform_device *pdev)
 static int mtk_camsv_runtime_suspend(struct device *dev)
 {
 	struct mtk_cam_dev *cam_dev = dev_get_drvdata(dev);
-	struct vb2_queue *vbq = &cam_dev->vdev.vbq;
-
-	if (vb2_is_streaming(vbq)) {
-		v4l2_subdev_disable_streams(&cam_dev->subdev,
-					    cam_dev->subdev_pads[MTK_CAM_CIO_PAD_VIDEO].index,
-					    BIT(0));
-	}
 
 	clk_bulk_disable_unprepare(cam_dev->num_clks, cam_dev->clks);
 
@@ -388,9 +377,6 @@ static int mtk_camsv_runtime_suspend(struct device *dev)
 static int mtk_camsv_runtime_resume(struct device *dev)
 {
 	struct mtk_cam_dev *cam_dev = dev_get_drvdata(dev);
-	struct vb2_queue *vbq = &cam_dev->vdev.vbq;
-	struct mtk_cam_dev_buffer *buf;
-	unsigned long flags = 0;
 	int ret;
 
 	ret = clk_bulk_prepare_enable(cam_dev->num_clks, cam_dev->clks);
@@ -399,31 +385,7 @@ static int mtk_camsv_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	if (vb2_is_streaming(vbq)) {
-
-		spin_lock_irqsave(&cam_dev->buf_list_lock, flags);
-		buf = list_first_entry_or_null(&cam_dev->buf_list,
-					       struct mtk_cam_dev_buffer,
-					       list);
-		if (buf)
-			mtk_camsv_update_buffers_add(cam_dev, buf);
-
-		spin_unlock_irqrestore(&cam_dev->buf_list_lock, flags);
-
-		/* Stream on the sub-device */
-		ret = v4l2_subdev_enable_streams(&cam_dev->subdev,
-						 cam_dev->subdev_pads[MTK_CAM_CIO_PAD_VIDEO].index,
-						 BIT(0));
-
-		if (ret)
-			goto fail_no_stream;
-	}
-
 	return 0;
-
-fail_no_stream:
-	mtk_cam_vb2_return_all_buffers(cam_dev, VB2_BUF_STATE_QUEUED);
-	return ret;
 }
 
 static const struct dev_pm_ops mtk_camsv_pm_ops = {
