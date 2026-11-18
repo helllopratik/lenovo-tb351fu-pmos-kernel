@@ -9,11 +9,16 @@
 # switch during playback does), DAPM never re-runs the supply enable and the
 # codec stays silent.  Closing and reopening the new Headphones PCM after the
 # profile switch forces DAPM to power the ADDA path up again, restoring audio.
+#
+# Profile names are discovered from the running card instead of being
+# hard-coded: the mt8186-mt6366 machine driver exposes only combined profiles
+# ("HiFi (Mic, Speaker)", "HiFi (Mic, Headphones)", ...), so the old
+# "HiFi (Speaker)"/"HiFi (Headphones)" names never matched and the card was
+# left on a profile whose port was unavailable.  That is what produced the
+# "Dummy Output" + no-sound state at boot.
 
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 CARD="alsa_card.platform-sound"
-HP_PROFILE="HiFi (Headphones)"
-SPK_PROFILE="HiFi (Speaker)"
 HP_SINK="alsa_output.platform-sound.HiFi__Headphones__sink"
 SPK_SINK="alsa_output.platform-sound.HiFi__Speaker__sink"
 
@@ -27,12 +32,28 @@ sink_present() {
         awk -v n="$1" '$2 == n { found = 1 } END { exit !found }'
 }
 
+# Highest-priority *available* profile whose name contains $1 (Speaker or
+# Headphones).  Empty when no such profile exists.
+pick_profile() {
+    kw="$1"
+    pactl list cards 2>/dev/null | awk -v kw="$kw" '
+        /priority:/ && /available: yes/ {
+            line=$0
+            sub(/^[ \t]+/, "", line)
+            name=line; sub(/:.*/, "", name)
+            if (index(name, kw) == 0) next
+            p=line; sub(/.*priority: /, "", p); sub(/,.*/, "", p)
+            if (p+0 > best) { best=p+0; bestn=name }
+        }
+        END { if (bestn != "") print bestn }
+    '
+}
+
 # `After=pulseaudio.service` only orders the fork, not socket readiness.
-# Switching the card profile while PulseAudio is still adding the card can
-# leave the profile active with no sink; wait for both before touching it.
+# Wait for both the daemon and the card before touching it.
 wait_card() {
     i=0
-    while [ "$i" -lt 50 ]; do
+    while [ "$i" -lt 150 ]; do
         if pactl info >/dev/null 2>&1 &&
             pactl list cards short 2>/dev/null | grep -q "$CARD"; then
             return 0
@@ -44,17 +65,20 @@ wait_card() {
 }
 
 # If the expected sink is missing after a profile change, bounce the profile
-# once so module-alsa-card recreates it.
+# so module-alsa-card recreates the PCM/sink.
 ensure_sink() {
+    sink_present "$2" && return 0
+    pactl set-card-profile "$CARD" off 2>/dev/null
+    sleep 0.3
+    pactl set-card-profile "$CARD" "$1" 2>/dev/null
+
     i=0
     while [ "$i" -lt 25 ]; do
         sink_present "$2" && return 0
         sleep 0.2
         i=$((i + 1))
     done
-    pactl set-card-profile "$CARD" off 2>/dev/null
-    sleep 0.3
-    pactl set-card-profile "$CARD" "$1" 2>/dev/null
+    return 1
 }
 
 find_hp_sink() {
@@ -79,6 +103,10 @@ reopen_hp_pcm() {
     pactl suspend-sink "$id" 0 2>/dev/null
 }
 
+# Both profiles are re-discovered on every pass: if PulseAudio reloads the
+# card the profile names can change under us.
+HP_PROFILE=""
+SPK_PROFILE=""
 last=""
 
 while :; do
@@ -86,6 +114,8 @@ while :; do
         # PulseAudio is down/restarting; re-evaluate the jack state when it
         # is back even if the physical state has not changed.
         last=""
+        HP_PROFILE=""
+        SPK_PROFILE=""
         sleep 2
         continue
     fi
@@ -94,34 +124,41 @@ while :; do
         sed -n "s/^numid=\([0-9]*\),iface=CARD,name='Headset Jack'$/\1/p" |
         head -n 1)
 
+    val=""
     if [ -n "$numid" ]; then
         val=$(amixer -c 0 cget numid="$numid" 2>/dev/null |
             sed -n 's/.*values=\(on\|off\).*/\1/p' |
             tail -n 1)
+    fi
+    [ -n "$val" ] || val="off"
 
-        if [ -n "$val" ] && [ "$val" != "$last" ]; then
-            case "$val" in
-                on)
-                    if [ "$(card_profile)" != "$HP_PROFILE" ] ||
-                        ! sink_present "$HP_SINK"; then
-                        pactl set-card-profile "$CARD" "$HP_PROFILE" 2>/dev/null
-                        ensure_sink "$HP_PROFILE" "$HP_SINK"
-                    fi
-                    sleep 0.5
-                    reopen_hp_pcm
-                    ;;
-                off)
-                    if [ "$(card_profile)" != "$SPK_PROFILE" ] ||
-                        ! sink_present "$SPK_SINK"; then
-                        pactl set-card-profile "$CARD" "$SPK_PROFILE" 2>/dev/null
-                        ensure_sink "$SPK_PROFILE" "$SPK_SINK"
-                    fi
-                    ;;
-            esac
-            last="$val"
-            echo "jack=$val -> $(pactl list cards 2>/dev/null |
-                sed -n 's/.*Active Profile: //p' | head -n 1)"
+    case "$val" in
+        on)  want="$HP_PROFILE";  sink="$HP_SINK";  kw="Headphones" ;;
+        *)   want="$SPK_PROFILE"; sink="$SPK_SINK"; kw="Speaker" ;;
+    esac
+
+    if [ -z "$want" ]; then
+        want=$(pick_profile "$kw")
+        case "$val" in
+            on)  HP_PROFILE="$want" ;;
+            *)   SPK_PROFILE="$want" ;;
+        esac
+    fi
+
+    if [ -n "$want" ] &&
+        { [ "$last" != "$val" ] || ! sink_present "$sink"; }; then
+        if [ "$(card_profile)" != "$want" ]; then
+            pactl set-card-profile "$CARD" "$want" 2>/dev/null
         fi
+        if ensure_sink "$want" "$sink"; then
+            last="$val"
+            echo "jack=$val -> $want ($sink)"
+        else
+            echo "jack=$val -> $want: sink $sink still missing" >&2
+        fi
+        case "$val" in
+            on) sleep 0.5; reopen_hp_pcm ;;
+        esac
     fi
 
     sleep 1

@@ -44,6 +44,13 @@ if [ -f /lib/modules/extra/panfrost.ko ] && [ ! -e /dev/dri/renderD128 ]; then
         if [ ! -d /sys/module/panfrost ]; then
             if insmod /lib/modules/extra/panfrost.ko; then kp "panfrost loaded"; else kp "WARN panfrost insmod failed"; fi
         fi
+        # Udev can auto-load panfrost before this script powers the MFG
+        # domains; probe then fails and the device stays unbound.  With
+        # MFG up, an explicit bind recovers the render node.
+        if [ ! -e /dev/dri/renderD128 ] && [ -d /sys/module/panfrost ]; then
+            kp "GPU: retrying panfrost bind with MFG powered"
+            echo 13000000.mali > /sys/bus/platform/drivers/panfrost/bind 2>/dev/null
+        fi
         if [ -e /dev/dri/renderD128 ]; then
             kp "GPU ready: $(cat /sys/kernel/debug/dri/1/name 2>/dev/null)"
         else

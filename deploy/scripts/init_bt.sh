@@ -68,10 +68,27 @@ done
 
 if [ -d /sys/class/bluetooth/hci0 ]; then
     kp "hci0 is UP!"
-    rfkill unblock bluetooth 2>/dev/null || true
     systemctl start bluetooth 2>/dev/null || true
-    bluetoothctl power on 2>/dev/null || true
-    kp "=== Bluetooth bring-up SUCCESS ==="
+    # bluetoothd needs a moment after hci0 appears; the first boot-time
+    # `power on` often races it and fails with org.bluez.Error.Failed.
+    # Retry until the adapter actually reports Powered: yes.
+    BT_ON=0
+    for i in $(seq 1 30); do
+        rfkill unblock bluetooth 2>/dev/null || true
+        bluetoothctl power on >/dev/null 2>&1 || true
+        if bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
+            BT_ON=1
+            kp "Bluetooth adapter powered on (attempt $i)"
+            break
+        fi
+        sleep 1
+    done
+    if [ "$BT_ON" -eq 1 ]; then
+        kp "=== Bluetooth bring-up SUCCESS ==="
+    else
+        kp "WARN: adapter present but could not power on"
+        exit 4
+    fi
 else
     kp "WARN: hci0 did not appear within timeout"
     exit 3
