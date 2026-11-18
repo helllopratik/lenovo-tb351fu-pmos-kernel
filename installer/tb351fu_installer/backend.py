@@ -769,8 +769,10 @@ def _list_partitions_fastboot(device: Device) -> list[Partition]:
 def get_data_space(device: Device) -> Optional[DataSpace]:
     if device.mode != "adb":
         return None
+    # Android toybox does not support `df -B1`; -k is available on both
+    # toybox and GNU coreutils.
     try:
-        out = _clean(_adb(device.serial, "shell", "df", "-B1", "/data").stdout)
+        out = _clean(_adb(device.serial, "shell", "df", "-k", "/data").stdout)
     except InstallerError:
         out = ""
     if not out.strip():

@@ -222,8 +222,13 @@ BUNDLE=/mnt/Nvme/slot_b_bundle
 ```
 
 `install_pmos_rootfs.sh` accepts either a full postmarketOS GPT image (it extracts
-partition 2) or a pre-compressed raw ext4 image (`.img.zst`). It refuses to leave
-less than 1 GiB free on `/data`.
+partition 2) or a pre-compressed raw ext4 image (`.img.zst`). It decompresses and
+prepares the image on the host, because Android's toybox has no `zstd`. The ext4
+`orphan_file` feature is cleared on the host so Android's e2fsprogs 1.46 can run
+`e2fsck`/`resize2fs`. During payload application the image is temporarily labeled
+`media_rw_data_file` for the read-write loop mount and restored to
+`system_data_file` afterwards. The script refuses to leave less than 1 GiB free
+on `/data`.
 
 ### 4. Boot slot B
 

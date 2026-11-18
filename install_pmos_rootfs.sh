@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$SCRIPT_DIR/deploy"
-TMP_DIR="/tmp/pmos_install_tmp"
+TMP_DIR="${TMPDIR:-/var/tmp}/pmos_install_tmp"
 
 usage() {
   cat <<EOF
@@ -38,7 +38,7 @@ EOF
 
 step() { printf '%%%%PMOS_STEP:%s:%s\n' "$1" "$2"; }
 progress() { printf '%%%%PMOS_PROGRESS:%s:%s\n' "$1" "$2"; }
-trap 'rc=$?; printf "%%%%PMOS_ERROR:%s\n" "$rc"' ERR
+trap 'rc=$?; echo "ERROR: rootfs installer failed at line $LINENO (exit $rc)" >&2; printf "%%%%PMOS_ERROR:%s\n" "$rc"' ERR
 
 # Machine-readable protocol check used by the installer self-test.
 if [ "${PMOS_MARKER_TEST:-}" = "1" ]; then
@@ -160,26 +160,32 @@ fi
 echo "Source image: $PMOS_IMG"
 
 # Refuse to create an image that would leave Android without breathing room.
-DATA_AVAIL=$(adb shell 'df -B1 /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r')
-if ! [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]]; then
-  DATA_AVAIL=$(adb shell 'df /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r')
-  [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]] && DATA_AVAIL=$((DATA_AVAIL * 1024))
+# Android toybox does not support `df -B1`; use -k (1 KiB blocks) and let a
+# failed probe fall through instead of tripping `set -e`.
+DATA_AVAIL_KB=$(adb shell 'df -k /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r' || true)
+if ! [[ "$DATA_AVAIL_KB" =~ ^[0-9]+$ ]]; then
+  DATA_AVAIL_KB=$(adb shell 'df /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r' || true)
 fi
-if [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]]; then
+if [[ "$DATA_AVAIL_KB" =~ ^[0-9]+$ ]]; then
+  DATA_AVAIL=$((DATA_AVAIL_KB * 1024))
   echo "Free space on /data: $DATA_AVAIL bytes"
   if [ "$DATA_AVAIL" -lt $((ROOTFS_SIZE_BYTES + 1073741824)) ]; then
     echo "ERROR: a $ROOTFS_SIZE rootfs would leave less than 1 GiB free on /data." >&2
     exit 1
   fi
+else
+  echo "WARNING: could not read free space on /data; continuing." >&2
 fi
 progress 12 "Rootfs image selected"
 mkdir -p "$TMP_DIR"
 
 # 4. Prepare base rootfs image
-ROOTFS_ZST="$TMP_DIR/rootfs_base.img.zst"
+# Android has no zstd binary, so decompress/extract on the host and push a
+# raw ext4 image.  The image is only moved into /data/pmos after transfer.
+ROOTFS_RAW="$TMP_DIR/rootfs_base.img"
 if [[ "$PMOS_IMG" == *.zst ]]; then
-  echo "Using pre-compressed zstd image: $PMOS_IMG"
-  ROOTFS_ZST="$PMOS_IMG"
+  echo "Decompressing zstd image on the host: $PMOS_IMG"
+  zstd -d -f "$PMOS_IMG" -o "$ROOTFS_RAW"
 elif [[ "$PMOS_IMG" == *.img ]]; then
   # Check if GPT disk image or a raw ext4 partition.
   if python3 - "$PMOS_IMG" <<'PY'
@@ -192,7 +198,7 @@ PY
     echo "Detected GPT disk image. Extracting partition 2 (rootfs)..."
     # Parse the GPT directly instead of relying on fdisk, whose output format
     # and availability differ between hosts.  The rootfs is partition 2.
-    python3 - "$PMOS_IMG" "$ROOTFS_ZST" <<'PY'
+    python3 - "$PMOS_IMG" "$ROOTFS_RAW" <<'PY'
 import struct
 import subprocess
 import sys
@@ -223,25 +229,43 @@ if len(partitions) < 2:
 _, first, sectors = partitions[1]
 count_sectors = sectors - first + 1
 print(f"Extracting partition 2: skip={first} count={count_sectors}")
-dd = subprocess.Popen(
-    ["dd", f"if={image}", "bs=512", f"skip={first}",
-     f"count={count_sectors}"],
-    stdout=subprocess.PIPE,
-)
-zstd = subprocess.Popen(["zstd", "-3", "-f", "-o", output],
-                        stdin=dd.stdout)
-dd.stdout.close()
-rc = zstd.wait()
-dd.wait()
+with open(output, "wb") as out:
+    dd = subprocess.Popen(
+        ["dd", f"if={image}", "bs=512", f"skip={first}",
+         f"count={count_sectors}"],
+        stdout=out,
+    )
+    rc = dd.wait()
 sys.exit(rc)
 PY
   else
-    echo "Detected raw ext4 partition. Compressing with zstd..."
-    zstd -3 -f "$PMOS_IMG" -o "$ROOTFS_ZST"
+    echo "Detected raw ext4 partition. Copying to a temporary image..."
+    cp -f "$PMOS_IMG" "$ROOTFS_RAW"
   fi
+else
+  echo "ERROR: unsupported rootfs image type: $PMOS_IMG" >&2
+  exit 1
 fi
 
-echo "Base rootfs compressed archive ready: $(ls -lh "$ROOTFS_ZST" | awk '{print $5}')"
+if [ ! -f "$ROOTFS_RAW" ]; then
+  echo "ERROR: prepared rootfs image not found: $ROOTFS_RAW" >&2
+  exit 1
+fi
+
+# Android 13/14 ship e2fsprogs 1.46, which refuses filesystems with the newer
+# orphan_file feature and therefore cannot resize the image.  Clear it on the
+# host; the filesystem remains fully compatible with the pmOS kernel.
+if ! command -v tune2fs >/dev/null 2>&1; then
+  echo "WARNING: tune2fs not found; Android may not be able to resize this image." >&2
+elif tune2fs -l "$ROOTFS_RAW" 2>/dev/null | grep -qw orphan_file; then
+  echo "Clearing ext4 orphan_file for Android e2fsprogs compatibility..."
+  tune2fs -O ^orphan_file "$ROOTFS_RAW" || {
+    echo "ERROR: could not clear orphan_file from $ROOTFS_RAW" >&2
+    exit 1
+  }
+fi
+
+echo "Base rootfs image ready: $(ls -lh "$ROOTFS_RAW" | awk '{print $5}')"
 
 # 5. Build customization payload package
 step payload "Building the device customization payload"
@@ -371,30 +395,42 @@ progress 35 "Customization payload ready"
 step transfer "Pushing rootfs and payload to the tablet"
 progress 38 "Transferring rootfs to the tablet"
 echo "Pushing rootfs base image and customizations to device..."
-adb push "$ROOTFS_ZST" /data/local/tmp/pmos_base.img.zst
+adb push "$ROOTFS_RAW" /data/local/tmp/pmos_base.img
 adb push "$PAYLOAD_TAR" /data/local/tmp/pmos_payload.tar.gz
 progress 55 "Transfer complete"
 
 # 7. Unpack and configure on device
 step unpack "Unpacking and resizing the rootfs on the tablet"
-progress 60 "Decompressing rootfs on the tablet"
+progress 60 "Preparing rootfs on the tablet"
 echo "Unpacking rootfs, resizing to $ROOTFS_SIZE, and applying customizations on device..."
 adb shell "su -c '
   set -e
   mkdir -p /data/pmos
-  rm -f /data/pmos/rootfs.img
+
+  LOOP=\"\"
+  cleanup() {
+    umount /data/local/tmp/chk 2>/dev/null || true
+    if [ -n \"\$LOOP\" ]; then
+      losetup -d \"\$LOOP\" 2>/dev/null || true
+    fi
+    chcon u:object_r:system_data_file:s0 /data/pmos/rootfs.img 2>/dev/null || true
+  }
+  trap cleanup EXIT
 
   echo \"%%PMOS_STEP:unpack:Unpacking rootfs on the tablet\"
-  echo \"Decompressing base image to /data/pmos/rootfs.img...\"
-  if [ -x /system_ext/bin/zstd ]; then
-    /system_ext/bin/zstd -d /data/local/tmp/pmos_base.img.zst -o /data/pmos/rootfs.img
-  elif command -v zstd >/dev/null 2>&1; then
-    zstd -d /data/local/tmp/pmos_base.img.zst -o /data/pmos/rootfs.img
-  else
-    echo \"ERROR: zstd decompression binary not found on Android.\"
-    exit 1
-  fi
+  echo \"Moving base image to /data/pmos/rootfs.img...\"
+  # Same filesystem: rename is atomic and keeps the old image until the new
+  # one has transferred successfully.
+  mv -f /data/local/tmp/pmos_base.img /data/pmos/rootfs.img
   rm -f /data/local/tmp/pmos_base.img.zst
+
+  # SELinux denies the kernel write access to system_data_file, so use the
+  # media_rw type for the read-write loop mount and restore the stricter type
+  # in the EXIT trap.
+  chcon u:object_r:media_rw_data_file:s0 /data/pmos/rootfs.img || {
+    echo \"ERROR: could not label the rootfs for a read-write loop mount.\"
+    exit 1
+  }
 
   echo \"%%PMOS_PROGRESS:68:Resizing rootfs to $ROOTFS_SIZE\"
   echo \"Expanding filesystem to $ROOTFS_SIZE...\"
@@ -452,8 +488,8 @@ adb shell "su -c '
   echo \"Validating executable binaries inside chroot...\"
   if [ ! -f /data/local/tmp/chk/lib/ld-musl-aarch64.so.1 ]; then
     echo \"ERROR: Dynamic linker /lib/ld-musl-aarch64.so.1 is missing!\"
-    umount /data/local/tmp/chk
-    losetup -d \$LOOP
+    umount /data/local/tmp/chk || true
+    losetup -d \"\$LOOP\" 2>/dev/null || true
     exit 1
   fi
 
@@ -470,9 +506,9 @@ adb shell "su -c '
 
   echo \"Building built-in module index...\"
   if [ -f /data/local/tmp/chk/usr/lib/modules/.pmos_kernel_release ]; then
-    KREL=$(cat /data/local/tmp/chk/usr/lib/modules/.pmos_kernel_release)
-    echo \"  kernel release: $KREL\"
-    chroot /data/local/tmp/chk /usr/sbin/depmod -a \"$KREL\" >/dev/null 2>&1 || true
+    KREL=\$(cat /data/local/tmp/chk/usr/lib/modules/.pmos_kernel_release)
+    echo \"  kernel release: \$KREL\"
+    chroot /data/local/tmp/chk /usr/sbin/depmod -a \"\$KREL\" >/dev/null 2>&1 || true
   fi
 
   echo \"Configuring nftables and zram services...\"
@@ -486,7 +522,8 @@ adb shell "su -c '
   echo \"%%PMOS_PROGRESS:96:Unmounting and syncing\"
   echo \"Unmounting and syncing...\"
   umount /data/local/tmp/chk
-  losetup -d \$LOOP
+  # The loop device may auto-detach when the last mount reference goes away.
+  losetup -d \"\$LOOP\" 2>/dev/null || true
   sync
   echo \"RootFS installation and validation complete!\"
 '"

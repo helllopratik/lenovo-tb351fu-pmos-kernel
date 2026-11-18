@@ -280,6 +280,19 @@ def check_scripts() -> str:
     assert "%%PMOS_PROGRESS:" in rootfs_text
     assert "%%PMOS_DONE" in rootfs_text
 
+    # Android compatibility regressions.  toybox has no `df -B1` and no zstd,
+    # and its e2fsprogs 1.46 rejects the ext4 orphan_file feature.  A
+    # read-write loop mount is only permitted under media_rw_data_file, so the
+    # script must relabel temporarily and restore system_data_file.
+    assert "df -k /data" in rootfs_text
+    assert "df -B1 /data" not in rootfs_text
+    assert "zstd -d -f" in rootfs_text
+    assert "tune2fs -O ^orphan_file" in rootfs_text
+    assert "u:object_r:media_rw_data_file:s0" in rootfs_text
+    assert "u:object_r:system_data_file:s0" in rootfs_text
+    assert 'losetup -d \\"\\$LOOP\\" 2>/dev/null || true' in rootfs_text
+    assert "rm -f /data/pmos/rootfs.img\n" not in rootfs_text
+
     # The markers must contain two literal percent signs on the wire; printf
     # consumes %% otherwise.  The scripts expose a tiny hook for this test.
     expected = [

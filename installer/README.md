@@ -124,7 +124,10 @@ tb351fu-installer --version
 
 ## Helper scripts
 
-The GUI is a front end for the proven scripts; they remain usable directly:
+The GUI is a front end for the proven scripts; they remain usable directly.
+`install_pmos_rootfs.sh` needs `zstd` and `e2fsprogs` on the host: it decompresses
+the image, clears `orphan_file` for Android's older `e2fsck`/`resize2fs`, and
+pushes a raw image. The device needs root adb and about 64 GiB free on `/data`.
 
 ```bash
 # rootfs only (Android + root adb)
