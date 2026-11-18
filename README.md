@@ -48,6 +48,24 @@ The device uses an A/B partition layout. PostmarketOS is configured as a complet
 
 ---
 
+### Optional: use the graphical installer
+
+`installer/` contains a GTK4 wizard that wraps Steps 1–3. It auto-detects
+adb/fastboot, lists every by-name partition, suggests a rootfs size from the
+free space on `/data`, validates the prebuilt images, flashes only slot B,
+installs the rootfs and optionally switches slots.
+
+```bash
+cd installer
+./install.sh          # adds tb351fu-installer to ~/.local/bin and the app menu
+tb351fu-installer
+```
+
+It also runs directly from the checkout with `./installer/tb351fu-installer`.
+See `installer/README.md` for the safety model, CLI modes and troubleshooting.
+
+---
+
 ### Step 1: Install & Provision the PostmarketOS RootFS
 
 Boot the tablet into Android (Slot A), ensure USB debugging is enabled and authorized, then run the automated rootfs installer:
@@ -60,7 +78,8 @@ Boot the tablet into Android (Slot A), ensure USB debugging is enabled and autho
 1. Validates root ADB access on the tablet.
 2. Extracts partition 2 from the postmarketOS image and pushes it compressed with `zstd` to the device.
 3. Decompresses the image to `/data/pmos/rootfs.img` on internal UFS userdata.
-4. Expands the ext4 filesystem to **64 GB** using `resize2fs`.
+4. Expands the ext4 filesystem to **64 GB** using `resize2fs`
+   (override with `--size 32G`, or let the GUI suggest a size).
 5. Loopback mounts the image and **strictly enforces merged `/usr` symlinks**:
    - `/lib -> usr/lib`
    - `/bin -> usr/bin`

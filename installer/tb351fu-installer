@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Launch the installer from a source checkout.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+
+# In a checkout this is inferred, but exporting it also works when the
+# package has been copied somewhere else (see install.sh).
+if [ -z "${TB351FU_COMMON_DIR:-}" ] && [ -f "$HERE/../install_pmos_rootfs.sh" ]; then
+  export TB351FU_COMMON_DIR="$(cd "$HERE/.." && pwd)"
+fi
+
+exec python3 -m tb351fu_installer "$@"

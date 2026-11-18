@@ -16,9 +16,83 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$SCRIPT_DIR/deploy"
 TMP_DIR="/tmp/pmos_install_tmp"
 
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS] [IMAGE]
+
+Install a postmarketOS rootfs image into /data/pmos/rootfs.img on the
+Lenovo Tab Plus (TB351FU) while Android is running.
+
+  -i, --image PATH   RootFS image (.img or .img.zst). Auto-detected when omitted.
+  -s, --size SIZE    Size of the loopback image on the tablet (default: 64G).
+                     Accepts K/M/G/T suffixes, e.g. 32G, 64G.
+      --yes          Reserved for non-interactive callers (no prompts today).
+  -h, --help         Show this help.
+
+Environment:
+  PMOS_IMG           Same as --image.
+  ROOTFS_SIZE        Same as --size.
+  ANDROID_SERIAL     Target a specific adb device.
+EOF
+}
+
+step() { printf '%%%%PMOS_STEP:%s:%s\n' "$1" "$2"; }
+progress() { printf '%%%%PMOS_PROGRESS:%s:%s\n' "$1" "$2"; }
+trap 'rc=$?; printf "%%%%PMOS_ERROR:%s\n" "$rc"' ERR
+
+# Machine-readable protocol check used by the installer self-test.
+if [ "${PMOS_MARKER_TEST:-}" = "1" ]; then
+  step selftest ok
+  progress 50 selftest
+  printf '%%%%PMOS_DONE\n'
+  exit 0
+elif [ "${PMOS_MARKER_TEST:-}" = "error" ]; then
+  false
+fi
+
+ROOTFS_SIZE="${ROOTFS_SIZE:-64G}"
+PMOS_IMG="${PMOS_IMG:-}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -i|--image)
+      [ "$#" -ge 2 ] || { echo "ERROR: --image needs a path" >&2; exit 2; }
+      PMOS_IMG="$2"; shift 2 ;;
+    -s|--size)
+      [ "$#" -ge 2 ] || { echo "ERROR: --size needs a value" >&2; exit 2; }
+      ROOTFS_SIZE="$2"; shift 2 ;;
+    --yes) shift ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) PMOS_IMG="$1"; shift ;;
+  esac
+done
+
+if ! [[ "$ROOTFS_SIZE" =~ ^[0-9]+[KkMmGgTt]?$ ]]; then
+  echo "ERROR: invalid --size '$ROOTFS_SIZE' (use e.g. 32G or 64G)" >&2
+  exit 2
+fi
+
+ROOTFS_SIZE_BYTES="$(python3 -c '
+import sys
+s = sys.argv[1].upper()
+mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+print(int(s[:-1]) * mult[s[-1]] if s[-1] in mult else int(s))
+' "$ROOTFS_SIZE")"
+
+if [ "$ROOTFS_SIZE_BYTES" -lt 2147483648 ]; then
+  echo "ERROR: --size must be at least 2G" >&2
+  exit 2
+fi
+
 echo "========================================================================"
 echo " postmarketOS UFS Loopback RootFS Installer (Lenovo Tab Plus TB351FU)"
 echo "========================================================================"
+echo "RootFS size: $ROOTFS_SIZE ($ROOTFS_SIZE_BYTES bytes)"
+
+step check "Checking host tools and deploy payload"
+progress 2 "Checking host tools"
 
 # 1. Check prerequisites
 command -v adb >/dev/null 2>&1 || { echo "ERROR: adb is required but not installed."; exit 1; }
@@ -31,13 +105,24 @@ if [ ! -d "$DEPLOY_DIR" ] || [ ! -f "$DEPLOY_DIR/modules.tar.xz" ]; then
 fi
 
 # 2. Check device connectivity via ADB
+step device "Waiting for an Android device over ADB"
+progress 5 "Checking ADB connection"
 echo "Checking ADB device connection..."
 if ! adb get-state 1>/dev/null 2>&1; then
   echo "ERROR: Device not found. Ensure tablet is booted into Android with USB debugging enabled."
   exit 1
 fi
 
-DEVICE_ID=$(adb devices | grep -w "device" | head -n 1 | awk '{print $1}')
+if [ -n "${ANDROID_SERIAL:-}" ]; then
+  DEVICE_ID="$ANDROID_SERIAL"
+else
+  DEVICE_ID=$(adb devices | grep -w "device" | head -n 1 | awk '{print $1}')
+  export ANDROID_SERIAL="$DEVICE_ID"
+fi
+if [ -z "${DEVICE_ID:-}" ]; then
+  echo "ERROR: no adb device in 'device' state."
+  exit 1
+fi
 echo "Found device: $DEVICE_ID"
 
 # Verify root ADB access
@@ -46,9 +131,10 @@ adb shell "su -c 'id'" | grep -q "uid=0" || {
   exit 1
 }
 echo "Root ADB access confirmed."
+progress 10 "Root access confirmed"
 
 # 3. Locate source postmarketOS image
-PMOS_IMG="${1:-}"
+step image "Preparing the postmarketOS rootfs image"
 if [ -z "$PMOS_IMG" ]; then
   # Auto-detect candidates
   CANDIDATES=(
@@ -72,6 +158,21 @@ if [ -z "$PMOS_IMG" ] || [ ! -f "$PMOS_IMG" ]; then
 fi
 
 echo "Source image: $PMOS_IMG"
+
+# Refuse to create an image that would leave Android without breathing room.
+DATA_AVAIL=$(adb shell 'df -B1 /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r')
+if ! [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]]; then
+  DATA_AVAIL=$(adb shell 'df /data' 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '\r')
+  [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]] && DATA_AVAIL=$((DATA_AVAIL * 1024))
+fi
+if [[ "$DATA_AVAIL" =~ ^[0-9]+$ ]]; then
+  echo "Free space on /data: $DATA_AVAIL bytes"
+  if [ "$DATA_AVAIL" -lt $((ROOTFS_SIZE_BYTES + 1073741824)) ]; then
+    echo "ERROR: a $ROOTFS_SIZE rootfs would leave less than 1 GiB free on /data." >&2
+    exit 1
+  fi
+fi
+progress 12 "Rootfs image selected"
 mkdir -p "$TMP_DIR"
 
 # 4. Prepare base rootfs image
@@ -80,39 +181,60 @@ if [[ "$PMOS_IMG" == *.zst ]]; then
   echo "Using pre-compressed zstd image: $PMOS_IMG"
   ROOTFS_ZST="$PMOS_IMG"
 elif [[ "$PMOS_IMG" == *.img ]]; then
-  # Check if GPT disk image or raw partition
-  if python3 -c "
-with open('$PMOS_IMG', 'rb') as f:
+  # Check if GPT disk image or a raw ext4 partition.
+  if python3 - "$PMOS_IMG" <<'PY'
+import sys
+with open(sys.argv[1], "rb") as f:
     f.seek(512)
-    sig = f.read(8)
-    exit(0 if sig == b'EFI PART' else 1)
-"; then
+    sys.exit(0 if f.read(8) == b"EFI PART" else 1)
+PY
+  then
     echo "Detected GPT disk image. Extracting partition 2 (rootfs)..."
-    python3 -c "
+    # Parse the GPT directly instead of relying on fdisk, whose output format
+    # and availability differ between hosts.  The rootfs is partition 2.
+    python3 - "$PMOS_IMG" "$ROOTFS_ZST" <<'PY'
+import struct
 import subprocess
-out = subprocess.check_output(['fdisk', '-l', '$PMOS_IMG']).decode()
-start_sector = None
-count_sectors = None
-for line in out.splitlines():
-    if '$PMOS_IMG' in line and ('2' in line or 'Linux' in line):
-        parts = line.split()
-        for idx, p in enumerate(parts):
-            if p.isdigit() and int(p) > 2048 and start_sector is None:
-                start_sector = int(p)
-            elif p.isdigit() and start_sector is not None and count_sectors is None:
-                # end sector
-                count_sectors = int(p) - start_sector + 1
-                break
-if not start_sector:
-    start_sector = 999424
-    count_sectors = 4917248
-print(f'Extracting sectors: skip={start_sector} count={count_sectors}')
-cmd = ['dd', 'if=$PMOS_IMG', 'bs=512', f'skip={start_sector}', f'count={count_sectors}']
-p1 = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-p2 = subprocess.Popen(['zstd', '-3', '-f', '-o', '$ROOTFS_ZST'], stdin=p1.stdout)
-p1.stdout.close()
-p2.communicate()
-"
+import sys
+
+image, output = sys.argv[1], sys.argv[2]
+with open(image, "rb") as fh:
+    fh.seek(512)
+    header = fh.read(92)
+    if len(header) < 92 or header[:8] != b"EFI PART":
+        sys.exit("not a GPT image")
+    entries_lba, count, entry_size = struct.unpack_from("<QII", header, 72)
+    if entry_size < 128 or count > 256:
+        sys.exit("unsupported GPT layout")
+    fh.seek(entries_lba * 512)
+    entries = fh.read(count * entry_size)
+
+partitions = []
+for index in range(count):
+    entry = entries[index * entry_size:(index + 1) * entry_size]
+    if len(entry) < 128 or entry[:16] == b"\x00" * 16:
+        continue
+    first, last = struct.unpack_from("<QQ", entry, 32)
+    partitions.append((index + 1, first, last))
+
+if len(partitions) < 2:
+    sys.exit("expected at least two GPT partitions")
+
+_, first, sectors = partitions[1]
+count_sectors = sectors - first + 1
+print(f"Extracting partition 2: skip={first} count={count_sectors}")
+dd = subprocess.Popen(
+    ["dd", f"if={image}", "bs=512", f"skip={first}",
+     f"count={count_sectors}"],
+    stdout=subprocess.PIPE,
+)
+zstd = subprocess.Popen(["zstd", "-3", "-f", "-o", output],
+                        stdin=dd.stdout)
+dd.stdout.close()
+rc = zstd.wait()
+dd.wait()
+sys.exit(rc)
+PY
   else
     echo "Detected raw ext4 partition. Compressing with zstd..."
     zstd -3 -f "$PMOS_IMG" -o "$ROOTFS_ZST"
@@ -122,6 +244,8 @@ fi
 echo "Base rootfs compressed archive ready: $(ls -lh "$ROOTFS_ZST" | awk '{print $5}')"
 
 # 5. Build customization payload package
+step payload "Building the device customization payload"
+progress 25 "Packaging modules, services and configs"
 echo "Packaging system customizations (modules, services, scripts, configs)..."
 PAYLOAD_DIR="$TMP_DIR/payload"
 rm -rf "$PAYLOAD_DIR"
@@ -241,19 +365,26 @@ fi
 PAYLOAD_TAR="$TMP_DIR/pmos_payload.tar.gz"
 tar -czf "$PAYLOAD_TAR" -C "$PAYLOAD_DIR" .
 echo "Customization payload ready: $(ls -lh "$PAYLOAD_TAR" | awk '{print $5}')"
+progress 35 "Customization payload ready"
 
 # 6. Push archives to device
+step transfer "Pushing rootfs and payload to the tablet"
+progress 38 "Transferring rootfs to the tablet"
 echo "Pushing rootfs base image and customizations to device..."
 adb push "$ROOTFS_ZST" /data/local/tmp/pmos_base.img.zst
 adb push "$PAYLOAD_TAR" /data/local/tmp/pmos_payload.tar.gz
+progress 55 "Transfer complete"
 
 # 7. Unpack and configure on device
-echo "Unpacking rootfs, resizing to 64GB, and applying customizations on device..."
+step unpack "Unpacking and resizing the rootfs on the tablet"
+progress 60 "Decompressing rootfs on the tablet"
+echo "Unpacking rootfs, resizing to $ROOTFS_SIZE, and applying customizations on device..."
 adb shell "su -c '
   set -e
   mkdir -p /data/pmos
   rm -f /data/pmos/rootfs.img
 
+  echo \"%%PMOS_STEP:unpack:Unpacking rootfs on the tablet\"
   echo \"Decompressing base image to /data/pmos/rootfs.img...\"
   if [ -x /system_ext/bin/zstd ]; then
     /system_ext/bin/zstd -d /data/local/tmp/pmos_base.img.zst -o /data/pmos/rootfs.img
@@ -265,16 +396,20 @@ adb shell "su -c '
   fi
   rm -f /data/local/tmp/pmos_base.img.zst
 
-  echo \"Expanding filesystem to 64GB...\"
-  truncate -s 64G /data/pmos/rootfs.img
+  echo \"%%PMOS_PROGRESS:68:Resizing rootfs to $ROOTFS_SIZE\"
+  echo \"Expanding filesystem to $ROOTFS_SIZE...\"
+  truncate -s \"$ROOTFS_SIZE_BYTES\" /data/pmos/rootfs.img
   /system/bin/e2fsck -f -y /data/pmos/rootfs.img || true
   /system/bin/resize2fs /data/pmos/rootfs.img
 
+  echo \"%%PMOS_PROGRESS:72:Mounting rootfs image\"
   echo \"Loopback mounting rootfs...\"
   mkdir -p /data/local/tmp/chk
   LOOP=\$(losetup -f /data/pmos/rootfs.img --show)
   mount -t ext4 \$LOOP /data/local/tmp/chk
 
+  echo \"%%PMOS_STEP:payload-device:Applying the customization payload\"
+  echo \"%%PMOS_PROGRESS:78:Applying modules, services and configs\"
   echo \"Applying customization payload...\"
   tar -xzf /data/local/tmp/pmos_payload.tar.gz -C /data/local/tmp/chk
   rm -f /data/local/tmp/pmos_payload.tar.gz
@@ -312,6 +447,8 @@ adb shell "su -c '
     sed -i \"s|/boot|# /boot|\" /data/local/tmp/chk/etc/fstab || true
   fi
 
+  echo \"%%PMOS_STEP:verify:Verifying the installed system\"
+  echo \"%%PMOS_PROGRESS:90:Verifying userspace binaries\"
   echo \"Validating executable binaries inside chroot...\"
   if [ ! -f /data/local/tmp/chk/lib/ld-musl-aarch64.so.1 ]; then
     echo \"ERROR: Dynamic linker /lib/ld-musl-aarch64.so.1 is missing!\"
@@ -346,6 +483,7 @@ adb shell "su -c '
   # the stock swap unit must not start it unconditionally at boot.
   chroot /data/local/tmp/chk /usr/bin/systemctl disable postmarketos-zram-swap.service >/dev/null 2>&1 || true
 
+  echo \"%%PMOS_PROGRESS:96:Unmounting and syncing\"
   echo \"Unmounting and syncing...\"
   umount /data/local/tmp/chk
   losetup -d \$LOOP
@@ -357,10 +495,13 @@ adb shell "su -c '
 rm -rf "$TMP_DIR"
 
 echo "========================================================================"
-echo " SUCCESS: postmarketOS 64GB rootfs is installed and verified!"
+echo " SUCCESS: postmarketOS $ROOTFS_SIZE rootfs is installed and verified!"
 echo ""
 echo " To boot into postmarketOS, switch to Slot B and reboot:"
 echo "   adb reboot bootloader"
 echo "   fastboot set_active b"
 echo "   fastboot reboot"
 echo "========================================================================"
+progress 100 "RootFS installed and verified"
+step done "RootFS installation complete"
+printf '%%%%PMOS_DONE\n'

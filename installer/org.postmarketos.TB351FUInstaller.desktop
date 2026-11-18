@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=postmarketOS Installer (TB351FU)
+GenericName=postmarketOS Installer
+Comment=Install postmarketOS on the Lenovo Tab Plus
+Exec="@BIN@"
+Icon=system-software-install
+Terminal=false
+Categories=System;
+Keywords=postmarketOS;pmOS;install;Lenovo;Tab Plus;TB351FU;
+StartupNotify=true
