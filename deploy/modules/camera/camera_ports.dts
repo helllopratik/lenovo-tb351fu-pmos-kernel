@@ -1,0 +1,171 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/pinctrl";
+		__overlay__ {
+			cam0_mclk_default: cam0-mclk-default {
+				pins_cmd_dat {
+					pinmux = <0x00008001>; /* GPIO 128, func 1 = CMMCLK2 */
+				};
+			};
+			cam1_mclk_default: cam1-mclk-default {
+				pins_cmd_dat {
+					pinmux = <0x00007e01>; /* GPIO 126, func 1 = CMMCLK0 */
+				};
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/i2c@11eb2000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			camera@10 {
+				compatible = "samsung,s5k4h7yx";
+				reg = <0x10>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&cam0_mclk_default>;
+				reset-gpios = <&pio 20 0>;
+				vcamd-gpios = <&pio 37 0>;
+				vcama-gpios = <&pio 155 0>;
+				clocks = <&topckgen_clk 13>;
+				clock-names = "mclk";
+				vcamio-supply = <&mt6358_vrf18_reg>;
+
+				port {
+					s5k4h7yx_ep: endpoint {
+						remote-endpoint = <&seninf_in0>;
+						clock-lanes = <2>;
+						data-lanes = <1 3 0 4>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc/i2c@11eb1000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			camera@36 {
+				compatible = "smartsens,sc820cs";
+				reg = <0x36>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&cam1_mclk_default>;
+				reset-gpios = <&pio 16 0>;
+				vcamd-gpios = <&pio 154 0>;
+				vcama-gpios = <&pio 152 0>;
+				clocks = <&topckgen_clk 11>;
+				clock-names = "mclk";
+				vcamio-supply = <&mt6358_vrf18_reg>;
+
+				port {
+					sc820cs_ep: endpoint {
+						remote-endpoint = <&seninf_in2>;
+						clock-lanes = <2>;
+						data-lanes = <1 3 0 4>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@3 {
+		target-path = "/soc/seninf_top@1a004000";
+		__overlay__ {
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					seninf_in0: endpoint {
+						remote-endpoint = <&s5k4h7yx_ep>;
+						clock-lanes = <2>;
+						data-lanes = <1 3 0 4>;
+					};
+				};
+
+				port@2 {
+					reg = <2>;
+					seninf_in2: endpoint {
+						remote-endpoint = <&sc820cs_ep>;
+						clock-lanes = <2>;
+						data-lanes = <1 3 0 4>;
+					};
+				};
+
+				port@6 {
+					reg = <6>;
+					seninf_out6: endpoint {
+						remote-endpoint = <&camsv2_ep>;
+					};
+				};
+
+				port@7 {
+					reg = <7>;
+					seninf_out7: endpoint {
+						remote-endpoint = <&camsv3_ep>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@4 {
+		target-path = "/soc/camsv2_legacy@1a092000";
+		__overlay__ {
+			clocks = <&camsys_main_clk 2>,
+				 <&camsys_main_clk 3>,
+				 <&camsys_main_clk 6>;
+			clock-names = "cam", "camtg", "camsv";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					camsv2_ep: endpoint {
+						remote-endpoint = <&seninf_out6>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@5 {
+		target-path = "/soc/camsv3_legacy@1a093000";
+		__overlay__ {
+			clocks = <&camsys_main_clk 2>,
+				 <&camsys_main_clk 3>,
+				 <&camsys_main_clk 7>;
+			clock-names = "cam", "camtg", "camsv";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					camsv3_ep: endpoint {
+						remote-endpoint = <&seninf_out7>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@6 {
+		target-path = "/soc/pwrap@10026000/mt6366/mt6358regulator/ldo-vrf18";
+		__overlay__ {
+			regulator-always-on;
+		};
+	};
+};
