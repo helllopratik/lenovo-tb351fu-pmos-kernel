@@ -133,6 +133,7 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
          "$PAYLOAD_DIR/etc/udev/rules.d" \
          "$PAYLOAD_DIR/etc/phosh" \
          "$PAYLOAD_DIR/etc/sysctl.d" \
+         "$PAYLOAD_DIR/etc/modprobe.d" \
          "$PAYLOAD_DIR/etc/systemd/system.conf.d" \
          "$PAYLOAD_DIR/etc/nftables.d" \
          "$PAYLOAD_DIR/usr/share/glib-2.0/schemas" \
@@ -206,6 +207,10 @@ fi
 cp "$DEPLOY_DIR/configs/70-touchscreen-pen.rules" "$PAYLOAD_DIR/etc/udev/rules.d/"
 cp "$DEPLOY_DIR/configs/phoc.ini" "$PAYLOAD_DIR/etc/phosh/phoc.ini"
 cp "$DEPLOY_DIR/configs/99-panic.conf" "$PAYLOAD_DIR/etc/sysctl.d/99-panic.conf"
+# Must sort after 99-panic.conf so kernel faults do not auto-reboot.
+cp "$DEPLOY_DIR/configs/99-zz-no-auto-reboot.conf" "$PAYLOAD_DIR/etc/sysctl.d/99-zz-no-auto-reboot.conf"
+# Camera modules stay manual-load only.
+cp "$DEPLOY_DIR/configs/90-camera-manual.conf" "$PAYLOAD_DIR/etc/modprobe.d/90-camera-manual.conf"
 cp "$DEPLOY_DIR/configs/watchdog.conf" "$PAYLOAD_DIR/etc/systemd/system.conf.d/watchdog.conf"
 
 # Display mode: GSettings schema + Mobile Settings (phosh-mobile-settings)
