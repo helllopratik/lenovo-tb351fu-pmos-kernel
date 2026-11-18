@@ -24,17 +24,17 @@ Host:
 
 - Linux with Python 3, PyGObject + GTK 4 (`python3-gi`, `gir1.2-gtk-4.0`)
 - `adb` and `fastboot` in `PATH`
-- the pmOS checkout at `~/Desktop/pmos/common` (or set
-  `TB351FU_COMMON_DIR=/path/to/pmos/common`)
+- the repository checkout (the installer locates it from its own path, or set
+  `TB351FU_COMMON_DIR=/path/to/lenovo-tb351fu-pmos-kernel`)
 - helper payloads `deploy/modules.tar.xz` and `deploy/firmware.tar.xz`
-- the images below, normally under `artifacts/`:
+- the images below, normally under `images/`:
 
 | Image | Default |
 | --- | --- |
-| boot | `artifacts/boot_latest.img` |
-| init_boot | `artifacts/init_boot_latest.img` |
-| vbmeta | `artifacts/vbmeta_latest.img` |
-| rootfs | `pmos-phosh-aarch64.img`, `/mnt/Nvme/pmos_rootfs_base.img{,.zst}` |
+| boot | `images/boot_b.img` |
+| init_boot | `images/init_boot_b.img` |
+| vbmeta | `images/vbmeta_b.img` |
+| rootfs | `images/rootfs_base.img.zst` (release asset), then `images/rootfs_base.img` |
 
 Tablet:
 
@@ -46,7 +46,7 @@ Tablet:
 ## Run from the checkout
 
 ```bash
-cd /home/user/Desktop/pmos/common/installer
+cd installer
 ./tb351fu-installer
 ```
 
@@ -75,9 +75,10 @@ reinstalling.
 2. **Partitions and size** — lists every by-name partition with size, slot,
    role and block node, reads `/data` usage, then suggests a rootfs size. You
    can lower or raise it (4 GiB–256 GiB) before continuing.
-3. **Images** — auto-detects the boot chain and rootfs, validates magic and
-   partition limits, and lets you override each path. Choose whether to flash
-   the boot chain, install the rootfs, and switch to slot B.
+3. **Images** — auto-detects the boot chain under `images/` (or `artifacts/`)
+   and the rootfs, validates magic and partition limits, and lets you override
+   each path. Choose whether to flash the boot chain, install the rootfs, and
+   switch to slot B.
 4. **Install** — shows the exact plan in a confirmation dialog, then streams
    the helper output with progress. Slot B is only written after you confirm.
 
@@ -140,7 +141,7 @@ exactly the bytes written. In fastboot mode it flashes slot B and can
 ## Tests
 
 ```bash
-cd /home/user/Desktop/pmos/common/installer
+cd installer
 python3 -m unittest discover -s tests -v
 python3 -m tb351fu_installer --self-test
 ```

@@ -269,18 +269,18 @@ class InstallerWindow(Gtk.ApplicationWindow):
         page = self._page()
         page.append(_label("Installation images", css="page-title"))
         page.append(_label(
-            "These are prebuilt images. Auto-detect looks in artifacts/ and the "
-            "usual image locations; you can override any path.",
+            "These are prebuilt images. Auto-detect looks in images/ and artifacts/; "
+            "you can override any path.",
             wrap=True, css="dim"))
 
         grid = Gtk.Grid(column_spacing=10, row_spacing=10)
         self.image_entries: dict[str, Gtk.Entry] = {}
         self.image_status: dict[str, Gtk.Label] = {}
         rows = [
-            ("boot", "Boot image (boot_b)", "boot_latest.img"),
-            ("init_boot", "Init_boot image (init_boot_b)", "init_boot_latest.img"),
-            ("vbmeta", "VBMeta image", "vbmeta_latest.img"),
-            ("rootfs", "postmarketOS rootfs", "pmos-phosh-aarch64.img"),
+            ("boot", "Boot image (boot_b)", "boot_b.img"),
+            ("init_boot", "Init_boot image (init_boot_b)", "init_boot_b.img"),
+            ("vbmeta", "VBMeta image", "vbmeta_b.img"),
+            ("rootfs", "postmarketOS rootfs", "rootfs_base.img.zst"),
         ]
         for row, (key, title, hint) in enumerate(rows):
             label = _label(title)

@@ -1,59 +1,169 @@
-# postmarketOS Linux Kernel (GKI 6.12) for Lenovo Tab Plus (TB351FU)
+# postmarketOS on the Lenovo Tab Plus (TB351FU)
 
-This repository contains the customized Linux GKI 6.12 kernel source, hardware drivers, userspace provisioning tools, and boot packaging scripts for dual-booting **postmarketOS (Phosh UI)** on the **Lenovo Tab Plus (TB351FU / Helio G99 / MT6789 / MT8781)** via Direct LK Boot.
+A hardware-enablement tree and installer for running **postmarketOS / Phosh** on the
+**Lenovo Tab Plus (TB351FU, MediaTek Helio G99 / MT6789 / MT8781)** alongside stock
+Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
 
----
+- **Slot A** stays stock Android and is treated as read-only.
+- **Slot B** holds the postmarketOS boot chain.
+- The root filesystem is a **loopback ext4 image** at `/data/pmos/rootfs.img` inside
+  Android userdata, not a new partition.
 
-## 1. Dual-Boot Architecture Overview
-
-The device uses an A/B partition layout. PostmarketOS is configured as a completely non-destructive dual-boot setup:
-
-* **Slot A**: Preserved **Stock Android** system (safe fallback). Never modified.
-* **Slot B**: Dedicated to **postmarketOS kernel & ramdisk**:
-  - `boot_b` (`/dev/block/sdc50`, 64 MB): GKI 6.12 Linux kernel with AVB hash footer.
-  - `init_boot_b` (`/dev/block/sdc52`, 8 MB): Freestanding `/init` ramdisk (LZ4 legacy frame) with AVB hash footer.
-  - `vbmeta_b` (`/dev/block/sdc10`, 4 KB): Verification disabled (flags = 3).
-  - `vendor_boot_b` & `dtbo_b`: Copied from Slot A to provide hardware device tree blobs (DTB) and bootconfig to LK.
-* **Root Filesystem (RootFS)**:
-  - Resides on internal UFS userdata (`/dev/block/sdc64`) at `/data/pmos/rootfs.img` (64 GB ext4 loopback image).
-  - Mounted by `pmos_init` via `/dev/loop0`.
-  - Android userdata is kept mounted on `/data_host` (inside postmarketOS at `/data_host`) so the loopback backing file remains permanently open.
+> **Status:** usable for daily use with the limitations listed below. Camera capture,
+> Panfrost cold-boot reliability, and automatic Type-C role detection are still
+> bring-up areas. The boot chain and rootfs installer are conservative and only write
+> slot B.
 
 ---
 
-## 2. Directory Structure
+## Safety first
 
-* **`common/`**: Linux GKI 6.12 kernel source tree.
-  - `drivers/gpu/drm/tiny/pmosfb.c`: DRM framebuffer driver with Point-of-Coherency hardware cache flush (`dcache_clean_poc`) and native 60Hz pacing.
-  - `drivers/input/touchscreen/nt36xxx/`: Novatek NT36523N TDDI touchscreen driver with hardware interrupt processing and zero SPI bus contention.
-  - `arch/arm64/kernel/setup.c`: MediaTek TopRGU hardware watchdog integration, display carveout reservation (`0xfe2b0000`), and priority 255 instant restart handler.
-  - `pmos_init_src/pmos_init.c`: Freestanding aarch64 `/init` implementation that attaches `/dev/sdc64`, mounts `/data_host/pmos/rootfs.img` onto `/root`, and executes `/sbin/init`.
-* **`common/deploy/`**: Turnkey postmarketOS hardware provisioning assets:
-  - `modules.tar.xz`: Out-of-tree vendor modules (`bluetooth.ko`, `wmt_drv.ko`, `connfem.ko`, `btif_drv.ko`, `hci_uart.ko`, etc.).
-  - `scripts/`: System bring-up scripts (`init_wifi_sensors.sh`, `init_bt.sh`, `pmos-usb-setup.sh`, `phosh-session`, etc.).
-  - `root_scripts/`: Hardware initialization scripts (`btbridge.py`, `early_xo.py`, `wmtshim.py`, etc.).
-  - `services/`: Systemd services (`pmos-hardware-init.service`, `pmos-usb-network.service`, etc.).
-  - `configs/`: Display configuration (`phoc.ini`), udev rules, sysctl panic parameters, and watchdog configs.
-* **`tools/mkbootimg/`**: Android boot image creation tool (`mkbootimg.py`).
-* **`external/avb/`**: Android Verified Boot signing tools (`avbtool.py`) and test RSA-4096 keys.
+- **Never flash slot A.** `boot_a`, `init_boot_a`, `vendor_boot_a`, `dtbo_a`,
+  `vbmeta*_a`, `super`, and Android logical partitions are off limits. The installer
+  refuses to write them.
+- **Only slot B is written:** `boot_b`, `init_boot_b`, `vbmeta_b`,
+  `vbmeta_system_b`, and `vbmeta_vendor_b`. Empty `vendor_boot_b` / `dtbo_b`
+  partitions are populated from slot A so the slot-B boot chain is complete.
+- **Flashing is explicit.** The GUI shows the exact plan and asks for confirmation.
+  The helper scripts support `--dry-run`; use it first. Do not run any flash command
+  until you have verified the target device, slot, and image.
+- **The rootfs is a file, not a partition.** It lives at
+  `/data/pmos/rootfs.img` on Android userdata and is mounted through `/dev/loop0`.
+  Android `/data` is otherwise exposed read-only to pmOS; `/data_host/pmos` is
+  protected with a read-only self-bind so a desktop process cannot corrupt the live
+  rootfs image.
+- **Crash policy: do not reboot after a crash.** Auto-reboot is disabled
+  (`kernel.panic=0`, `panic_on_oops=0`, `hung_task_panic=0`) and the bring-up
+  watchdog is disarmed once the rootfs is mounted. Pull `/sys/fs/pstore` and the
+  previous journal **before** any restart. `deploy/scripts/pstore_snapshot.sh`
+  snapshots pstore on the next warm boot, but a deliberate reboot can overwrite the
+  evidence.
+- **Back up.** Keep a known-good Android boot image and your data backed up. This is
+  a hobbyist hardware port, not a vendor-supported update.
 
 ---
 
-## 3. Step-by-Step Installation Guide
+## What works
 
-### Prerequisites
-1. **Host Machine**: Linux with `adb`, `fastboot`, `python3`, `zstd`, `lz4`, `tar`, and `llvm`/`clang` (LLVM 20 or Android Clang `clang-r547379`).
-2. **Device**: Lenovo Tab Plus (TB351FU) with unlocked bootloader.
-3. **postmarketOS Base Image**: An aarch64 Phosh image (e.g. `pmos-phosh-aarch64.img`).
+| Area | Status |
+| --- | --- |
+| Boot / dual-boot | Working. LK boots the slot-B kernel directly; Android remains on slot A. |
+| Display | Working. 1200×2000 panel, portrait 180°, `pmosfb` boots at 60 Hz, then 60 / 90 / Adaptive modes. |
+| Touch | Working. Novatek NT36523 TDDI over SPI2, interrupt-driven. |
+| Stylus | Working. AES pen pressure/tilt at 90 Hz; Lenovo Tab Pen Plus BLE gestures via `pmos-pen-daemon`. |
+| Audio | Working on the AP side: ALSA/ASoC + PulseAudio, MT6366 + AW88395 amplifiers, UCM2 profiles. |
+| Wi-Fi / Bluetooth | Working through the MediaTek CONSYS vendor modules and firmware. |
+| GNSS | Working. Vendor `mnld` feeds a filtered NMEA socket to GeoClue. |
+| Storage | Internal shared storage, read-only Android views, microSD and USB via udisks2/Nautilus. |
+| Charging | Charge-limit GUI, 50–99 % or full, default 80 %, 5 % hysteresis. |
+| GPU | Experimental. Panfrost Mali-G57; a cold boot may be required after a warm reset. |
+| Camera | Bring-up only. Mainline MTK SENINF/CAMSV drivers; modules are manual-load and capture is not reliable yet. |
+| Widevine | L3 only with a user-supplied ARM64 CDM (no proprietary blob is shipped). |
+| USB OTG | Manual role switch (`pmos-usb-role`); automatic Type-C role detection is not available. |
 
 ---
 
-### Optional: use the graphical installer
+## Hardware
 
-`installer/` contains a GTK4 wizard that wraps Steps 1–3. It auto-detects
-adb/fastboot, lists every by-name partition, suggests a rootfs size from the
-free space on `/data`, validates the prebuilt images, flashes only slot B,
-installs the rootfs and optionally switches slots.
+- **Device:** Lenovo Tab Plus (TB351FU, board `t808aa`)
+- **SoC:** MediaTek Helio G99 / MT6789 / MT8781 (ARM64)
+- **Kernel:** Google GKI 6.12-based tree with MediaTek and TB351FU changes
+- **Display:** 11.5″ 1200×2000 LCD, 60/90 Hz, Novatek NT36523 TDDI touch
+- **Storage:** UFS 2.2 internal, microSD
+- **Audio:** MT6366 codec + AW88395 smart amplifiers
+- **Cameras:** Samsung S5K4H7YX and SmartSens SC820CS sensors
+- **GNSS:** MediaTek vendor `mnld` userspace
+
+---
+
+## Architecture
+
+```text
+Slot A (untouched)                 Slot B (postmarketOS)
+┌──────────────────────┐           ┌──────────────────────────────┐
+│ boot_a               │           │ boot_b       kernel Image.lz4│
+│ init_boot_a          │           │ init_boot_b  freestanding /init│
+│ vendor_boot_a        │  copied   │ vendor_boot_b  (from A if empty)│
+│ dtbo_a               │ ────────► │ dtbo_b         (from A if empty)│
+│ vbmeta*_a            │           │ vbmeta*_b    verification off │
+│ Android system/data  │           └──────────────┬───────────────┘
+└──────────────────────┘                          │
+                                                  ▼
+                                   /data/pmos/rootfs.img (ext4)
+                                   inside Android userdata
+                                                  │
+                                      loop0 ──► systemd ──► Phosh
+```
+
+Boot flow: `LK` → `boot_b` kernel → `init_boot_b` `/init` → mount Android userdata
+at `/data_host` → attach `/data_host/pmos/rootfs.img` to `/dev/loop0` → mount ext4 →
+`switch_root` → systemd → Phosh.
+
+The freestanding `/init` keeps `/data_host` mounted after the switch so the loopback
+backing file stays open. `/data_host/pmos` is then remounted read-only for the life
+of the pmOS session.
+
+---
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `arch/arm64/configs/pmos_tb351fu.fragment` | TB351FU kernel configuration fragment. |
+| `drivers/gpu/drm/tiny/pmosfb.c` | DRM framebuffer driver with POC cache flushing and 60/90 Hz pacing. |
+| `drivers/media/platform/mediatek/isp/` | Mainline MTK SENINF + CAMSV camera pipeline. |
+| `drivers/media/i2c/s5k4h7yx.c`, `sc820cs.c` | Camera sensor drivers. |
+| `pmos_init_src/pmos_init.c` | Freestanding aarch64 `/init` that finds and mounts the rootfs. |
+| `deploy/` | Modules, firmware payloads, scripts, services, configs, and subsystem docs. |
+| `installer/` | GTK4/Python installer wizard and backend. |
+| `images/` | Flashable boot-chain bundle, checksums, and the image-to-partition map. |
+| `build_and_flash_pmos.sh` | Builds the kernel/initramfs and packages/slot-B-flashes the boot chain. |
+| `install_pmos_rootfs.sh` | Decompresses, resizes, provisions, and verifies the loopback rootfs. |
+| `pmos_kernel.md`, `device.md`, `verification.md` | Historical bring-up notes; useful, but some paths are outdated. |
+
+---
+
+## Quick start
+
+### Requirements
+
+Host:
+
+- Linux with `adb`, `fastboot`, `python3`, `zstd`, `lz4`, and a Clang/LLVM toolchain
+  for rebuilding the kernel.
+- GTK4 + PyGObject for the GUI installer (`python3-gi`, `gir1.2-gtk-4.0`). The
+  installer uses GTK4 without libadwaita.
+
+Tablet:
+
+- Unlocked bootloader.
+- Android booted on **slot A** with USB debugging and **root adb** (Magisk/KernelSU)
+  for a full rootfs install.
+- Fastboot or fastbootd is enough for a boot-chain-only update; the rootfs install
+  needs Android running with root adb.
+
+### 1. Get the images
+
+```bash
+git clone https://github.com/helllopratik/lenovo-tb351fu-pmos-kernel.git
+cd lenovo-tb351fu-pmos-kernel
+```
+
+The small slot-B images are committed under `images/`. The compressed rootfs is a
+GitHub Release asset because it is larger than GitHub's 100 MB per-file limit:
+
+```bash
+# Download the release asset into images/ (URL is also in images/README.md)
+curl -L -o images/rootfs_base.img.zst \
+  https://github.com/helllopratik/lenovo-tb351fu-pmos-kernel/releases/download/v0.1.0/rootfs_base.img.zst
+
+cd images
+sha256sum -c SHA256SUMS
+```
+
+See [`images/README.md`](images/README.md) for the full file-to-partition map.
+
+### 2. Install with the GUI (recommended)
 
 ```bash
 cd installer
@@ -61,60 +171,54 @@ cd installer
 tb351fu-installer
 ```
 
-It also runs directly from the checkout with `./installer/tb351fu-installer`.
-See `installer/README.md` for the safety model, CLI modes and troubleshooting.
-
----
-
-### Step 1: Install & Provision the PostmarketOS RootFS
-
-Boot the tablet into Android (Slot A), ensure USB debugging is enabled and authorized, then run the automated rootfs installer:
+Or run it directly from the checkout:
 
 ```bash
-./install_pmos_rootfs.sh /path/to/pmos-phosh-aarch64.img
+./installer/tb351fu-installer
 ```
 
-#### What this script does automatically:
-1. Validates root ADB access on the tablet.
-2. Extracts partition 2 from the postmarketOS image and pushes it compressed with `zstd` to the device.
-3. Decompresses the image to `/data/pmos/rootfs.img` on internal UFS userdata.
-4. Expands the ext4 filesystem to **64 GB** using `resize2fs`
-   (override with `--size 32G`, or let the GUI suggest a size).
-5. Loopback mounts the image and **strictly enforces merged `/usr` symlinks**:
-   - `/lib -> usr/lib`
-   - `/bin -> usr/bin`
-   - `/sbin -> usr/sbin`
-   *(Prevents dynamic linker breakage; see Pitfalls below).*
-6. Installs all hardware modules into `/usr/lib/modules/extra/`.
-7. Installs and enables systemd bring-up services for Bluetooth, USB networking, and hardware peripherals.
-8. Configures Phosh display to native 60Hz portrait 180° mode (`scale = 2`, `rotate = 180`). The unlock-time rotation reset needs the patched phosh build in `deploy/phosh/`; see that directory's README.
-9. Disables the non-existent EFI `/boot` entry in `/etc/fstab` to eliminate 90s boot stalls.
-10. Executes a preflight sanity check (`chroot ... systemd --version`) to confirm userspace binary integrity before completing.
+The wizard:
 
----
+1. Detects adb/fastboot devices, model/codename, active slot, root access, and battery.
+2. Lists every by-name partition with size, slot, and role. Logical/mapper partitions
+   are display-only and are never written.
+3. Reads `/data` free space and suggests a rootfs size (default 64 GiB, leaving an
+   8 GiB reserve).
+4. Validates the boot-chain images and rootfs image, then shows a confirmation plan.
+5. Flashes only slot B, installs the rootfs, and optionally switches the active slot.
 
-### Step 2: Build & Flash the Kernel to Slot B
+In fastboot mode the rootfs step is disabled: flash the boot chain there, then boot
+Android with root adb to install the rootfs.
 
-With the device still connected in Android via ADB, compile and flash the kernel, ramdisk, and vbmeta:
+### 3. Install from the command line
+
+With Android booted on slot A and root adb authorized:
 
 ```bash
-./build_and_flash_pmos.sh
+# 1) Check the boot-chain plan without writing anything
+./deploy/scripts/flash_slot_b.sh \
+  --boot images/boot_b.img \
+  --init-boot images/init_boot_b.img \
+  --vbmeta images/vbmeta_b.img \
+  --dry-run
+
+# 2) Write the slot-B boot chain
+./deploy/scripts/flash_slot_b.sh \
+  --boot images/boot_b.img \
+  --init-boot images/init_boot_b.img \
+  --vbmeta images/vbmeta_b.img
+
+# 3) Decompress, resize, provision, and verify the rootfs
+./install_pmos_rootfs.sh --image images/rootfs_base.img.zst --size 64G
 ```
 
-#### What this script does:
-1. Compiles the freestanding `/init` binary and packages it into `pmos_initramfs_194.cpio.lz4` using **LZ4 legacy frame format** (`lz4 -l -9`).
-2. Builds the GKI 6.12 kernel `Image` using Clang/LLVM.
-3. Generates and signs `boot_latest.img` (64 MB) and `init_boot_latest.img` (8 MB) with AVB hash footers.
-4. Generates `vbmeta_latest.img` with verification flags disabled (`--flags 3`).
-5. Flashes exclusively to **Slot B** (`boot_b`, `init_boot_b`, `vbmeta_b`, `vbmeta_system_b`, `vbmeta_vendor_b`) via `dd`.
-6. Compares partition MD5 checksums on device against host build artifacts.
-7. Does **not** reboot the device, leaving you in full control.
+`install_pmos_rootfs.sh` accepts either a full postmarketOS GPT image (it extracts
+partition 2) or a pre-compressed raw ext4 image (`.img.zst`). It refuses to leave
+less than 1 GiB free on `/data`.
 
----
+### 4. Boot slot B
 
-### Step 3: Boot into postmarketOS
-
-Reboot into fastboot, set Slot B active, and boot:
+Only after both steps complete, and only when you are ready to test:
 
 ```bash
 adb reboot bootloader
@@ -122,76 +226,230 @@ fastboot set_active b
 fastboot reboot
 ```
 
-The device will boot through LK, mount `/data_host/pmos/rootfs.img`, launch `systemd 261`, and start the graphical Phosh desktop.
-
----
-
-## 4. Accessing postmarketOS (Networking & Terminal)
-
-The system automatically configures USB gadget networking on boot:
-* **Tablet IP**: `172.16.42.1`
-* **Host IP**: `172.16.42.2` (assigned automatically or configure on `enx020042000001`)
-
-### Shell Access
-* **Root Telnet Shell**:
-  ```bash
-  telnet 172.16.42.1
-  ```
-* **SSH**:
-  ```bash
-  ssh user@172.16.42.1  # password: user (or root)
-  ```
-
----
-
-## 5. Critical Hard-Won Facts & Pitfall Prevention
-
-### A. The Merged `/usr` Symlink Trap (`/lib -> usr/lib`)
-* **Problem**: In postmarketOS (Alpine / musl), `/lib` is a symlink to `usr/lib`. All ELF binaries request `/lib/ld-musl-aarch64.so.1`. If an installation tarball or script creates a real directory `/lib/` on the rootfs, it clobbers the symlink.
-* **Result**: `/lib/ld-musl-aarch64.so.1` ceases to exist, and `execve("/sbin/init")` instantly fails with `ENOENT` (`-2`: No such file or directory).
-* **Fix**: Always install modules into `/usr/lib/modules/extra/` and ensure `/lib` remains a symlink pointing to `usr/lib`.
-
-### B. Display Cadence & TDDI Glitch Elimination
-* **Hardware Reality**: The NT36523N TDDI panel integrates both display driver and touch controller into a single chip.
-* **Problem**: Running touch background polling threads or attempting 90Hz modeline overrides causes bus contention over SPI2 during display scanout, creating horizontal line artifacts and pixel glitches.
-* **Fix**:
-  - Keep display locked to native **60Hz** in DRM driver and `/etc/phosh/phoc.ini` (`scale = 2`, `rotate = 180`).
-  - Rely purely on hardware interrupt-driven touch handling without continuous scan polling.
-
-### C. Ramdisk Compression (`lz4 -l -9`)
-* **Problem**: The MediaTek LK bootloader supports only the legacy LZ4 frame format (`0x184C2102`). Using standard `lz4 -9` or `xz -9` causes LK's decompressor to fail silently. The kernel falls back to treating block memory as an initrd, falsely matches `MINIX_SUPER_MAGIC`, and crashes with a `64-bit el1t` SError exception.
-* **Fix**: Always package the ramdisk with `lz4 -l -9 -f`.
-
-### D. Auto-Reboot on Crash vs. Smooth Boot
-* **Kernel Command Line**:
-  ```text
-  panic=5 panic_on_oops=1 hung_task_panic=1 hung_task_timeout_secs=60
-  ```
-* **Behavior**:
-  - **Normal Operation**: When booting and running services, the reboot watchdog is completely disarmed so boot completes uninterrupted.
-  - **Fatal Lockup**: If a kernel panic occurs or a task hangs in `D` state for >60s, the MediaTek TopRGU hardware watchdog triggers a clean warm restart after 5 seconds.
-
-### E. MediaTek MT6789 Audio DMA & AFE Agent Gatekeeping
-* **Hardware Reality**: On MT6789 (Helio G99 / MT8781), the MediaTek Audio Front End (AFE) memory interface channels (DL1, DL2..DL8, DL12) require asserting the `AFE_AGENT_ON` register bank (`0x11211b00` = `AFE_AGENT_ON`, `0x11211b04` = `AFE_AGENT_ON_SET`, `0x11211b08` = `AFE_AGENT_ON_CLR`) in order to fetch audio PCM data from DRAM over system bus.
-* **Problem**: Upstream `mt8186-afe-pcm.c` only toggled bit 0 of `AFE_DAC_CON0` (`0x11210010`). On MT6789, `AFE_DAC_CON0` bit 0 enables the audio AFE clock core, but the DMA bus master engine remains unclocked until bit `enable_shift` (bit 4 for DL1) is written to `AFE_AGENT_ON_SET`. Without this, `AFE_DL1_CUR` never advances past 0, causing ALSA PCM playback (`aplay`, `speaker-test`, `paplay`) to stall and fail with `-EIO` after a 10-second timeout.
-* **Fix**:
-  - Added definitions for `AFE_AGENT_ON`, `AFE_AGENT_ON_SET`, and `AFE_AGENT_ON_CLR` to `sound/soc/mediatek/mt8186/mt8186-reg.h`.
-  - Expanded `AFE_MAX_REGISTER` from `0x18bc` to `0x1c00` so regmap boundaries allow reading/writing `0x1b00..0x1b08`.
-  - Updated `mtk_memif_set_enable()` and `mtk_memif_set_disable()` in `sound/soc/mediatek/common/mtk-afe-fe-dai.c` to assert and clear agent channels.
-  - In the AW88395 smart amplifier codec driver, `0` represents 0 dB attenuation (full volume) and `720` (`AW88395_MUTE_VOL`) represents hardware mute. Configured ALSA UCM2 (`mt8186.conf` / `HiFi.conf`) to initialize all 8 amplifier volume registers to 0 dB attenuation at boot.
-
----
-
-## 6. Switching Back to Android
-
-Whenever you want to return to stock Android:
+To return to Android:
 
 ```bash
-# From fastboot:
+# From fastboot
 fastboot set_active a
 fastboot reboot
 
-# Or from postmarketOS shell:
-pmos-reboot android  # or: bootctl set-active-boot-slot 0 && reboot
+# Or from the pmOS shell
+pmos-reboot android
 ```
-Android on Slot A remains 100% intact with all user data preserved.
+
+---
+
+## Building from source
+
+`build_and_flash_pmos.sh` compiles the freestanding `/init`, the GKI 6.12 kernel, and
+the boot images, then flashes slot B if a device is connected. Set `NO_FLASH=1` to
+package the images without writing anything:
+
+```bash
+NO_FLASH=1 ./build_and_flash_pmos.sh
+```
+
+The script produces:
+
+- `artifacts/boot_latest.img` (64 MiB, kernel + AVB hash footer)
+- `artifacts/init_boot_latest.img` (8 MiB, pmOS initramfs + AVB hash footer)
+- `artifacts/vbmeta_latest.img` (4 KiB, verification flags disabled)
+- `artifacts/Image.lz4` (kernel payload, for reference)
+
+The rootfs is installed separately with `install_pmos_rootfs.sh` (or the GUI).
+
+Kernel configuration lives in `arch/arm64/configs/pmos_tb351fu.fragment`; the helper
+`apply_pmos_kernel_config.sh` applies it to a GKI tree. The build expects the Android
+Clang toolchain described in `build_and_flash_pmos.sh`.
+
+---
+
+## Image bundle
+
+The committed bundle is intentionally small:
+
+| File | Target | Size | Contents |
+| --- | --- | --- | --- |
+| `images/boot_b.img` | `boot_b` | 64 MiB | LZ4-legacy kernel `Image`, boot header v4, AVB hash footer. |
+| `images/init_boot_b.img` | `init_boot_b` | 8 MiB | Freestanding pmOS `/init` + `cpio.lz4` initramfs, AVB hash footer. |
+| `images/vbmeta_b.img` | `vbmeta_b`, `vbmeta_system_b`, `vbmeta_vendor_b` | 4 KiB | AVB vbmeta with verification flags `3`. |
+| `images/rootfs_base.img.zst` | not a partition | 734 MB | Base ext4 rootfs for `/data/pmos/rootfs.img`; release asset. |
+
+`vendor_boot_b` and `dtbo_b` are not separate files: `flash_slot_b.sh` copies
+`vendor_boot_a` / `dtbo_a` to slot B only if the B partitions are empty. The kernel
+payload inside `boot_b.img` is also available as `artifacts/Image.lz4` after a build.
+
+See [`images/README.md`](images/README.md) for exact commands, checksums, and the
+rootfs release instructions.
+
+---
+
+## Display, touch, and pen
+
+- **Portrait 180°** is the supported orientation. `phoc.ini` uses `scale = 2` and
+  `rotate = 180`.
+- **`pmosfb` starts at 60 Hz** for a stable LK handoff. After boot,
+  `pmos-display-mode` applies the saved mode from
+  `org.postmarketos.Display refresh-mode`:
+  - `60` — power saving. The NT36523 reports the stylus as a finger at 60 Hz, so
+    pressure and tilt are unavailable.
+  - `90` — full stylus mode (default).
+  - `adaptive` — 90 Hz while the screen changes or input arrives, 60 Hz after a
+    static period, and 90 Hz held for five minutes after stylus activity.
+- **No startup animation.** The framebuffer console/pmosfb hands off directly to
+  Phosh. Do not add a boot animation to the display path.
+- **Touch** is interrupt-driven; there is no continuous SPI polling thread. Keep it
+  that way to avoid bus contention with scanout.
+
+---
+
+## Audio
+
+Audio is entirely **AP-side ALSA/ASoC + PulseAudio**:
+
+- MT6366 codec and eight AW88395 smart amplifiers.
+- UCM2 profiles in `deploy/configs/ucm2/`.
+- `mt6789_audio_pd` and `mt6789_i2s3_mclk` are order-sensitive. Do not change their
+  load order or power-domain/clock sequence without hardware testing; a mistake can
+  leave playback stalled with `-EIO` or destabilize the boot.
+
+---
+
+## Networking
+
+The USB gadget provides CDC-NCM/RNDIS Ethernet plus a CDC-ACM console:
+
+| Interface | Address |
+| --- | --- |
+| Tablet (`usb0`) | `172.16.42.1/24` |
+| Host | `172.16.42.2/24` |
+
+- SSH on port 22; the password is set during installation, not a fixed default.
+- Telnet root shell on port 23 and an ACM console on `/dev/ttyGS0` are intended for
+  bring-up on a trusted host only.
+- Wi-Fi and Bluetooth use the MediaTek CONSYS vendor modules/firmware. Keep the
+  module load order from `deploy/scripts/init_wifi_sensors.sh` and
+  `init_bt.sh`; the CONSYS power/reset sequence is fragile.
+
+---
+
+## Storage
+
+- The rootfs is `/data/pmos/rootfs.img` (ext4 loopback), resized by the installer.
+- `/data_host` is Android userdata mounted read-only in pmOS.
+- `/data_host/pmos` is protected with a read-only self-bind for the whole pmOS
+  session. Do not undo it while pmOS is running; it would let a desktop process
+  corrupt the live rootfs image.
+- `/media/internal` is a read-write bind of Android shared storage
+  (`/data_host/media/0`).
+- Android system/vendor/product partitions are exposed read-only through loop
+  devices. `userdata` and `super` are never mounted raw.
+- **microSD and USB storage are handled by udisks2/Nautilus**, not by the Android
+  partition service.
+
+---
+
+## Charging
+
+`pmos-charge-limit` provides a small GUI for the charge cap:
+
+- Range: 50–99 %, or full (100 %).
+- Default: **80 %**.
+- 5 % hysteresis to avoid charge toggling around the limit.
+- Persisted in `/etc/pmos-charge-cap.conf`; the kernel interface is
+  `/sys/kernel/pmos_charge_cap`.
+
+The limit remains user-settable; the current device setting is 80 %.
+
+---
+
+## GNSS
+
+The GNSS stack is **NMEA-only**:
+
+- Vendor `mnld` talks to the MTK GNSS hardware and writes NMEA to
+  `/run/tablet-gps/nmea`.
+- `tablet-gnss-bridge.py` filters the stream and exposes
+  `/run/tablet-gps/nmea.sock`.
+- GeoClue uses the `network-nmea` source pointed at that socket.
+
+Do not replace this with GeoClue's Wi-Fi/network provider or edit
+`/etc/geoclue/geoclue.conf` without understanding the NMEA-only design. See
+[`deploy/gnss/README.md`](deploy/gnss/README.md).
+
+---
+
+## Camera
+
+Camera support is deliberately **manual-load only**:
+
+```sh
+insmod /lib/modules/extra/mtk-seninf.ko
+insmod /lib/modules/extra/mtk-camsv.ko
+insmod /lib/modules/extra/s5k4h7yx.ko
+insmod /lib/modules/extra/sc820cs.ko
+```
+
+`deploy/configs/90-camera-manual.conf` blacklists the modules so they are not
+autoloaded at boot. The pipeline uses the mainline MTK SENINF + CAMSV drivers, not
+the vendor ISP stack. Rear capture currently produces no frames; front SENINF/CAMSV
+routing is still being debugged. Treat camera work as bring-up, not a supported
+feature.
+
+---
+
+## Crash forensics and the no-reboot rule
+
+This port intentionally favors evidence over automatic recovery:
+
+- `kernel.panic = 0`, `kernel.panic_on_oops = 0`, `kernel.hung_task_panic = 0`,
+  `kernel.softlockup_panic = 0`.
+- The 120 s bring-up watchdog is disarmed after the rootfs mounts.
+- A crash does **not** reboot the tablet. Do not deliberately reboot it before
+  pulling `/sys/fs/pstore` and the previous journal.
+- `deploy/scripts/pstore_snapshot.sh` copies pstore records to `/root/pstore_auto`
+  on the next warm boot, but a manual reboot can overwrite the records first.
+
+If you are debugging, capture pstore and `journalctl -b -1` before changing slots or
+power-cycling. This rule exists because earlier bring-up cycles lost crash traces to
+automatic reboots.
+
+---
+
+## Known limitations
+
+- **Camera capture** is not working reliably; rear frames are absent and front
+  routing is incomplete.
+- **Panfrost** is experimental; a cold boot may be needed after a warm reset.
+- **USB Type-C role detection** is unavailable; use `pmos-usb-role host|device`.
+- **Widevine L3** requires a user-supplied ARM64 CDM; L1/L2 are not possible without
+  the vendor TEE.
+- **60 Hz stylus trade-off:** pressure/tilt require 90 Hz; 60 Hz reports the pen as a
+  finger.
+- **Vendor firmware/modules** remain subject to their own licenses. They are included
+  only to make the owned hardware work.
+
+---
+
+## Documentation
+
+- [`images/README.md`](images/README.md) — image-to-partition map and flashing.
+- [`installer/README.md`](installer/README.md) — GUI installer, CLI modes, safety model.
+- [`deploy/docs/pmos-storage.md`](deploy/docs/pmos-storage.md) — internal storage and
+  Android partition exposure.
+- [`deploy/docs/USB_OTG.md`](deploy/docs/USB_OTG.md) — host/device role switching.
+- [`deploy/docs/DRM_WIDEVINE.md`](deploy/docs/DRM_WIDEVINE.md) — Widevine status.
+- [`deploy/gnss/README.md`](deploy/gnss/README.md) — GNSS/GeoClue bridge.
+- [`deploy/phosh/README.md`](deploy/phosh/README.md) — patched Phosh build.
+- `device.md`, `verification.md`, `pmos_kernel.md` — historical bring-up notes. Some
+  paths and attempts are outdated; the README and `images/README.md` are the
+  authoritative install instructions.
+
+---
+
+## Credits and license
+
+Kernel and original project code are licensed under **GPL-2.0** (see `COPYING`).
+postmarketOS, Phosh, GNOME, Alpine, and the Linux kernel are the work of their
+respective communities. MediaTek vendor modules, firmware, and other proprietary
+blobs remain the property of their owners and are not relicensed by this project.

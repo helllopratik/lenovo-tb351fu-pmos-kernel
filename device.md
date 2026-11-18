@@ -15,7 +15,7 @@
 The tablet operates in a dual-boot A/B layout without repartitioning internal UFS:
 * **Slot A**: Stock Android 17 / Evolution OS / TWRP (Kernel GKI 6.12.15).
 * **Slot B**: postmarketOS standalone installation with custom GKI 6.12 kernel.
-* **RootFS**: Located on MicroSD card partition 2 (`/dev/mmcblk0p2`, `ext4`), mounted by the freestanding `/init` in `init_boot_b`.
+* **RootFS**: A loopback ext4 image at `/data/pmos/rootfs.img` inside Android UFS userdata, mounted through `/dev/loop0` by the freestanding `/init` in `init_boot_b`. MicroSD remains available as removable storage.
 * **Boot Images**:
   * `boot_b` (64 MB): Contains compressed GKI 6.12 kernel image (`Image.lz4`), Header Version 4, AVB testkey signed.
   * `init_boot_b` (8 MB): Contains freestanding C-compiled `/init` and initramfs CPIO archive.
@@ -29,10 +29,11 @@ The tablet operates in a dual-boot A/B layout without repartitioning internal UF
    * LittleKernel (LK) initializes the physical panel during early boot at `1200x2000` resolution (32-bit ARGB8888, base physical address `0xfe2b0000`, pitch/stride `4864` bytes).
    * Hardware PWM backlight is preserved at brightness level `1200`.
 
-2. **DRM Simple-Framebuffer (`simpledrm`)**:
-   * `CONFIG_DRM_SIMPLEDRM=y` is compiled into the kernel.
-   * `simpledrm.c` binds directly to `0xfe2b0000` and executes `dcache_clean_inval_poc()` (Point-of-Coherency cache flushing) on dirty rectangle damages to guarantee direct scanout.
-   * Atomic plane blanking (`memset 0`) is removed to prevent screen vanishing on compositor idle transitions.
+2. **DRM pmosfb driver**:
+   * `drivers/gpu/drm/tiny/pmosfb.c` samples the live DSI/panel pipeline that LK initialized at `0xfe2b0000` and exposes it as a DRM framebuffer.
+   * Dirty rectangle updates execute `dcache_clean_inval_poc()` (Point-of-Coherency cache flushing) to guarantee direct scanout.
+   * The driver starts at **60 Hz** for a stable boot handoff. After boot, `pmos-display-mode` applies the saved 60 Hz, 90 Hz, or Adaptive mode.
+   * Atomic plane blanking (`memset 0`) is removed to prevent the screen vanishing on compositor idle transitions, and no startup animation is used.
 
 3. **Wayland Compositor Configuration (`phoc` / `phosh`)**:
    * Compositor: `/usr/bin/phoc` with software pixman rendering (`WLR_RENDERER=pixman`, `WLR_RENDERER_ALLOW_SOFTWARE=1`, `WLR_NO_HARDWARE_CURSORS=1`, `LIBGL_ALWAYS_SOFTWARE=1`).
@@ -146,7 +147,7 @@ double = next track, triple = previous track. It creates the uinput keyboard
 When booted into postmarketOS, the USB port dynamically initializes a multi-function gadget:
 * **CDC-NCM / RNDIS Ethernet**: IP `172.16.42.1/24` (Tablet), `172.16.42.2/24` (Host PC).
 * **Telnet Root Shell**: Port 23 (passwordless root access).
-* **OpenSSH Daemon**: Port 22 (`root` / `user`).
+* **OpenSSH Daemon**: Port 22 (`root` / `user`; the password is set during install).
 * **FTP File Server**: Port 21 (read/write access to rootfs).
 * **CDC-ACM Serial Console**: `/dev/ttyGS0` (device) -> `/dev/ttyACM0` (host).
 

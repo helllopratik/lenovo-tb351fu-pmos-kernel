@@ -231,11 +231,14 @@ def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
 def find_images() -> ImageSet:
     paths = repo_paths()
     artifacts = paths["artifacts"]
+    images = paths["common"] / "images"
     pmos = paths["pmos"]
     deploy = paths["deploy"]
 
     rootfs_candidates = [
         Path(os.environ["TB351FU_ROOTFS_IMAGE"]) if os.environ.get("TB351FU_ROOTFS_IMAGE") else None,
+        images / "rootfs_base.img.zst",
+        images / "rootfs_base.img",
         pmos / "pmos-phosh-aarch64.img",
         Path("/mnt/Nvme/pmos_rootfs_base.img"),
         Path("/mnt/Nvme/pmos_rootfs_base.img.zst"),
@@ -245,16 +248,22 @@ def find_images() -> ImageSet:
 
     return ImageSet(
         boot=_first_existing([
+            images / "boot_b.img",
+            images / "boot_latest.img",
             artifacts / "boot_latest.img",
             artifacts / "boot_pmos.img",
             Path("/mnt/Nvme/slot_b_bundle/boot_pmos.img"),
         ]),
         init_boot=_first_existing([
+            images / "init_boot_b.img",
+            images / "init_boot_latest.img",
             artifacts / "init_boot_latest.img",
             artifacts / "init_boot_pmos.img",
             Path("/mnt/Nvme/slot_b_bundle/init_boot_pmos.img"),
         ]),
         vbmeta=_first_existing([
+            images / "vbmeta_b.img",
+            images / "vbmeta_latest.img",
             artifacts / "vbmeta_latest.img",
             Path("/mnt/Nvme/slot_b_bundle/vbmeta.img"),
         ]),
