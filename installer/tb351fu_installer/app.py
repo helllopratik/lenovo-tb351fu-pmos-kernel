@@ -73,7 +73,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application):
         super().__init__(application=app)
         self.set_title("TB351FU pmOS Installer")
-        self.set_default_size(1020, 780)
+        self.set_default_size(1000, 720)
 
         self.state = UiState()
         self.queue: queue.Queue[str] = queue.Queue()
@@ -122,9 +122,9 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.images_page = self._build_images_page()
         self.install_page = self._build_install_page()
 
-        self.stack.add_named(self.device_page, "device")
-        self.stack.add_named(self.partitions_page, "partitions")
-        self.stack.add_named(self.images_page, "images")
+        self.stack.add_named(self._scrollable(self.device_page), "device")
+        self.stack.add_named(self._scrollable(self.partitions_page), "partitions")
+        self.stack.add_named(self._scrollable(self.images_page), "images")
         self.stack.add_named(self.install_page, "install")
         root.append(self.stack)
 
@@ -155,6 +155,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
         page.set_margin_start(22)
         page.set_margin_end(22)
         return page
+
+    def _scrollable(self, child: Gtk.Widget) -> Gtk.ScrolledWindow:
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_child(child)
+        return scrolled
 
     def _build_device_page(self) -> Gtk.Widget:
         page = self._page()
