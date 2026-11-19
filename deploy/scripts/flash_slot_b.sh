@@ -24,6 +24,8 @@ FIRMWARE_DIR=""
 SET_ACTIVE=0
 REBOOT=0
 DRY_RUN=0
+INIT_BOOT_ONLY=0
+BOOT_ONLY=0
 SERIAL="${ANDROID_SERIAL:-}"
 
 # Firmware that belongs to slot B's boot chain.  Every file is written to the
@@ -50,6 +52,10 @@ spmfw_b, pi_img_b).  Slot A is never modified.
   --set-active       run 'fastboot set_active b' (fastboot mode only)
   --reboot           reboot when flashing finishes
   --dry-run          print the plan without writing anything
+  --only-init-boot   write init_boot_b only (skips boot, vbmeta,
+                     vendor_boot, dtbo and firmware)
+  --only-boot        write boot_b only (skips init_boot, vbmeta,
+                     vendor_boot, dtbo and firmware)
   -h, --help         show this help
 
 Environment:
@@ -84,6 +90,8 @@ while [ "$#" -gt 0 ]; do
     --set-active) SET_ACTIVE=1; shift ;;
     --reboot) REBOOT=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --only-init-boot) INIT_BOOT_ONLY=1; shift ;;
+    --only-boot) BOOT_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -93,9 +101,20 @@ done
 [ -n "$INIT_BOOT_IMG" ] || INIT_BOOT_IMG="$ARTIFACTS_DIR/init_boot_latest.img"
 [ -n "$VBMETA_IMG" ] || VBMETA_IMG="$ARTIFACTS_DIR/vbmeta_latest.img"
 
-REQUIRED_IMAGES=("$BOOT_IMG" "$INIT_BOOT_IMG" "$VBMETA_IMG")
-[ -n "$VENDOR_BOOT_IMG" ] && REQUIRED_IMAGES+=("$VENDOR_BOOT_IMG")
-[ -n "$DTBO_IMG" ] && REQUIRED_IMAGES+=("$DTBO_IMG")
+if [ "$INIT_BOOT_ONLY" -eq 1 ] && [ "$BOOT_ONLY" -eq 1 ]; then
+  echo "ERROR: --only-init-boot and --only-boot are mutually exclusive." >&2
+  exit 2
+fi
+
+if [ "$BOOT_ONLY" -eq 1 ]; then
+  REQUIRED_IMAGES=("$BOOT_IMG")
+elif [ "$INIT_BOOT_ONLY" -eq 1 ]; then
+  REQUIRED_IMAGES=("$INIT_BOOT_IMG")
+else
+  REQUIRED_IMAGES=("$BOOT_IMG" "$INIT_BOOT_IMG" "$VBMETA_IMG")
+  [ -n "$VENDOR_BOOT_IMG" ] && REQUIRED_IMAGES+=("$VENDOR_BOOT_IMG")
+  [ -n "$DTBO_IMG" ] && REQUIRED_IMAGES+=("$DTBO_IMG")
+fi
 
 for f in "${REQUIRED_IMAGES[@]}"; do
   [ -f "$f" ] || { echo "ERROR: image not found: $f" >&2; exit 1; }
@@ -172,13 +191,105 @@ flash_adb() {
     local name="$1" dev node sectors
     dev="$("${ADB[@]}" shell "su -c 'readlink -f /dev/block/by-name/$name'" 2>/dev/null | tr -d '\r')"
     node="${dev##*/}"
-    sectors="$("${ADB[@]}" shell "cat /sys/class/block/$node/size" 2>/dev/null | tr -d '\r')"
+    sectors="$("${ADB[@]}" shell "su -c 'cat /sys/class/block/$node/size'" 2>/dev/null | tr -d '\r')"
     if [[ "$sectors" =~ ^[0-9]+$ ]]; then
       echo $((sectors * 512))
     else
       echo 0
     fi
   }
+
+  if [ "$BOOT_ONLY" -eq 1 ]; then
+    local boot_size boot_part host_md5 dev_md5
+    boot_size="$(stat -c%s "$BOOT_IMG")"
+    boot_part="$(part_bytes boot_b)"
+    echo "boot_b size: ${boot_part:-unknown}"
+    if [ "$boot_part" -gt 0 ] && [ "$boot_size" -gt "$boot_part" ]; then
+      echo "ERROR: $BOOT_IMG is larger than boot_b ($boot_part bytes)." >&2
+      exit 1
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would push and dd:"
+      echo "  boot -> boot_b"
+      progress 100 "Dry run complete"
+      printf '%%%%PMOS_DONE\n'
+      return 0
+    fi
+
+    step transfer "Pushing boot image to the tablet"
+    progress 15 "Pushing boot"
+    "${ADB[@]}" push "$BOOT_IMG" /data/local/tmp/pmos_boot.img
+
+    step write "Writing boot_b"
+    progress 80 "Writing boot_b"
+    "${ADB[@]}" shell "su -c 'dd if=/data/local/tmp/pmos_boot.img of=/dev/block/by-name/boot_b bs=4194304 conv=fsync'"
+
+    step verify "Verifying boot_b checksum"
+    progress 92 "Verifying checksum"
+    host_md5="$(md5sum "$BOOT_IMG" | awk '{print $1}')"
+    dev_md5="$("${ADB[@]}" exec-out su -c "head -c $boot_size /dev/block/by-name/boot_b" | md5sum | awk '{print $1}')"
+    if [ "$host_md5" != "$dev_md5" ]; then
+      echo "ERROR: checksum mismatch after writing boot_b" >&2
+      echo "host:   $host_md5" >&2
+      echo "device: $dev_md5" >&2
+      exit 1
+    fi
+    echo "Checksum matches."
+
+    "${ADB[@]}" shell "rm -f /data/local/tmp/pmos_boot.img"
+
+    step done "boot_b flashed"
+    progress 100 "boot_b flashed"
+    printf '%%%%PMOS_DONE\n'
+    return 0
+  fi
+
+  if [ "$INIT_BOOT_ONLY" -eq 1 ]; then
+    local init_size init_part host_md5 dev_md5
+    init_size="$(stat -c%s "$INIT_BOOT_IMG")"
+    init_part="$(part_bytes init_boot_b)"
+    echo "init_boot_b size: ${init_part:-unknown}"
+    if [ "$init_part" -gt 0 ] && [ "$init_size" -gt "$init_part" ]; then
+      echo "ERROR: $INIT_BOOT_IMG is larger than init_boot_b ($init_part bytes)." >&2
+      exit 1
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would push and dd:"
+      echo "  init_boot -> init_boot_b"
+      progress 100 "Dry run complete"
+      printf '%%%%PMOS_DONE\n'
+      return 0
+    fi
+
+    step transfer "Pushing init_boot image to the tablet"
+    progress 15 "Pushing init_boot"
+    "${ADB[@]}" push "$INIT_BOOT_IMG" /data/local/tmp/pmos_init_boot.img
+
+    step write "Writing init_boot_b"
+    progress 80 "Writing init_boot_b"
+    "${ADB[@]}" shell "su -c 'dd if=/data/local/tmp/pmos_init_boot.img of=/dev/block/by-name/init_boot_b bs=4194304 conv=fsync'"
+
+    step verify "Verifying init_boot_b checksum"
+    progress 92 "Verifying checksum"
+    host_md5="$(md5sum "$INIT_BOOT_IMG" | awk '{print $1}')"
+    dev_md5="$("${ADB[@]}" exec-out su -c "head -c $init_size /dev/block/by-name/init_boot_b" | md5sum | awk '{print $1}')"
+    if [ "$host_md5" != "$dev_md5" ]; then
+      echo "ERROR: checksum mismatch after writing init_boot_b" >&2
+      echo "host:   $host_md5" >&2
+      echo "device: $dev_md5" >&2
+      exit 1
+    fi
+    echo "Checksum matches."
+
+    "${ADB[@]}" shell "rm -f /data/local/tmp/pmos_init_boot.img"
+
+    step done "init_boot_b flashed"
+    progress 100 "init_boot_b flashed"
+    printf '%%%%PMOS_DONE\n'
+    return 0
+  fi
 
   local boot_size init_size vb_size vendor_size=0 dtbo_size=0
   local boot_part init_part vendor_part=0 dtbo_part=0
@@ -380,6 +491,44 @@ flash_adb() {
 }
 
 flash_fastboot() {
+  if [ "$BOOT_ONLY" -eq 1 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would run:"
+      echo "  fastboot flash boot_b $BOOT_IMG"
+      progress 100 "Dry run complete"
+      printf '%%%%PMOS_DONE\n'
+      return 0
+    fi
+
+    step write "Writing boot_b via fastboot"
+    progress 85 "Flashing boot_b"
+    "${FB[@]}" flash boot_b "$BOOT_IMG"
+
+    step done "boot_b flashed"
+    progress 100 "boot_b flashed"
+    printf '%%%%PMOS_DONE\n'
+    return 0
+  fi
+
+  if [ "$INIT_BOOT_ONLY" -eq 1 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would run:"
+      echo "  fastboot flash init_boot_b $INIT_BOOT_IMG"
+      progress 100 "Dry run complete"
+      printf '%%%%PMOS_DONE\n'
+      return 0
+    fi
+
+    step write "Writing init_boot_b via fastboot"
+    progress 85 "Flashing init_boot_b"
+    "${FB[@]}" flash init_boot_b "$INIT_BOOT_IMG"
+
+    step done "init_boot_b flashed"
+    progress 100 "init_boot_b flashed"
+    printf '%%%%PMOS_DONE\n'
+    return 0
+  fi
+
   step verify "Checking fastboot state"
   "${FB[@]}" getvar current-slot 2>&1 | sed 's/^/  /' || true
 

@@ -64,9 +64,14 @@
 #define O_WRONLY 00000001
 #define O_RDWR   00000002
 #define O_CLOEXEC 02000000
-#define O_DIRECTORY 00200000
+/* arm64 overrides the asm-generic value; see arch/arm64/include/uapi/asm/fcntl.h */
+#define O_DIRECTORY 040000
 #define S_IFCHR 0020000
 #define S_IFBLK 0060000
+#define S_IFMT  0170000
+#define MS_NOSUID  2
+#define MS_NODEV   4
+#define MS_NOATIME 1024
 #define MS_MOVE  8192
 #define LOOP_SET_FD 0x4C00
 #define LOOP_CLR_FD 0x4C01
@@ -602,10 +607,59 @@ static int find_userdata_byname(struct userdata_info *info)
 	return 0;
 }
 
+/*
+ * Last-resort discovery for this tablet: the initramfs pre-creates
+ * /dev/sdc64 with the UFS userdata device number.  Opening it directly does
+ * not depend on sysfs, devtmpfs symlinks, or udev, and BLKGETSIZE64 rejects
+ * a node that exists before the block device is ready.  It is tried before
+ * the sysfs scan so a slow or unavailable sysfs cannot hide userdata.
+ */
+static int userdata_from_devpath(const char *path, struct userdata_info *info)
+{
+	struct kstat64 st;
+	unsigned long long bytes = 0;
+	unsigned int maj, min;
+	long fd;
+	long rc;
+
+	fd = syscall4(56, AT_FDCWD, (long)path, O_RDONLY | O_CLOEXEC, 0);
+	if (fd < 0)
+		return -1;
+
+	rc = syscall3(80, fd, (long)&st, 0);
+	if (rc < 0 || (st.st_mode & S_IFMT) != S_IFBLK) {
+		syscall3(57, fd, 0, 0);
+		return -1;
+	}
+	dev_decode(st.st_rdev, &maj, &min);
+
+	rc = syscall3(29, fd, BLKGETSIZE64, (long)&bytes);
+	syscall3(57, fd, 0, 0);
+	if (rc < 0 || bytes < (1ULL << 30))
+		return -1;
+
+	memset(info, 0, sizeof(*info));
+	scopy(info->path, path, sizeof(info->path));
+	scopy(info->name, "userdata", sizeof(info->name));
+	info->maj = maj;
+	info->min = min;
+	info->sectors = bytes >> 9;
+	{
+		char *q = info->mm;
+		char *end = info->mm + sizeof(info->mm) - 1;
+		sappend_num(&q, end, maj);
+		sappend(&q, end, ":");
+		sappend_num(&q, end, min);
+		*q = '\0';
+	}
+	return 0;
+}
+
 static int find_userdata(struct userdata_info *info)
 {
 	memset(info, 0, sizeof(*info));
 	if (find_userdata_byname(info) == 0 ||
+	    userdata_from_devpath("/dev/sdc64", info) == 0 ||
 	    find_userdata_sysfs(info) == 0) {
 		kmsg("<3>PMOSINIT: userdata partition: ");
 		kmsg(info->name);
@@ -1054,19 +1108,32 @@ static int loop_attach(int img_fd, char *devpath, unsigned long devpathsz,
 /* mounts                                                              */
 /* ------------------------------------------------------------------ */
 
-static long mount_fs(const char *dev, const char *mnt, const char *fs,
-		     const char *opts)
+static long mount_fs_flags(const char *dev, const char *mnt, const char *fs,
+			   unsigned long flags, const char *opts)
 {
-	return syscall5(40, (long)dev, (long)mnt, (long)fs, 0,
+	return syscall5(40, (long)dev, (long)mnt, (long)fs, (long)flags,
 			(long)opts);
 }
 
+static long mount_fs(const char *dev, const char *mnt, const char *fs,
+		     const char *opts)
+{
+	return mount_fs_flags(dev, mnt, fs, 0, opts);
+}
+
 #if PMOS_DATA_INLINECRYPT
-static const char data_mount_opts[] =
-	"inlinecrypt,noatime,nosuid,nodev";
+static const char data_mount_opts[] = "inlinecrypt";
 #else
-static const char data_mount_opts[] = "noatime,nosuid,nodev";
+static const char data_mount_opts[] = "";
 #endif
+
+/* erofs does not implement the inlinecrypt mount option. */
+static const char *data_fs_opts(const char *fs)
+{
+	if (scmp(fs, "erofs") == 0)
+		return "";
+	return data_mount_opts;
+}
 
 static int mount_loop_rootfs(const char *imgpath, const char **mounted_target,
 			     const char **mounted_fs)
@@ -1111,6 +1178,41 @@ static int mount_loop_rootfs(const char *imgpath, const char **mounted_target,
 	return (int)rc;
 }
 
+#define USERDATA_WAIT_ATTEMPTS 120
+
+/*
+ * One-shot diagnostics emitted every ten attempts.  They distinguish a
+ * missing sysfs mount from a block device that has not enumerated yet, and
+ * print the userdata uevent once UFS is up.
+ */
+static void userdata_diag(void)
+{
+	char b[256];
+	long fd;
+	long n;
+
+	fd = syscall4(56, AT_FDCWD, (long)"/sys/class/block/sdc64/uevent",
+		      O_RDONLY | O_CLOEXEC, 0);
+	klong("<3>PMOSINIT: diag: sdc64 uevent open rc=", fd);
+	if (fd >= 0) {
+		n = syscall3(63, fd, (long)b, sizeof(b) - 1);
+		syscall3(57, fd, 0, 0);
+		klong("<3>PMOSINIT: diag: sdc64 uevent read rc=", n);
+		if (n > 0) {
+			b[n] = '\0';
+			kmsg("<3>PMOSINIT: diag: sdc64 uevent: ");
+			kmsg(b);
+			kmsg("\n");
+		}
+	}
+
+	fd = syscall4(56, AT_FDCWD, (long)"/sys/class/block",
+		      O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+	klong("<3>PMOSINIT: diag: sysfs block open rc=", fd);
+	if (fd >= 0)
+		syscall3(57, fd, 0, 0);
+}
+
 static int try_userdata_rootfs(const char **mounted_target,
 			       const char **mounted_fs)
 {
@@ -1124,12 +1226,17 @@ static int try_userdata_rootfs(const char **mounted_target,
 	memset(&ud, 0, sizeof(ud));
 	memset(dmdev, 0, sizeof(dmdev));
 
-	for (attempt = 0; attempt < 25; attempt++) {
+	for (attempt = 0; attempt < USERDATA_WAIT_ATTEMPTS; attempt++) {
 		int d;
 		int ndevs = 0;
 		const char *devs[2];
 
 		if (!have_ud) {
+			if ((attempt % 10) == 0) {
+				klong("<3>PMOSINIT: waiting for userdata, attempt ",
+				      attempt);
+				userdata_diag();
+			}
 			if (find_userdata(&ud) == 0)
 				have_ud = 1;
 		}
@@ -1154,11 +1261,21 @@ static int try_userdata_rootfs(const char **mounted_target,
 				for (f = 0;
 				     f < (int)(sizeof(fs_types) / sizeof(fs_types[0]));
 				     f++) {
-					long rc = mount_fs(devs[d], "/data_host",
-							   fs_types[f],
-							   data_mount_opts);
-					if (rc != 0)
+					long rc = mount_fs_flags(
+						devs[d], "/data_host",
+						fs_types[f],
+						MS_NOATIME | MS_NOSUID |
+							MS_NODEV,
+						data_fs_opts(fs_types[f]));
+					if (rc != 0) {
+						kmsg("<3>PMOSINIT: mount userdata ");
+						kmsg(fs_types[f]);
+						kmsg(" via ");
+						kmsg(devs[d]);
+						kmsg(" failed rc=");
+						klong("", rc);
 						continue;
+					}
 					kmsg("<3>PMOSINIT: userdata mounted (");
 					kmsg(fs_types[f]);
 					kmsg(") on /data_host via ");
@@ -1235,9 +1352,18 @@ void _start(void)
 	syscall3(34, AT_FDCWD, (long)"/data_host", 0755);
 
 	/* Mount core virtual filesystems */
-	syscall5(40, (long)"devtmpfs", (long)"/dev", (long)"devtmpfs", 0, 0);
-	syscall5(40, (long)"proc", (long)"/proc", (long)"proc", 0, 0);
-	syscall5(40, (long)"sysfs", (long)"/sys", (long)"sysfs", 0, 0);
+	{
+		long mdev = syscall5(40, (long)"devtmpfs", (long)"/dev",
+				     (long)"devtmpfs", 0, 0);
+		long mproc = syscall5(40, (long)"proc", (long)"/proc",
+				      (long)"proc", 0, 0);
+		long msys = syscall5(40, (long)"sysfs", (long)"/sys",
+				     (long)"sysfs", 0, 0);
+
+		klong("<3>PMOSINIT: mount devtmpfs rc=", mdev);
+		klong("<3>PMOSINIT: mount proc rc=", mproc);
+		klong("<3>PMOSINIT: mount sysfs rc=", msys);
+	}
 
 	/* Wait 3s for storage controllers (UFS & MSDC) to enumerate */
 	sleep_s(3);
@@ -1273,8 +1399,10 @@ void _start(void)
 		kmsg("<3>PMOSINIT: encrypted/raw userdata rootfs path unavailable; trying legacy targets\n");
 	}
 
-	/* STEP 2: Legacy fixed targets (MicroSD, super, tee, etc.) */
-	for (tries = 0; tries < 15 && rc != 0; tries++) {
+	/* STEP 2: Legacy fixed targets (MicroSD, super, tee, etc.).
+	 * Five passes are enough for late storage; more just floods pstore
+	 * with expected failures on encrypted userdata. */
+	for (tries = 0; tries < 5 && rc != 0; tries++) {
 		int t;
 		for (t = 0; t < (int)(sizeof(targets) / sizeof(targets[0])); t++) {
 			int f;
