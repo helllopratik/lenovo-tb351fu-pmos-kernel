@@ -217,18 +217,40 @@ BUNDLE=/mnt/Nvme/slot_b_bundle
   --dtbo "$BUNDLE/dtbo.img" \
   --firmware-dir "$BUNDLE"
 
-# 3) Decompress, resize, provision, and verify the rootfs
-./install_pmos_rootfs.sh --image images/rootfs_base.img.zst --size 64G
+# 3) Install the rootfs into /data/pmos (asks source and account details)
+./install_pmos_rootfs.sh --source auto --mode dual
+
+#    Or use a local image:
+./install_pmos_rootfs.sh --source manual \
+  --image images/rootfs_base.img.zst --size 64G --mode dual
 ```
 
-`install_pmos_rootfs.sh` accepts either a full postmarketOS GPT image (it extracts
-partition 2) or a pre-compressed raw ext4 image (`.img.zst`). It decompresses and
-prepares the image on the host, because Android's toybox has no `zstd`. The ext4
-`orphan_file` feature is cleared on the host so Android's e2fsprogs 1.46 can run
-`e2fsck`/`resize2fs`. During payload application the image is temporarily labeled
+`install_pmos_rootfs.sh` can download the matching rootfs from the server
+(`--source auto`, URL in `deploy/configs/pmos_image_url`) or use a local
+`.img`, `.img.zst`, `.img.xz`, or `.img.gz` file. A GPT image is accepted; the
+installer extracts partition 2. It decompresses and prepares the image on the
+host, because Android's toybox has no `zstd`. The ext4 `orphan_file` feature is
+cleared on the host so Android's e2fsprogs 1.46 can run `e2fsck`/`resize2fs`.
+During payload application the image is temporarily labeled
 `media_rw_data_file` for the read-write loop mount and restored to
-`system_data_file` afterwards. The script refuses to leave less than 1 GiB free
-on `/data`.
+`system_data_file` afterwards. The script refuses to leave too little free
+space on `/data`.
+
+The installer asks for the pmOS username and password. Only a SHA-512 crypt
+hash is sent to the tablet; the plaintext password is never stored or passed on
+a command line. `--no-account` keeps the image's default `user` account, and
+`--password-file` supports unattended runs.
+
+If `/data/pmos` already exists, the installer asks whether to replace it, remove
+it, or cancel. Non-interactive runs use `--replace-existing` or
+`--remove-existing`. The legacy Android-readable image is deleted only when
+`--remove-legacy` is passed explicitly.
+
+`--mode whole` prepares an offline package for a device that will no longer run
+Android. It uses a temporary encrypted staging install, packs the finalized
+image, and does not erase userdata while Android is running. Applying that
+package requires a recovery environment, `/data` unmounted, and a separate
+userdata-direct boot image; see `PMOS_ENCRYPTED_STORAGE.md`.
 
 ### 4. Boot slot B
 

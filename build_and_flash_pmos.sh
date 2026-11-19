@@ -41,9 +41,102 @@ else
   CC="aarch64-linux-gnu-gcc"
 fi
 
+# ---------------------------------------------------------------------------
+# Storage encryption configuration
+#
+# The metadata key, the per-install fscrypt key and its identifier live in a
+# 0600 file outside this repository.  They are compiled into /init through a
+# generated header in a private temporary directory that is deleted again
+# immediately after the compile.  Nothing key-related is written to git.
+# ---------------------------------------------------------------------------
+STORAGE_KEYS_FILE="${PMOS_STORAGE_KEYS:-$HOME/.config/pmos/storage-keys.env}"
+INIT_EXTRA_CFLAGS=""
+INIT_CFG_DIR=""
+
+cleanup_init_cfg() {
+  if [ -n "${INIT_CFG_DIR:-}" ]; then
+    rm -rf "$INIT_CFG_DIR"
+    INIT_CFG_DIR=""
+  fi
+}
+trap cleanup_init_cfg EXIT
+
+require_hex() {
+  local name="$1" value="$2" min="$3" max="$4"
+  if [ -n "$value" ]; then
+    case "$value" in
+      *[!0-9a-fA-F]*)
+        echo "ERROR: $name must contain only hexadecimal characters" >&2
+        exit 1
+        ;;
+    esac
+    if [ "${#value}" -lt "$min" ] || [ "${#value}" -gt "$max" ] || \
+       [ $(( ${#value} % 2 )) -ne 0 ]; then
+      echo "ERROR: $name has an unexpected length" >&2
+      exit 1
+    fi
+  fi
+}
+
+if [ -f "$STORAGE_KEYS_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a
+  . "$STORAGE_KEYS_FILE"
+  set +a
+
+  PMOS_DM_METADATA_KEY="${PMOS_DM_METADATA_KEY:-}"
+  PMOS_FSCRYPT_MASTER_KEY="${PMOS_FSCRYPT_MASTER_KEY:-}"
+  PMOS_FSCRYPT_IDENTIFIER="${PMOS_FSCRYPT_IDENTIFIER:-}"
+  PMOS_DM_CIPHER="${PMOS_DM_CIPHER:-aes-xts-plain64}"
+  PMOS_DM_SECTOR_SIZE="${PMOS_DM_SECTOR_SIZE:-4096}"
+  PMOS_DM_WRAPPEDKEY="${PMOS_DM_WRAPPEDKEY:-0}"
+
+  require_hex PMOS_DM_METADATA_KEY "$PMOS_DM_METADATA_KEY" 64 128
+  require_hex PMOS_FSCRYPT_MASTER_KEY "$PMOS_FSCRYPT_MASTER_KEY" 32 128
+  require_hex PMOS_FSCRYPT_IDENTIFIER "$PMOS_FSCRYPT_IDENTIFIER" 32 32
+  case "$PMOS_DM_CIPHER" in
+    *[!a-zA-Z0-9-]*) echo "ERROR: PMOS_DM_CIPHER is not a valid cipher name" >&2; exit 1 ;;
+  esac
+  case "$PMOS_DM_SECTOR_SIZE" in
+    512|4096) ;;
+    *) echo "ERROR: PMOS_DM_SECTOR_SIZE must be 512 or 4096" >&2; exit 1 ;;
+  esac
+  case "$PMOS_DM_WRAPPEDKEY" in
+    0|1) ;;
+    *) echo "ERROR: PMOS_DM_WRAPPEDKEY must be 0 or 1" >&2; exit 1 ;;
+  esac
+
+  INIT_CFG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pmos-init-cfg.XXXXXX")"
+  cat > "$INIT_CFG_DIR/pmos_storage_config.h" <<EOF
+/* Generated at build time. Do not commit or redistribute. */
+#define PMOS_DM_METADATA_KEY "$PMOS_DM_METADATA_KEY"
+#define PMOS_DM_CIPHER "$PMOS_DM_CIPHER"
+#define PMOS_DM_SECTOR_SIZE $PMOS_DM_SECTOR_SIZE
+#define PMOS_DM_WRAPPEDKEY $PMOS_DM_WRAPPEDKEY
+#define PMOS_FSCRYPT_MASTER_KEY "$PMOS_FSCRYPT_MASTER_KEY"
+#define PMOS_FSCRYPT_IDENTIFIER "$PMOS_FSCRYPT_IDENTIFIER"
+EOF
+  chmod 600 "$INIT_CFG_DIR/pmos_storage_config.h"
+  INIT_EXTRA_CFLAGS="-I$INIT_CFG_DIR"
+  echo "Storage keys loaded from $STORAGE_KEYS_FILE (values not shown)."
+  if [ -z "$PMOS_DM_METADATA_KEY" ] || [ -z "$PMOS_FSCRYPT_MASTER_KEY" ]; then
+    echo "WARNING: storage key file is incomplete; encrypted boot will be unavailable." >&2
+  fi
+else
+  echo "No storage key file at $STORAGE_KEYS_FILE."
+  echo "Building /init without keys (raw userdata/SD/USB boot only)."
+fi
+
 $CC -static -nostdlib -fno-builtin -O2 -fno-stack-protector \
   -fno-asynchronous-unwind-tables -fno-ident -Wl,-e,_start \
+  $INIT_EXTRA_CFLAGS \
   "$INIT_SRC" -o /tmp/irfs_build/init
+
+# The keys are now inside the initramfs; discard the generated header.
+if [ -n "$INIT_CFG_DIR" ]; then
+  rm -rf "$INIT_CFG_DIR"
+  INIT_CFG_DIR=""
+fi
 
 chmod 755 /tmp/irfs_build/init
 

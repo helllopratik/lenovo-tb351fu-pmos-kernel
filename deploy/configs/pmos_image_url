@@ -1,0 +1,7 @@
+# Default rootfs image used by the installer's automatic server-download mode.
+# Override with:  PMOS_IMAGE_URL=... ./install_pmos_rootfs.sh --source auto
+# or:             ./install_pmos_rootfs.sh --source auto --url URL
+#
+# This asset is the matching TB351FU postmarketOS rootfs.  For another device,
+# point this at that device's image.  Both raw ext4 .img and .img.zst work.
+https://github.com/helllopratik/lenovo-tb351fu-pmos-kernel/releases/download/v0.1.0/rootfs_base.img.zst
