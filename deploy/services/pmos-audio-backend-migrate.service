@@ -1,0 +1,14 @@
+[Unit]
+Description=Migrate pmOS image from PulseAudio to the PipeWire audio backend
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/pmos/audio-backend-migrated
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pmos-audio-backend-migrate.sh
+TimeoutStartSec=600
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

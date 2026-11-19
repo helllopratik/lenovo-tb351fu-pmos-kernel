@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry the pmOS audio backend migration until it completes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=pmos-audio-backend-migrate.service
+
+[Install]
+WantedBy=timers.target

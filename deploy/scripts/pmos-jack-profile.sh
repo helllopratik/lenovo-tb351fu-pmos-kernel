@@ -1,5 +1,8 @@
 #!/bin/sh
-# Follow the ACCDET headphone jack and keep the PulseAudio card profile in sync.
+# Follow the ACCDET headphone jack and keep the PipeWire-Pulse card profile in
+# sync.  This runs as a systemd *user* service so XDG_RUNTIME_DIR is the
+# logged-in user's runtime directory; running it as root cannot reach the
+# session sound server.
 # Manual profile choices are preserved until the next physical plug/unplug.
 #
 # Why the extra suspend/resume: the MT8186 AFE driver clears the DAPM-owned
@@ -49,8 +52,8 @@ pick_profile() {
     '
 }
 
-# `After=pulseaudio.service` only orders the fork, not socket readiness.
-# Wait for both the daemon and the card before touching it.
+# Ordering against pipewire-pulse.service only orders the fork, not socket
+# readiness.  Wait for both the daemon and the card before touching it.
 wait_card() {
     i=0
     while [ "$i" -lt 150 ]; do

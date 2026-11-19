@@ -6,6 +6,24 @@
 
 set -e
 
+usage() {
+  cat <<EOF
+Usage: $0 [--init-only]
+
+  --init-only   Rebuild /init and the kernel-embedded initramfs, repackage
+                boot/init_boot images, and skip flashing.  The kernel is
+                rebuilt because CONFIG_INITRAMFS_FORCE=y makes the initramfs
+                inside boot.img authoritative; init_boot is not used at boot.
+EOF
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --init-only) NO_FLASH=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
 # The fragment pins CONFIG_LOCALVERSION_AUTO=n.  Set LOCALVERSION explicitly
 # (empty) so scripts/setlocalversion does not append its "+" suffix.
 export LOCALVERSION=
@@ -18,6 +36,19 @@ OUT_DIR="${OUT_DIR:-$COMMON_DIR/out}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$PMOS_DIR/artifacts}"
 # LLVM / Clang toolchain
 export PATH="/mnt/Nvme/evolutionx/sync/prebuilts/kernel-build-tools/linux-x86/bin:/usr/lib/llvm-20/bin:/mnt/Nvme/evolutionx/sync/prebuilts/clang/host/linux-x86/clang-r547379/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+package_init_boot() {
+  python3 "$COMMON_DIR/tools/mkbootimg/mkbootimg.py" \
+    --header_version 4 --pagesize 4096 \
+    --ramdisk "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.lz4" \
+    --output "$ARTIFACTS_DIR/init_boot_latest.img"
+
+  python3 "$COMMON_DIR/external/avb/avbtool.py" add_hash_footer \
+    --image "$ARTIFACTS_DIR/init_boot_latest.img" \
+    --partition_size 8388608 --partition_name init_boot --algorithm SHA256_RSA4096 \
+    --key "$COMMON_DIR/external/avb/test/data/testkey_rsa4096.pem" \
+    --rollback_index 0 --rollback_index_location 1
+}
 
 echo "========================================================================"
 echo " 1. Compiling Freestanding /init & Generating Initramfs CPIO"
@@ -156,6 +187,15 @@ echo "========================================================================"
 "$COMMON_DIR/apply_pmos_kernel_config.sh"
 make -C "$COMMON_DIR" O="$OUT_DIR" ARCH=arm64 LLVM=1 -j$(nproc) Image modules
 
+# Rebuild the two MT6789 audio helper modules against this exact kernel and
+# fold them into the installer payload.  They are required for speaker
+# playback and must never be missing from deploy/modules.tar.xz.
+echo "========================================================================"
+echo " 2b. Building audio helper modules and refreshing the installer payload"
+echo "========================================================================"
+COMMON_DIR="$COMMON_DIR" OUT_DIR="$OUT_DIR" \
+  bash "$COMMON_DIR/deploy/update_modules_payload.sh"
+
 # Built-in modules (notably zram) are invisible to kmod unless the
 # per-release modules.builtin index exists.  Stage it for the installer
 # and for the running device; zramstart calls modprobe and would abort
@@ -187,16 +227,7 @@ python3 "$COMMON_DIR/external/avb/avbtool.py" add_hash_footer \
   --prop com.android.build.boot.os_version:17
 
 # Create init_boot.img (Header Version 4, 8MB partition size, ramdisk cpio.lz4)
-python3 "$COMMON_DIR/tools/mkbootimg/mkbootimg.py" \
-  --header_version 4 --pagesize 4096 \
-  --ramdisk "$ARTIFACTS_DIR/pmos_initramfs_194.cpio.lz4" \
-  --output "$ARTIFACTS_DIR/init_boot_latest.img"
-
-python3 "$COMMON_DIR/external/avb/avbtool.py" add_hash_footer \
-  --image "$ARTIFACTS_DIR/init_boot_latest.img" \
-  --partition_size 8388608 --partition_name init_boot --algorithm SHA256_RSA4096 \
-  --key "$COMMON_DIR/external/avb/test/data/testkey_rsa4096.pem" \
-  --rollback_index 0 --rollback_index_location 1
+package_init_boot
 
 # Create vbmeta.img (Verification Flags=3 Disabled) - FRESH every cycle
 python3 "$COMMON_DIR/external/avb/avbtool.py" make_vbmeta_image \
