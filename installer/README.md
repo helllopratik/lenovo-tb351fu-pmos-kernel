@@ -31,6 +31,34 @@ without repartitioning UFS and without touching the Android slot.
   space minus an 8 GiB reserve) and the helper script refuses to leave less
   than 1 GiB free on `/data`.
 
+## Audio stack
+
+The installer payload always includes the two MT6789 audio helper modules
+(`mt6789_audio_pd.ko`, `mt6789_i2s3_mclk.ko`) in `deploy/modules.tar.xz`; they
+are rebuilt from `deploy/modules/audio/` after each kernel build and loaded in
+order by `init_wifi_sensors.sh`. Do not remove them from the payload.
+
+The stock pmOS base image still selects
+`postmarketos-base-ui-audio-backend-pulseaudio`, which leaves Phosh silent
+because `pulseaudio-wireplumber` disables WirePlumber's hardware audio and
+PulseAudio is never started. Every installation therefore gets:
+
+- `pmos-audio-backend-migrate.service`, a guarded one-time migration to
+  `postmarketos-base-ui-audio-backend-pipewire`. It waits for the network,
+  treats the known mkinitfs trigger failure on this custom boot chain as
+  non-fatal, restores `/etc/apk/world` on real failure, and retries through
+  `pmos-audio-backend-migrate.timer` every 10 minutes until it succeeds.
+- A completion marker at `/var/lib/pmos/audio-backend-migrated`, so the
+  migration is a no-op afterwards.
+- `pmos-jack-profile.service` under `/usr/lib/systemd/user/`, enabled through
+  `/etc/systemd/user/default.target.wants/`. It runs inside the graphical
+  session and drives the PipeWire-Pulse card profile when headphones are
+  plugged or unplugged.
+
+Audio output is verified with `speaker-test -D pulse -c 2 -t sine -f 440 -l 1`
+after the migration and a restart of `pipewire`, `wireplumber` and
+`pipewire-pulse` in the user session.
+
 ## Requirements
 
 Host:

@@ -372,3 +372,83 @@ flash; it is not required for the module path that is now verified.
   (`rebuild_vendor_boot.sh`, `splice_header.py`, `stock_header.bin`, `prebuilt/dtb.dtb`)
 - pmOS device tree: `mt8781_pmos.dts` (mali node at ~line 4513)
 - MFGCFG clk driver: `common/drivers/clk/mediatek/clk-mt6789-mfgcfg.c`
+
+---
+
+## 11. Audio Stack Verification (2026-11-19)
+
+The speaker path was verified on the live slot-B pmOS system with kernel
+`6.12.23-android16-5-gd2c91f0c3b11-4k-g9cfa397996e7-dirty`.
+
+### Modules
+
+Both helpers are built from `common/deploy/modules/audio/` and included in
+`common/deploy/modules.tar.xz`:
+
+| Module | SHA-256 |
+| --- | --- |
+| `mt6789_audio_pd.ko` | `e1179305876e095634854d610e66d4689aea74aa3493e4b46879aa7473747ee2` |
+| `mt6789_i2s3_mclk.ko` | `712f3e379fe65243afdad1e8a67e6002258765daaecef3997663c9e7147c2f64` |
+
+They are loaded in this order by `init_wifi_sensors.sh`:
+
+```sh
+insmod /lib/modules/extra/mt6789_audio_pd.ko
+insmod /lib/modules/extra/mt6789_i2s3_mclk.ko
+```
+
+The I2S3 clock tree must read back:
+
+```text
+aud_2_sel             196608000  parent=apll2_ck
+apll_i2s3_mck_sel     196608000  parent=aud_2_sel
+apll12_div3             6144000  parent=apll_i2s3_mck_sel
+```
+
+and the module log must end with:
+
+```text
+mt6789_i2s3_mclk: mux3=196608000 div3=6144000 (want 6144000)
+```
+
+An earlier build logged `div3=5200000` because `aud_2_sel` was left on
+`tck_26m_mx9_ck`; the module now selects `apll2_ck` explicitly.
+
+### Userspace
+
+The image was switched from the PulseAudio backend to:
+
+```text
+postmarketos-base-ui-audio-backend-pipewire
+```
+
+which installs `pipewire-pulse`, `pipewire-alsa` and `pipewire-spa-bluez` and
+removes `pulseaudio-wireplumber` (the package that disabled WirePlumber's
+hardware audio profile).  In the user session:
+
+```sh
+export XDG_RUNTIME_DIR=/run/user/10000
+pactl info
+pactl list sinks short
+speaker-test -D pulse -c 2 -t sine -f 440 -l 1
+```
+
+`pactl info` reports `PulseAudio (on PipeWire 1.6.8)`, the default sink is
+`alsa_output.platform-sound.HiFi__Speaker__sink`, and `speaker-test` completes
+with exit status 0.  All eight AW88395 amplifiers log `start success`, and the
+AFE logs `memif 0 (DL1)` DMA enable.  `failed to set tdm slot` messages during
+profile changes are harmless.
+
+### Jack watcher
+
+`pmos-jack-profile.service` is now a **user** unit installed under
+`/usr/lib/systemd/user/` and enabled via
+`/etc/systemd/user/default.target.wants/`.  It runs as the logged-in user,
+finds the speaker/headphone profile from the live card, and logged:
+
+```text
+jack=off -> HiFi (Mic, Speaker) (alsa_output.platform-sound.HiFi__Speaker__sink)
+```
+
+The old system-wide unit ran as root, targeted `/run/user/0`, and looped on
+`pactl info` forever.

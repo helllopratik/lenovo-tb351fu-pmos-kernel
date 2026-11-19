@@ -52,7 +52,7 @@ Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
 | Display | Working. 1200×2000 panel, portrait 180°, `pmosfb` boots at 60 Hz, then 60 / 90 / Adaptive modes. |
 | Touch | Working. Novatek NT36523 TDDI over SPI2, interrupt-driven. |
 | Stylus | Working. AES pen pressure/tilt at 90 Hz; Lenovo Tab Pen Plus BLE gestures via `pmos-pen-daemon`. |
-| Audio | Working on the AP side: ALSA/ASoC + PulseAudio, MT6366 + AW88395 amplifiers, UCM2 profiles. |
+| Audio | Working on the AP side: ALSA/ASoC + PipeWire (PulseAudio API), MT6366 + AW88395 amplifiers, UCM2 profiles. |
 | Wi-Fi / Bluetooth | Working through the MediaTek CONSYS vendor modules and firmware. |
 | GNSS | Working. Vendor `mnld` feeds a filtered NMEA socket to GeoClue. |
 | Storage | Internal shared storage, read-only Android views, microSD and USB via udisks2/Nautilus. |
@@ -357,13 +357,31 @@ rootfs release instructions.
 
 ## Audio
 
-Audio is entirely **AP-side ALSA/ASoC + PulseAudio**:
+Audio is entirely **AP-side ALSA/ASoC + PipeWire**:
 
 - MT6366 codec and eight AW88395 smart amplifiers.
 - UCM2 profiles in `deploy/configs/ucm2/`.
-- `mt6789_audio_pd` and `mt6789_i2s3_mclk` are order-sensitive. Do not change their
-  load order or power-domain/clock sequence without hardware testing; a mistake can
-  leave playback stalled with `-EIO` or destabilize the boot.
+- Phosh uses PipeWire with `pipewire-pulse`, `pipewire-alsa` and the BlueZ SPA
+  plugin. The PulseAudio backend metapackage is wrong for this desktop: its
+  `pulseaudio-wireplumber` package disables WirePlumber's hardware audio and
+  Phosh never starts PulseAudio.
+- Images built from the stock pmOS base rootfs still select the PulseAudio
+  backend. `pmos-audio-backend-migrate.service` (plus a retry timer) performs
+  the one-time switch to `postmarketos-base-ui-audio-backend-pipewire` after
+  the network is reachable, is idempotent, and records completion in
+  `/var/lib/pmos/audio-backend-migrated`.
+- `mt6789_audio_pd` and `mt6789_i2s3_mclk` are order-sensitive. Do not change
+  their load order or power-domain/clock sequence without hardware testing; a
+  mistake can leave playback stalled with `-EIO` or destabilize the boot.
+  Their sources and build script live in `deploy/modules/audio/`, and
+  `deploy/update_modules_payload.sh` refreshes `deploy/modules.tar.xz` after
+  each kernel build so the installer always ships matching modules.
+- The headphone-jack watcher is a **user** service
+  (`deploy/services/user/pmos-jack-profile.service`). It must run inside the
+  graphical session to reach the per-user PipeWire-Pulse socket; the old
+  system-wide unit ran as root and could never connect.
+- `failed to set tdm slot` messages during profile changes are harmless on
+  this machine driver; playback still completes.
 
 ---
 

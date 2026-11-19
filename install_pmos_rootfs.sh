@@ -1159,6 +1159,9 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
          "$PAYLOAD_DIR/usr/bin" \
          "$PAYLOAD_DIR/root" \
          "$PAYLOAD_DIR/etc/systemd/system/multi-user.target.wants" \
+         "$PAYLOAD_DIR/etc/systemd/system/timers.target.wants" \
+         "$PAYLOAD_DIR/etc/systemd/user/default.target.wants" \
+         "$PAYLOAD_DIR/usr/lib/systemd/user" \
          "$PAYLOAD_DIR/etc/udev/rules.d" \
          "$PAYLOAD_DIR/etc/phosh" \
          "$PAYLOAD_DIR/etc/sysctl.d" \
@@ -1222,6 +1225,26 @@ for s in "$DEPLOY_DIR/services/"*.service; do
   sname=$(basename "$s")
   cp "$s" "$PAYLOAD_DIR/etc/systemd/system/$sname"
   ln -sf "/etc/systemd/system/$sname" "$PAYLOAD_DIR/etc/systemd/system/multi-user.target.wants/$sname"
+done
+
+# Timers are installed system-wide and started by timers.target.
+for t in "$DEPLOY_DIR/services/"*.timer; do
+  [ -f "$t" ] || continue
+  tname=$(basename "$t")
+  cp "$t" "$PAYLOAD_DIR/etc/systemd/system/$tname"
+  ln -sf "/etc/systemd/system/$tname" "$PAYLOAD_DIR/etc/systemd/system/timers.target.wants/$tname"
+done
+
+# Per-user services (e.g. the jack-profile watcher) must run inside the
+# graphical user session so XDG_RUNTIME_DIR points at the PipeWire-Pulse
+# socket.  Install them as vendor user units and enable them for every user
+# through /etc/systemd/user/default.target.wants.
+for s in "$DEPLOY_DIR/services/user/"*.service; do
+  [ -f "$s" ] || continue
+  sname=$(basename "$s")
+  cp "$s" "$PAYLOAD_DIR/usr/lib/systemd/user/$sname"
+  ln -sf "/usr/lib/systemd/user/$sname" \
+    "$PAYLOAD_DIR/etc/systemd/user/default.target.wants/$sname"
 done
 
 # Copy service drop-in overrides (e.g. upower.service.d)
