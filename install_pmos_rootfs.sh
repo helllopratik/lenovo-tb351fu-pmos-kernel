@@ -77,6 +77,10 @@ Installation:
 Account:
   -n, --username NAME   pmOS login name (default: prompt; "user" defaults).
       --password-file F Read the password from F instead of prompting.
+      --password-hash-file F
+                        Read a precomputed SHA-512 crypt hash from F.
+                        Use this instead of --password-file; only the hash
+                        is sent to the tablet.
       --no-account      Do not create/change a pmOS login account.
 
 Other:
@@ -84,7 +88,8 @@ Other:
 
 Environment:
   PMOS_IMG, PMOS_IMAGE_URL, PMOS_IMAGE_SHA256, PMOS_SOURCE, PMOS_MODE
-  PMOS_USERNAME, PMOS_PASSWORD_FILE, PMOS_PASSWORD (discouraged), PMOS_NO_ACCOUNT
+  PMOS_USERNAME, PMOS_PASSWORD_FILE, PMOS_PASSWORD_HASH_FILE,
+  PMOS_PASSWORD (discouraged), PMOS_NO_ACCOUNT
   ROOTFS_SIZE, ANDROID_SERIAL, PMOS_STORAGE_KEYS, PMOS_INSTALL_DIR
   PMOS_KEEP_OLD, PMOS_REPLACE_EXISTING, PMOS_REMOVE_EXISTING, PMOS_REMOVE_LEGACY
   PMOS_WHOLE_OUTPUT   Output directory for --mode whole (prep only).
@@ -131,6 +136,7 @@ PMOS_IMAGE_URL="${PMOS_IMAGE_URL:-$DEFAULT_IMAGE_URL}"
 PMOS_IMAGE_SHA256="${PMOS_IMAGE_SHA256:-}"
 PMOS_USERNAME="${PMOS_USERNAME:-}"
 PMOS_PASSWORD_FILE="${PMOS_PASSWORD_FILE:-}"
+PMOS_PASSWORD_HASH_FILE="${PMOS_PASSWORD_HASH_FILE:-}"
 PMOS_PASSWORD="${PMOS_PASSWORD:-}"
 PMOS_NO_ACCOUNT="${PMOS_NO_ACCOUNT:-0}"
 ASSUME_YES=0
@@ -361,22 +367,44 @@ prepare_account() {
   fi
   validate_username "$PMOS_USERNAME"
 
-  if [ -n "$PMOS_PASSWORD_FILE" ]; then
-    PMOS_PASSWORD_FILE=$(expand_path "$PMOS_PASSWORD_FILE")
-    [ -f "$PMOS_PASSWORD_FILE" ] || \
-      die "password file not found: $PMOS_PASSWORD_FILE"
-    IFS= read -r pw < "$PMOS_PASSWORD_FILE" || true
-    pw=${pw%$'\r'}
-  elif [ -n "$PMOS_PASSWORD" ]; then
-    pw="$PMOS_PASSWORD"
-    echo "WARNING: PMOS_PASSWORD is visible in the environment; prefer --password-file." >&2
-  else
-    pw=$(ask_password)
+  if [ -n "$PMOS_PASSWORD_HASH_FILE" ] && \
+     { [ -n "$PMOS_PASSWORD_FILE" ] || [ -n "$PMOS_PASSWORD" ]; }; then
+    die "use only one of --password-file, --password-hash-file and PMOS_PASSWORD"
   fi
-  [ -n "$pw" ] || die "password must not be empty"
 
-  PMOS_PASSWORD_HASH=$(hash_password "$pw")
-  unset pw
+  if [ -n "$PMOS_PASSWORD_HASH_FILE" ]; then
+    PMOS_PASSWORD_HASH_FILE=$(expand_path "$PMOS_PASSWORD_HASH_FILE")
+    [ -f "$PMOS_PASSWORD_HASH_FILE" ] || \
+      die "password hash file not found: $PMOS_PASSWORD_HASH_FILE"
+    IFS= read -r PMOS_PASSWORD_HASH < "$PMOS_PASSWORD_HASH_FILE" || true
+    PMOS_PASSWORD_HASH=${PMOS_PASSWORD_HASH%$'\r'}
+    case "$PMOS_PASSWORD_HASH" in
+      '$6$'*) ;;
+      *) die "password hash file does not contain a SHA-512 crypt hash" ;;
+    esac
+    [ "${#PMOS_PASSWORD_HASH}" -le 256 ] || \
+      die "password hash is too long"
+    case "$PMOS_PASSWORD_HASH" in
+      *[!A-Za-z0-9./=$]*) die "password hash contains invalid characters" ;;
+    esac
+  else
+    if [ -n "$PMOS_PASSWORD_FILE" ]; then
+      PMOS_PASSWORD_FILE=$(expand_path "$PMOS_PASSWORD_FILE")
+      [ -f "$PMOS_PASSWORD_FILE" ] || \
+        die "password file not found: $PMOS_PASSWORD_FILE"
+      IFS= read -r pw < "$PMOS_PASSWORD_FILE" || true
+      pw=${pw%$'\r'}
+    elif [ -n "$PMOS_PASSWORD" ]; then
+      pw="$PMOS_PASSWORD"
+      echo "WARNING: PMOS_PASSWORD is visible in the environment; prefer --password-file." >&2
+    else
+      pw=$(ask_password)
+    fi
+    [ -n "$pw" ] || die "password must not be empty"
+
+    PMOS_PASSWORD_HASH=$(hash_password "$pw")
+    unset pw
+  fi
 
   ACCOUNT_ENABLED=1
   ACCOUNT_ENV_HOST="$TMP_DIR/pmos_account.env"
@@ -606,6 +634,9 @@ while [ "$#" -gt 0 ]; do
     --password-file)
       [ "$#" -ge 2 ] || { echo "ERROR: --password-file needs a path" >&2; exit 2; }
       PMOS_PASSWORD_FILE="$2"; shift 2 ;;
+    --password-hash-file)
+      [ "$#" -ge 2 ] || { echo "ERROR: --password-hash-file needs a path" >&2; exit 2; }
+      PMOS_PASSWORD_HASH_FILE="$2"; shift 2 ;;
     --no-account) PMOS_NO_ACCOUNT=1; shift ;;
     --keep-old) KEEP_OLD=1; shift ;;
     --replace-existing) REPLACE_EXISTING=1; shift ;;

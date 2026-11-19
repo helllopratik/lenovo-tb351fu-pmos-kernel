@@ -194,7 +194,21 @@ def check_validate_images() -> str:
             need_boot=False,
         )
         assert any("firmware.tar.xz" in p for p in problems), problems
-    return ("size limits, vendor_boot/dtbo and rootfs payload checks work")
+
+        # A server download does not need a local rootfs path, but the payload
+        # archives are still required.
+        problems = backend.validate_images(
+            backend.ImageSet(modules=modules, firmware=firmware),
+            need_boot=False, need_local_rootfs=False,
+        )
+        assert problems == [], problems
+        problems = backend.validate_images(
+            backend.ImageSet(modules=modules, firmware=firmware),
+            need_boot=False,
+        )
+        assert any("rootfs image not found" in p for p in problems), problems
+    return ("size limits, vendor_boot/dtbo, local/server rootfs and payload "
+            "checks work")
 
 
 def check_bundle_scan() -> str:
@@ -250,6 +264,10 @@ def check_scripts() -> str:
                           env={**os.environ, "ANDROID_SERIAL": ""})
     assert proc.returncode == 0, proc.stderr
     assert "--size" in proc.stdout and "--image" in proc.stdout
+    assert "--password-hash-file" in proc.stdout
+    assert "--source" in proc.stdout and "--url" in proc.stdout
+    assert "--mode" in proc.stdout and "--whole-output" in proc.stdout
+    assert "--replace-existing" in proc.stdout and "--remove-existing" in proc.stdout
 
     proc = subprocess.run([str(rootfs), "--size", "nope"],
                           capture_output=True, text=True)
@@ -283,14 +301,16 @@ def check_scripts() -> str:
     # Android compatibility regressions.  toybox has no `df -B1` and no zstd,
     # and its e2fsprogs 1.46 rejects the ext4 orphan_file feature.  A
     # read-write loop mount is only permitted under media_rw_data_file, so the
-    # script must relabel temporarily and restore system_data_file.
+    # device helper must relabel temporarily and restore system_data_file.
+    device = rootfs.parent / "deploy" / "installer" / "device_install.sh"
+    device_text = device.read_text()
     assert "df -k /data" in rootfs_text
     assert "df -B1 /data" not in rootfs_text
     assert "zstd -d -f" in rootfs_text
     assert "tune2fs -O ^orphan_file" in rootfs_text
-    assert "u:object_r:media_rw_data_file:s0" in rootfs_text
-    assert "u:object_r:system_data_file:s0" in rootfs_text
-    assert 'losetup -d \\"\\$LOOP\\" 2>/dev/null || true' in rootfs_text
+    assert "u:object_r:media_rw_data_file:s0" in device_text
+    assert "u:object_r:system_data_file:s0" in device_text
+    assert 'losetup -d "$LOOP" 2>/dev/null || true' in device_text
     assert "rm -f /data/pmos/rootfs.img\n" not in rootfs_text
 
     # The markers must contain two literal percent signs on the wire; printf
@@ -336,16 +356,29 @@ def check_orchestration() -> str:
         scripts.mkdir(parents=True)
         flash = scripts / "flash_slot_b.sh"
         rootfs = common / "install_pmos_rootfs.sh"
-        args_file = common / "flash_args.txt"
+        flash_args_file = common / "flash_args.txt"
+        rootfs_args_file = common / "rootfs_args.txt"
+        calls_file = common / "calls.txt"
+        hash_seen = common / "hash.txt"
         flash.write_text(
             "#!/usr/bin/env bash\n"
-            f"printf '%s\\n' \"$@\" > {shlex.quote(str(args_file))}\n"
+            f"printf '%s\\n' \"$@\" > {shlex.quote(str(flash_args_file))}\n"
+            f"printf 'flash\\n' >> {shlex.quote(str(calls_file))}\n"
             "echo '%%PMOS_STEP:write:Writing fake boot'\n"
             "echo '%%PMOS_PROGRESS:50:Halfway'\n"
             "echo '%%PMOS_DONE'\n"
         )
         rootfs.write_text(
             "#!/usr/bin/env bash\n"
+            f"printf '%s\\n' \"$@\" > {shlex.quote(str(rootfs_args_file))}\n"
+            f"printf 'rootfs\\n' >> {shlex.quote(str(calls_file))}\n"
+            "prev=''\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$prev\" = '--password-hash-file' ]; then\n"
+            f"    cat \"$arg\" > {shlex.quote(str(hash_seen))}\n"
+            "  fi\n"
+            "  prev=\"$arg\"\n"
+            "done\n"
             "echo '%%PMOS_STEP:unpack:Fake unpack'\n"
             "echo '%%PMOS_PROGRESS:25:Quarter'\n"
             "echo '%%PMOS_DONE'\n"
@@ -358,35 +391,62 @@ def check_orchestration() -> str:
             image.write_bytes(b"\x00" * 16)
             firmware_images[part] = image
 
+        image_paths = {
+            "boot": common / "boot.img",
+            "init_boot": common / "init_boot.img",
+            "vbmeta": common / "vbmeta.img",
+            "vendor_boot": common / "vendor_boot.img",
+            "dtbo": common / "dtbo.img",
+            "rootfs": common / "rootfs.img",
+            "modules": common / "modules.tar.xz",
+            "firmware": common / "firmware.tar.xz",
+        }
+
+        def run(options: backend.InstallOptions
+                ) -> tuple[str, str, list[str], str, list[str]]:
+            for path in (flash_args_file, rootfs_args_file, calls_file,
+                         hash_seen):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            lines: list[str] = []
+            backend.install(options, lines.append)
+            flash_args = (flash_args_file.read_text()
+                          if flash_args_file.exists() else "")
+            rootfs_args = (rootfs_args_file.read_text()
+                           if rootfs_args_file.exists() else "")
+            calls = (calls_file.read_text().split() if calls_file.exists() else [])
+            seen = hash_seen.read_text() if hash_seen.exists() else ""
+            return flash_args, rootfs_args, calls, seen, lines
+
         old = os.environ.get("TB351FU_COMMON_DIR")
         os.environ["TB351FU_COMMON_DIR"] = str(common)
         try:
-            lines: list[str] = []
-            options = backend.InstallOptions(
+            password_hash = "$6$rounds=120000$abcdefghijklmnop$" + "a" * 86
+            manual = backend.InstallOptions(
                 device=backend.Device(serial="FAKE", mode="adb", root=True),
                 images=backend.ImageSet(
-                    boot=common / "boot.img",
-                    init_boot=common / "init_boot.img",
-                    vbmeta=common / "vbmeta.img",
-                    vendor_boot=common / "vendor_boot.img",
-                    dtbo=common / "dtbo.img",
-                    rootfs=common / "rootfs.img",
-                ),
+                    **image_paths, slot_b_firmware=firmware_images),
                 size_bytes=16 * GIB,
                 switch_slot=False,
+                source="manual",
+                mode="dual",
+                account_enabled=True,
+                username="alice",
+                password_hash=password_hash,
+                existing_action="replace",
             )
-            backend.install(options, lines.append)
-            args_text = args_file.read_text()
+            manual_flash, manual_args, manual_calls, seen, manual_lines = run(manual)
 
-            fw_lines: list[str] = []
             fw_options = backend.InstallOptions(
-                device=backend.Device(serial="FAKE", mode="adb", root=True),
+                device=backend.Device(serial="FAKE", mode="fastboot"),
                 images=backend.ImageSet(
-                    boot=common / "boot.img",
-                    init_boot=common / "init_boot.img",
-                    vbmeta=common / "vbmeta.img",
-                    vendor_boot=common / "vendor_boot.img",
-                    dtbo=common / "dtbo.img",
+                    boot=image_paths["boot"],
+                    init_boot=image_paths["init_boot"],
+                    vbmeta=image_paths["vbmeta"],
+                    vendor_boot=image_paths["vendor_boot"],
+                    dtbo=image_paths["dtbo"],
                     slot_b_firmware=firmware_images,
                 ),
                 size_bytes=16 * GIB,
@@ -394,29 +454,124 @@ def check_orchestration() -> str:
                 install_rootfs=False,
                 switch_slot=False,
             )
-            backend.install(fw_options, fw_lines.append)
-            fw_args_text = args_file.read_text()
+            fw_flash_args, _, fw_calls, _, fw_lines = run(fw_options)
+
+            whole_dir = common / "whole_out"
+            whole = backend.InstallOptions(
+                device=backend.Device(serial="FAKE", mode="adb", root=True),
+                images=backend.ImageSet(
+                    modules=image_paths["modules"],
+                    firmware=image_paths["firmware"]),
+                size_bytes=0,
+                source="auto",
+                image_url="https://example.invalid/rootfs.img.zst",
+                image_sha256="b" * 64,
+                mode="whole",
+                whole_output=whole_dir,
+                account_enabled=False,
+            )
+            _, whole_args, whole_calls, _, whole_lines = run(whole)
+
+            remove = backend.InstallOptions(
+                device=backend.Device(serial="FAKE", mode="adb", root=True),
+                images=backend.ImageSet(),
+                size_bytes=0,
+                source="manual",
+                existing_action="remove",
+                remove_legacy=True,
+            )
+            _, remove_args, remove_calls, _, remove_lines = run(remove)
         finally:
             if old is None:
                 os.environ.pop("TB351FU_COMMON_DIR", None)
             else:
                 os.environ["TB351FU_COMMON_DIR"] = old
 
-    done = [line for line in lines if line == "%%PMOS_DONE"]
-    assert len(done) == 1, done
-    assert any(line.startswith("%%PMOS_STEP:boot:") for line in lines), lines
-    assert any(line.startswith("%%PMOS_STEP:rootfs:") for line in lines), lines
-    assert any(line.startswith("%%PMOS_STEP:unpack:") for line in lines), lines
-    assert "%%PMOS_PROGRESS:100:Installation complete" in lines, lines
-    # Child DONE markers must not leak through.
-    assert done == ["%%PMOS_DONE"], lines
+    manual_tokens = manual_args.splitlines()
+    manual_flash_tokens = manual_flash.splitlines()
+    assert manual_calls == ["flash", "rootfs"], manual_calls
+    for flag in ("--source", "manual", "--image", "--size", "16G",
+                 "--mode", "dual", "--replace-existing", "--username",
+                 "alice", "--password-hash-file", "--yes"):
+        assert flag in manual_tokens, (flag, manual_tokens)
+    assert "--no-account" not in manual_tokens, manual_tokens
+    assert seen.strip() == password_hash, seen
     for flag in ("--vendor-boot", "--dtbo"):
-        assert flag in args_text.splitlines(), args_text
-    assert "--firmware-dir" not in args_text.splitlines(), args_text
-    assert "--firmware-dir" in fw_args_text.splitlines(), fw_args_text
-    assert str(firmware_dir.resolve()) in fw_args_text.splitlines(), fw_args_text
+        assert flag in manual_flash_tokens, (flag, manual_flash_tokens)
+
+    done = [line for line in manual_lines if line == "%%PMOS_DONE"]
+    assert len(done) == 1, done
+    assert any(line.startswith("%%PMOS_STEP:boot:") for line in manual_lines), manual_lines
+    assert any(line.startswith("%%PMOS_STEP:rootfs:") for line in manual_lines), manual_lines
+    assert any(line.startswith("%%PMOS_STEP:unpack:") for line in manual_lines), manual_lines
+    assert "%%PMOS_PROGRESS:100:Installation complete" in manual_lines, manual_lines
+    assert done == ["%%PMOS_DONE"], manual_lines
+    assert "--firmware-dir" not in manual_flash_tokens, manual_flash_tokens
+    assert "--firmware-dir" in fw_flash_args.splitlines(), fw_flash_args
+    assert str(firmware_dir.resolve()) in fw_flash_args.splitlines(), fw_flash_args
+    assert fw_calls == ["flash"], fw_calls
     assert fw_lines.count("%%PMOS_DONE") == 1, fw_lines
-    return "two helper phases, bundle args, firmware opt-in, one final DONE"
+
+    whole_tokens = whole_args.splitlines()
+    assert whole_calls == ["rootfs"], whole_calls
+    for flag in ("--source", "auto", "--url", "--sha256", "--mode", "whole",
+                 "--whole-output", "--no-account"):
+        assert flag in whole_tokens, (flag, whole_tokens)
+    assert str(whole_dir) in whole_tokens, whole_tokens
+    assert "--size" not in whole_tokens, whole_tokens
+    assert "--image" not in whole_tokens, whole_tokens
+    assert "--replace-existing" not in whole_tokens, whole_tokens
+    assert "%%PMOS_PROGRESS:100:Whole-device package ready" in whole_lines, whole_lines
+
+    remove_tokens = remove_args.splitlines()
+    assert remove_calls == ["rootfs"], remove_calls
+    for flag in ("--mode", "dual", "--remove-existing", "--remove-legacy", "--yes"):
+        assert flag in remove_tokens, (flag, remove_tokens)
+    assert "--size" not in remove_tokens, remove_tokens
+    assert "--username" not in remove_tokens, remove_tokens
+    assert "--source" not in remove_tokens, remove_tokens
+    assert "%%PMOS_PROGRESS:100:Removal complete" in remove_lines, remove_lines
+    return ("dual account/replace, auto whole-device, removal, firmware "
+            "opt-in and one final marker each")
+
+
+def check_existing_detection() -> str:
+    device = backend.Device(serial="FAKE", mode="adb", root=True)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_adb(serial, *args, **kwargs):
+        calls.append(args)
+        command = args[-1] if args else ""
+        if "cat " in command:
+            out = "PMOS_INSTALL=1\nPMOS_ACCOUNT=tester\n"
+        else:
+            out = "dir\nmarker\nlegacy\n"
+        return subprocess.CompletedProcess(["adb"], 0, stdout=out, stderr="")
+
+    original = backend._adb
+    backend._adb = fake_adb
+    try:
+        state = backend.detect_existing_install(device)
+        fastboot = backend.detect_existing_install(
+            backend.Device(serial="FAKE", mode="fastboot"))
+    finally:
+        backend._adb = original
+
+    assert state.checked and state.directory and state.marker and state.legacy
+    assert state.present and "PMOS_INSTALL=1" in state.marker_text
+    assert not fastboot.checked and not fastboot.present
+    assert len(calls) == 2, calls
+    assert all("su -c '" in call[-1] for call in calls), calls
+    return "/data state parsed; su command is quoted; fastboot is read-free"
+
+
+def check_password_hash() -> str:
+    digest = backend.hash_password("correct horse battery staple")
+    assert digest.startswith("$6$"), digest
+    assert len(digest) <= 256, len(digest)
+    assert digest.count("$") >= 4, digest
+    assert "correct" not in digest, digest
+    return f"SHA-512 crypt hash ({len(digest)} characters)"
 
 
 def check_gui_import() -> str:
@@ -439,7 +594,9 @@ CHECKS = [
     ("partition roles", check_partition_roles),
     ("helper scripts", check_scripts),
     ("repository discovery", check_repo_paths),
+    ("existing-install detection", check_existing_detection),
     ("install orchestration", check_orchestration),
+    ("password hashing", check_password_hash),
     ("GTK4 import", check_gui_import),
 ]
 

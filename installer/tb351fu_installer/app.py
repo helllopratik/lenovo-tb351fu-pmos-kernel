@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import queue
+import re
 import threading
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,22 @@ CSS = """
 .log { font-family: monospace; font-size: 0.9em; }
 """
 
+USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+RESERVED_USERNAMES = {
+    "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail",
+    "news", "uucp", "proxy", "www-data", "backup", "list", "irc", "gnats",
+    "nobody",
+}
+
+
+def _username_problem(name: str) -> str:
+    if not USERNAME_RE.fullmatch(name):
+        return ("Use lowercase letters, digits, _ and -, starting with a letter "
+                "or _ (maximum 32 characters).")
+    if name in RESERVED_USERNAMES or name.startswith("systemd-"):
+        return f"'{name}' is reserved by the system."
+    return ""
+
 
 @dataclasses.dataclass
 class UiState:
@@ -38,6 +55,8 @@ class UiState:
     partitions: list[backend.Partition] = dataclasses.field(default_factory=list)
     data: Optional[backend.DataSpace] = None
     images: backend.ImageSet = dataclasses.field(default_factory=backend.ImageSet)
+    existing: backend.ExistingInstall = dataclasses.field(
+        default_factory=backend.ExistingInstall)
     suggested_gib: int = 16
     installing: bool = False
     switched: bool = False
@@ -80,6 +99,9 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self._install_thread: Optional[threading.Thread] = None
         self._detect_thread: Optional[threading.Thread] = None
         self._options: Optional[backend.InstallOptions] = None
+        self._pending_options: Optional[backend.InstallOptions] = None
+        self._source_touched = False
+        self._syncing_options = False
 
         self._install_css()
         self._build_header()
@@ -120,11 +142,13 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.device_page = self._build_device_page()
         self.partitions_page = self._build_partitions_page()
         self.images_page = self._build_images_page()
+        self.options_page = self._build_options_page()
         self.install_page = self._build_install_page()
 
         self.stack.add_named(self._scrollable(self.device_page), "device")
         self.stack.add_named(self._scrollable(self.partitions_page), "partitions")
         self.stack.add_named(self._scrollable(self.images_page), "images")
+        self.stack.add_named(self._scrollable(self.options_page), "options")
         self.stack.add_named(self.install_page, "install")
         root.append(self.stack)
 
@@ -315,6 +339,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             entry.connect("changed", lambda *_: self._on_images_changed())
             browse = Gtk.Button(label="Browse…")
             browse.connect("clicked", lambda _b, k=key, t=title: self._browse_image(k, t))
+            if key == "rootfs":
+                self.rootfs_browse = browse
             status = _label("", wrap=True, css="dim")
             grid.attach(label, 0, row * 2, 1, 1)
             grid.attach(entry, 1, row * 2, 1, 1)
@@ -356,6 +382,144 @@ class InstallerWindow(Gtk.ApplicationWindow):
         page.append(self.image_problems)
         return page
 
+    def _build_options_page(self) -> Gtk.Widget:
+        page = self._page()
+        page.append(_label("Installation options", css="page-title"))
+        page.append(_label(
+            "Choose what happens to an existing installation, whether Android "
+            "stays, where the rootfs image comes from, and the pmOS login. "
+            "Nothing is written until you confirm on the next page.",
+            wrap=True, css="dim"))
+
+        existing_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        existing_box.append(_section(
+            "Existing installation",
+            "Read-only check of /data/pmos, its marker and the legacy image."))
+        self.existing_status = _label("Not checked yet.", wrap=True)
+        existing_box.append(self.existing_status)
+        self.radio_replace = Gtk.CheckButton(
+            label="Replace the existing pmOS rootfs (Android is kept)")
+        self.radio_remove = Gtk.CheckButton(
+            label="Remove the existing pmOS installation and exit")
+        self.radio_remove.set_group(self.radio_replace)
+        self.radio_replace.set_active(True)
+        for radio in (self.radio_replace, self.radio_remove):
+            radio.connect("toggled", lambda *_: self._on_options_changed())
+            existing_box.append(radio)
+        self.chk_remove_legacy = Gtk.CheckButton(
+            label="Also delete the legacy image /data/pmos_legacy/rootfs.img")
+        self.chk_remove_legacy.connect(
+            "toggled", lambda *_: self._on_options_changed())
+        existing_box.append(self.chk_remove_legacy)
+        existing_box.append(_label(
+            "The legacy image is never deleted implicitly. It is only removed "
+            "when this box is checked together with Remove.",
+            wrap=True, css="dim"))
+        page.append(_card(existing_box))
+
+        mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        mode_box.append(_section(
+            "Installation mode",
+            "Dual boot keeps Android and is the normal choice. Whole device "
+            "only prepares an offline package; it never erases Android while "
+            "Android is running."))
+        self.radio_dual = Gtk.CheckButton(
+            label="Dual boot — keep Android and install postmarketOS into /data/pmos")
+        self.radio_whole = Gtk.CheckButton(
+            label="Whole device — prepare an offline package (Android stays untouched)")
+        self.radio_whole.set_group(self.radio_dual)
+        self.radio_dual.set_active(True)
+        for radio in (self.radio_dual, self.radio_whole):
+            radio.connect("toggled", lambda *_: self._on_options_changed())
+            mode_box.append(radio)
+        self.whole_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.whole_entry = Gtk.Entry()
+        self.whole_entry.set_hexpand(True)
+        self.whole_entry.set_text(str(
+            backend.repo_paths()["artifacts"] / "whole_device_prep"))
+        self.whole_entry.connect("changed", lambda *_: self._on_options_changed())
+        self.whole_browse_btn = Gtk.Button(label="Browse…")
+        self.whole_browse_btn.connect("clicked", lambda *_: self._browse_whole_output())
+        self.whole_row.append(_label("Output folder:"))
+        self.whole_row.append(self.whole_entry)
+        self.whole_row.append(self.whole_browse_btn)
+        mode_box.append(self.whole_row)
+        self.mode_hint = _label("", wrap=True, css="dim")
+        mode_box.append(self.mode_hint)
+        page.append(_card(mode_box))
+
+        source_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        source_box.append(_section(
+            "RootFS image source",
+            "Download the published image from the server, or select a local "
+            "image on the previous page."))
+        self.radio_manual = Gtk.CheckButton(label="Use a local image file")
+        self.radio_auto = Gtk.CheckButton(label="Download from the server")
+        self.radio_auto.set_group(self.radio_manual)
+        self.radio_manual.set_active(True)
+        for radio in (self.radio_manual, self.radio_auto):
+            radio.connect("toggled", self._on_source_choice)
+            source_box.append(radio)
+        self.auto_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        url_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.url_entry = Gtk.Entry()
+        self.url_entry.set_hexpand(True)
+        self.url_entry.set_placeholder_text(backend.default_image_url()
+                                            or "https://…/rootfs.img.zst")
+        self.url_entry.set_text(backend.default_image_url())
+        self.url_entry.connect("changed", lambda *_: self._on_options_changed())
+        url_row.append(_label("URL:"))
+        url_row.append(self.url_entry)
+        self.auto_box.append(url_row)
+        sha_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.sha_entry = Gtk.Entry()
+        self.sha_entry.set_hexpand(True)
+        self.sha_entry.set_placeholder_text("Optional SHA-256 of the downloaded file")
+        self.sha_entry.connect("changed", lambda *_: self._on_options_changed())
+        sha_row.append(_label("SHA-256:"))
+        sha_row.append(self.sha_entry)
+        self.auto_box.append(sha_row)
+        source_box.append(self.auto_box)
+        self.manual_hint = _label(
+            "Select the local rootfs image in Installation images → postmarketOS "
+            "rootfs. Compressed .img.zst, .xz and .gz files are accepted.",
+            wrap=True, css="dim")
+        source_box.append(self.manual_hint)
+        self.source_hint = _label("", wrap=True, css="dim")
+        source_box.append(self.source_hint)
+        page.append(_card(source_box))
+
+        account_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        account_box.append(_section(
+            "pmOS login",
+            "The password is hashed on this computer with SHA-512 crypt; only "
+            "the hash is sent to the tablet."))
+        self.chk_account = Gtk.CheckButton(label="Create a pmOS login account")
+        self.chk_account.set_active(True)
+        self.chk_account.connect("toggled", lambda *_: self._on_options_changed())
+        account_box.append(self.chk_account)
+        account_grid = Gtk.Grid(column_spacing=10, row_spacing=8)
+        self.username_entry = Gtk.Entry()
+        self.username_entry.set_text("user")
+        self.username_entry.connect("changed", lambda *_: self._on_options_changed())
+        self.password_entry = Gtk.Entry()
+        self.password_entry.set_visibility(False)
+        self.password_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        self.confirm_entry = Gtk.Entry()
+        self.confirm_entry.set_visibility(False)
+        self.confirm_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        account_grid.attach(_label("Username:"), 0, 0, 1, 1)
+        account_grid.attach(self.username_entry, 1, 0, 1, 1)
+        account_grid.attach(_label("Password:"), 0, 1, 1, 1)
+        account_grid.attach(self.password_entry, 1, 1, 1, 1)
+        account_grid.attach(_label("Confirm:"), 0, 2, 1, 1)
+        account_grid.attach(self.confirm_entry, 1, 2, 1, 1)
+        account_box.append(account_grid)
+        self.account_hint = _label("", wrap=True, css="dim")
+        account_box.append(self.account_hint)
+        page.append(_card(account_box))
+        return page
+
     def _build_install_page(self) -> Gtk.Widget:
         page = self._page()
         page.append(_label("Install", css="page-title"))
@@ -365,8 +529,9 @@ class InstallerWindow(Gtk.ApplicationWindow):
 
         summary = Gtk.Grid(column_spacing=18, row_spacing=8)
         self.summary_values: dict[str, Gtk.Label] = {}
-        for row, name in enumerate(["Device", "RootFS image", "RootFS size",
-                                    "Boot chain", "Switch slot", "Free after"]):
+        for row, name in enumerate(["Device", "Action", "Image source",
+                                    "RootFS image", "RootFS size", "Boot chain",
+                                    "Switch slot", "Account", "Free after"]):
             summary.attach(_label(f"{name}:", css="dim"), 0, row, 1, 1)
             value = _label("—", wrap=True)
             summary.attach(value, 1, row, 1, 1)
@@ -414,7 +579,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _page_names(self) -> list[str]:
-        return ["device", "partitions", "images", "install"]
+        return ["device", "partitions", "images", "options", "install"]
 
     def _current_page(self) -> str:
         return self.stack.get_visible_child_name() or "device"
@@ -430,6 +595,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             self.next_btn.set_label("Continue")
             self.next_btn.set_sensitive(not self.state.installing)
         if current == "install":
+            self._refresh_summary()
+        elif current == "options":
             self._refresh_summary()
 
     def _go_back(self) -> None:
@@ -456,11 +623,13 @@ class InstallerWindow(Gtk.ApplicationWindow):
                             "This installer is for the Lenovo TB351FU.")
                 return
         elif current == "partitions":
-            if self.state.device and self.state.device.mode == "adb" and not self.state.data:
+            if (self.state.device and self.state.device.mode == "adb"
+                    and not self.state.data and not self._is_whole()):
                 self._alert("Could not read /data",
                             "Rootfs size cannot be validated without free space information.")
                 return
-            if self.state.data:
+            if (self.state.data and not self._is_whole()
+                    and not self._is_removing()):
                 size = int(self.size_spin.get_value()) * backend.GIB
                 if size > self.state.data.free:
                     self._alert("RootFS too large",
@@ -470,6 +639,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
             problems = self._validate_images()
             if problems:
                 self._alert("Check the installation images",
+                            "\n".join(f"• {p}" for p in problems))
+                return
+        elif current == "options":
+            problems = self._validate_install()
+            if problems:
+                self._alert("Check the installation options",
                             "\n".join(f"• {p}" for p in problems))
                 return
         names = self._page_names()
@@ -499,31 +674,38 @@ class InstallerWindow(Gtk.ApplicationWindow):
             device = None
             partitions: list[backend.Partition] = []
             space = None
+            existing = backend.ExistingInstall()
             if devices:
                 device = next((d for d in devices if d.is_target), devices[0])
                 partitions = backend.list_partitions(device)
                 space = backend.get_data_space(device)
+                existing = backend.detect_existing_install(device)
             images = backend.find_images()
             GLib.idle_add(self._detect_done, devices, device, partitions, space,
-                          images, None)
+                          existing, images, None)
         except Exception as exc:  # noqa: BLE001 - shown to the user
             GLib.idle_add(self._detect_done, [], None, [], None,
-                          backend.find_images(), str(exc))
+                          backend.ExistingInstall(), backend.find_images(), str(exc))
 
-    def _detect_done(self, devices, device, partitions, space, images, error) -> bool:
+    def _detect_done(self, devices, device, partitions, space, existing,
+                     images, error) -> bool:
         self.device_spinner.stop()
         self.refresh_btn.set_sensitive(True)
         self.state.devices = devices or []
         self.state.device = device
         self.state.partitions = partitions or []
         self.state.data = space
+        self.state.existing = existing or backend.ExistingInstall()
         self.state.images = images
         self._render_device(error)
         self._render_partitions()
         self._apply_images(images)
+        self._choose_default_source()
+        self._update_existing_ui()
         self._update_mode_controls()
         self._update_size_controls()
         self._on_images_changed()
+        self._update_options_controls()
         self._update_nav()
         return GLib.SOURCE_REMOVE
 
@@ -543,6 +725,188 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 "The rootfs will be created as /data/pmos/rootfs.img. "
                 "Android /data is never repartitioned.")
             self.rootfs_hint.remove_css_class("warning")
+        self._update_options_controls()
+
+    def _is_whole(self) -> bool:
+        radio = getattr(self, "radio_whole", None)
+        return bool(radio and radio.get_active())
+
+    def _is_removing(self) -> bool:
+        radio = getattr(self, "radio_remove", None)
+        return bool(self.state.existing.present and not self._is_whole()
+                    and radio and radio.get_active())
+
+    def _is_source_auto(self) -> bool:
+        radio = getattr(self, "radio_auto", None)
+        return bool(radio and radio.get_active())
+
+    def _will_install_rootfs(self) -> bool:
+        return (not self._is_removing()
+                and (self._is_whole() or self.chk_rootfs.get_active()))
+
+    def _choose_default_source(self) -> None:
+        if self._source_touched:
+            return
+        if self.state.images.rootfs:
+            target = self.radio_manual
+        elif backend.default_image_url():
+            target = self.radio_auto
+        else:
+            return
+        if target.get_active():
+            return
+        self._syncing_options = True
+        target.set_active(True)
+        self._syncing_options = False
+
+    def _update_existing_ui(self) -> None:
+        if not hasattr(self, "existing_status"):
+            return
+        existing = self.state.existing
+        if existing.error:
+            self.existing_status.set_text(
+                "Could not check /data: " + existing.error)
+            self.existing_status.add_css_class("warning")
+            return
+        self.existing_status.remove_css_class("warning")
+        if existing.present:
+            parts = []
+            if existing.directory:
+                parts.append("/data/pmos")
+            if existing.marker:
+                parts.append("/data/pmos_install.env")
+            if existing.legacy:
+                parts.append("/data/pmos_legacy/rootfs.img (legacy)")
+            text = "Existing pmOS installation found: " + ", ".join(parts)
+            if existing.marker_text:
+                marker = " ".join(existing.marker_text.split())[:300]
+                text += "\nMarker: " + marker
+            self.existing_status.set_text(text)
+            if not (self.radio_replace.get_active()
+                    or self.radio_remove.get_active()):
+                self.radio_replace.set_active(True)
+        elif existing.checked:
+            self.existing_status.set_text(
+                "No existing pmOS installation was found in /data.")
+        else:
+            self.existing_status.set_text(
+                "Existing installations can only be checked with Android "
+                "running and root adb available.")
+
+    def _on_source_choice(self, *_args) -> None:
+        if not self._syncing_options:
+            self._source_touched = True
+        self._on_options_changed()
+
+    def _on_options_changed(self) -> None:
+        if getattr(self, "_syncing_options", False):
+            return
+        self._update_options_controls()
+        self._on_images_changed()
+
+    def _update_options_controls(self) -> None:
+        if not hasattr(self, "radio_whole"):
+            return
+        busy = self.state.installing
+        device = self.state.device
+        adb_root = bool(device and device.mode == "adb" and device.root)
+        existing = self.state.existing
+        present = existing.present and not existing.error
+        whole = self._is_whole()
+        removing = self._is_removing()
+        auto = self._is_source_auto()
+
+        for radio in (self.radio_replace, self.radio_remove):
+            radio.set_sensitive(present and not busy and not whole)
+        self.chk_remove_legacy.set_sensitive(
+            present and existing.legacy and removing and not busy)
+
+        self.radio_dual.set_sensitive(not busy)
+        self.radio_whole.set_sensitive(not busy and adb_root)
+        self.whole_entry.set_sensitive(whole and not busy)
+        self.whole_browse_btn.set_sensitive(whole and not busy)
+        self.chk_flash.set_sensitive(not busy and not whole and not removing)
+        self.chk_switch.set_sensitive(not busy and not whole and not removing)
+        self.chk_rootfs.set_sensitive(
+            not busy and adb_root and not whole and not removing)
+        if whole or removing:
+            self.chk_firmware.set_sensitive(False)
+
+        self.radio_manual.set_sensitive(not busy and not removing)
+        self.radio_auto.set_sensitive(not busy and not removing)
+        self.auto_box.set_visible(auto)
+        self.manual_hint.set_visible(not auto)
+        self.url_entry.set_sensitive(auto and not busy and not removing)
+        self.sha_entry.set_sensitive(auto and not busy and not removing)
+        if hasattr(self, "image_entries"):
+            self.image_entries["rootfs"].set_sensitive(
+                not auto and not busy and not removing)
+            self.rootfs_browse.set_sensitive(
+                not auto and not busy and not removing)
+
+        account = (self.chk_account.get_active()
+                   and self._will_install_rootfs() and not removing)
+        self.chk_account.set_sensitive(
+            not busy and not removing and self._will_install_rootfs())
+        for widget in (self.username_entry, self.password_entry,
+                       self.confirm_entry):
+            widget.set_sensitive(account and not busy)
+        self.size_spin.set_sensitive(
+            not busy and self.state.data is not None
+            and not whole and not removing)
+
+        if removing:
+            self.mode_hint.set_text(
+                "The existing installation will be removed. Nothing is "
+                "installed, flashed or switched; Android is not modified.")
+        elif whole:
+            if adb_root:
+                self.mode_hint.set_text(
+                    "The package is assembled in temporary encrypted staging "
+                    "under /data and copied here; the staging directory is "
+                    "removed afterwards. Slot B is not flashed or activated.")
+            else:
+                self.mode_hint.set_text(
+                    "Whole-device preparation needs Android booted with root adb.")
+        else:
+            self.mode_hint.set_text(
+                "Android and slot A stay installed. postmarketOS lives in "
+                "/data/pmos and slot B is used for its boot chain.")
+
+        if removing:
+            self.source_hint.set_text("Not used while removing an installation.")
+        elif auto:
+            self.source_hint.set_text(
+                "The image is downloaded on this computer, verified if a "
+                "SHA-256 is given, then pushed to the tablet.")
+        else:
+            self.source_hint.set_text(
+                "The selected local image is used; nothing is downloaded.")
+
+        if removing:
+            self.account_hint.set_text("Not used while removing an installation.")
+        elif not self._will_install_rootfs():
+            self.account_hint.set_text(
+                "Account setup is only used when a postmarketOS rootfs is installed.")
+        elif self.chk_account.get_active():
+            self.account_hint.set_text(
+                "Only the SHA-512 crypt hash leaves this computer. The tablet "
+                "never receives the plaintext password.")
+        else:
+            self.account_hint.set_text(
+                "The image's default account is kept.")
+
+    def _browse_whole_output(self) -> None:
+        dialog = Gtk.FileDialog(title="Select the whole-device package folder")
+        dialog.select_folder(self, None, self._on_whole_folder_chosen)
+
+    def _on_whole_folder_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        if folder and folder.get_path():
+            self.whole_entry.set_text(folder.get_path())
 
     def _render_device(self, error: Optional[str]) -> None:
         device = self.state.device
@@ -703,6 +1067,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         if (self.chk_flash.get_active()
                 and len(images.slot_b_firmware) == len(backend.SLOT_B_FIRMWARE)):
             self.chk_firmware.set_active(True)
+        self._choose_default_source()
 
     def _bundle_path(self) -> Optional[Path]:
         text = (self.bundle_entry.get_text().strip()
@@ -786,6 +1151,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
     def _update_firmware_status(self) -> None:
         if not hasattr(self, "firmware_status"):
             return
+        if self._is_whole() or self._is_removing():
+            self.chk_firmware.set_sensitive(False)
+            self.firmware_status.set_text(
+                "Slot-B firmware is not used in this mode.")
+            self.firmware_status.remove_css_class("warning")
+            return
         images = self._bundle_images()
         if not self.chk_flash.get_active():
             self.chk_firmware.set_active(False)
@@ -841,6 +1212,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
     def _on_images_changed(self) -> None:
         self._update_image_status()
         self._update_firmware_status()
+        self._update_options_controls()
         problems = self._validate_images()
         if problems:
             self.image_problems.set_text("\n".join(f"• {p}" for p in problems))
@@ -888,12 +1260,17 @@ class InstallerWindow(Gtk.ApplicationWindow):
 
     def _validate_images(self) -> list[str]:
         images = self._current_images()
+        removing = self._is_removing()
+        whole = self._is_whole()
         return backend.validate_images(
             images,
-            need_rootfs=self.chk_rootfs.get_active(),
-            need_boot=self.chk_flash.get_active(),
+            need_rootfs=self._will_install_rootfs(),
+            need_boot=(self.chk_flash.get_active()
+                       and not whole and not removing),
             need_firmware=(self.chk_flash.get_active()
-                           and self.chk_firmware.get_active()),
+                           and self.chk_firmware.get_active()
+                           and not whole and not removing),
+            need_local_rootfs=not self._is_source_auto(),
         )
 
     # ------------------------------------------------------------------
@@ -907,41 +1284,135 @@ class InstallerWindow(Gtk.ApplicationWindow):
         images = self._current_images()
         size_gib = int(self.size_spin.get_value()) if hasattr(self, "size_spin") else 0
         data = self.state.data
+        existing = self.state.existing
+        whole = self._is_whole()
+        removing = self._is_removing()
+        auto = self._is_source_auto()
         self.summary_values["Device"].set_text(
             f"{device.serial} ({device.mode}, slot {device.slot or '?'})"
             if device else "—")
-        self.summary_values["RootFS image"].set_text(
-            str(images.rootfs) if images.rootfs else "Not selected")
-        self.summary_values["RootFS size"].set_text(
-            f"{size_gib} GiB" if self.chk_rootfs.get_active() else "Skipped")
-        self.summary_values["Boot chain"].set_text(
-            "boot_b + init_boot_b + vbmeta_b + vendor_boot_b + dtbo_b"
-            + (f" + {len(images.slot_b_firmware)} firmware images"
-               if self.chk_firmware.get_active() else "")
-            if self.chk_flash.get_active() else "Skipped")
-        self.summary_values["Switch slot"].set_text(
-            "Yes, set slot B active and reboot" if self.chk_switch.get_active() else "No")
-        if data and self.chk_rootfs.get_active():
+        if removing:
+            action = "Remove the existing pmOS installation"
+            if self.chk_remove_legacy.get_active() and existing.legacy:
+                action += " and the legacy image"
+        elif whole:
+            action = "Prepare a whole-device package (Android untouched)"
+        elif existing.present and not existing.error:
+            action = "Dual boot — replace the existing pmOS rootfs"
+        else:
+            action = "Dual boot — keep Android"
+        self.summary_values["Action"].set_text(action)
+        if removing:
+            source_text = "—"
+        elif auto:
+            source_text = ("Server: " + (self.url_entry.get_text().strip()
+                                         or backend.default_image_url()
+                                         or "URL not set"))
+        else:
+            source_text = "Local image file"
+        self.summary_values["Image source"].set_text(source_text)
+        if removing:
+            rootfs_text = "—"
+        elif auto:
+            rootfs_text = "Downloaded from the server"
+        else:
+            rootfs_text = str(images.rootfs) if images.rootfs else "Not selected"
+        self.summary_values["RootFS image"].set_text(rootfs_text)
+        if removing:
+            size_text = "—"
+        elif whole:
+            size_text = "Full userdata size (automatic)"
+        elif self.chk_rootfs.get_active():
+            size_text = f"{size_gib} GiB"
+        else:
+            size_text = "Skipped"
+        self.summary_values["RootFS size"].set_text(size_text)
+        if removing or whole:
+            boot_text = "Not touched"
+        elif self.chk_flash.get_active():
+            boot_text = ("boot_b + init_boot_b + vbmeta_b + vendor_boot_b + dtbo_b"
+                         + (f" + {len(images.slot_b_firmware)} firmware images"
+                            if self.chk_firmware.get_active() else ""))
+        else:
+            boot_text = "Skipped"
+        self.summary_values["Boot chain"].set_text(boot_text)
+        if removing or whole:
+            switch_text = "No"
+        else:
+            switch_text = ("Yes, set slot B active and reboot"
+                           if self.chk_switch.get_active() else "No")
+        self.summary_values["Switch slot"].set_text(switch_text)
+        if removing:
+            account_text = "—"
+        elif not self._will_install_rootfs():
+            account_text = "—"
+        elif self.chk_account.get_active():
+            account_text = self.username_entry.get_text().strip() or "user"
+        else:
+            account_text = "No account (image default kept)"
+        self.summary_values["Account"].set_text(account_text)
+        if data and self.chk_rootfs.get_active() and not whole and not removing:
             left = data.free - size_gib * backend.GIB
             self.summary_values["Free after"].set_text(
                 backend.human_size(max(0, left)))
+        elif whole:
+            self.summary_values["Free after"].set_text(
+                "Temporary staging only; freed afterwards")
         else:
             self.summary_values["Free after"].set_text("—")
+
+        if removing:
+            self.install_btn.set_label("Remove installation")
+        elif whole:
+            self.install_btn.set_label("Prepare whole-device package")
+        else:
+            self.install_btn.set_label("Start installation")
 
     def _collect_options(self) -> backend.InstallOptions:
         device = self.state.device
         if not device:
             raise backend.InstallerError("no device detected")
+        whole = self._is_whole()
+        removing = self._is_removing()
+        source = "auto" if self._is_source_auto() else "manual"
+        existing_action = "none"
+        if (self.state.existing.present and not self.state.existing.error
+                and not whole):
+            existing_action = ("remove" if self.radio_remove.get_active()
+                               else "replace")
+        account = (self.chk_account.get_active()
+                   and self._will_install_rootfs() and not removing)
+        password_hash = ""
+        if account:
+            password = self.password_entry.get_text()
+            password_hash = backend.hash_password(password)
+        whole_text = self.whole_entry.get_text().strip()
+        size_bytes = 0 if (whole or removing) else (
+            int(self.size_spin.get_value()) * backend.GIB)
         return backend.InstallOptions(
             device=device,
             images=self._current_images(),
-            size_bytes=int(self.size_spin.get_value()) * backend.GIB,
-            flash_boot=self.chk_flash.get_active(),
+            size_bytes=size_bytes,
+            flash_boot=(self.chk_flash.get_active() and not whole and not removing),
             flash_firmware=(self.chk_flash.get_active()
-                            and self.chk_firmware.get_active()),
-            install_rootfs=self.chk_rootfs.get_active(),
-            switch_slot=self.chk_switch.get_active(),
-            reboot_after_switch=self.chk_switch.get_active(),
+                            and self.chk_firmware.get_active()
+                            and not whole and not removing),
+            install_rootfs=(removing or whole or self.chk_rootfs.get_active()),
+            switch_slot=(self.chk_switch.get_active() and not whole and not removing),
+            reboot_after_switch=(self.chk_switch.get_active()
+                                 and not whole and not removing),
+            mode="whole" if whole else "dual",
+            whole_output=(Path(whole_text).expanduser()
+                          if whole and whole_text else None),
+            source=source,
+            image_url=(self.url_entry.get_text().strip() if source == "auto" else ""),
+            image_sha256=(self.sha_entry.get_text().strip().lower()
+                          if source == "auto" else ""),
+            account_enabled=account,
+            username=(self.username_entry.get_text().strip() if account else ""),
+            password_hash=password_hash,
+            existing_action=existing_action,
+            remove_legacy=(removing and self.chk_remove_legacy.get_active()),
         )
 
     def _confirm_install(self) -> None:
@@ -952,34 +1423,68 @@ class InstallerWindow(Gtk.ApplicationWindow):
             self._alert("Cannot start the installation",
                         "\n".join(f"• {p}" for p in problems))
             return
-        options = self._collect_options()
-        lines = [
-            f"Device: {options.device.serial} ({options.device.mode})",
-            "",
-        ]
-        if options.flash_boot:
+        try:
+            options = self._collect_options()
+        except backend.InstallerError as exc:
+            self._alert("Cannot start the installation", str(exc))
+            return
+        self._pending_options = options
+        lines = [f"Device: {options.device.serial} ({options.device.mode})", ""]
+        if options.existing_action == "remove":
             lines += [
-                "Will write slot B only:",
-                "  boot_b, init_boot_b, vbmeta_b, vbmeta_system_b, vbmeta_vendor_b",
-                "  vendor_boot_b, dtbo_b",
+                "Will remove the existing pmOS installation:",
+                "  /data/pmos/rootfs.img and /data/pmos_install.env",
             ]
-            if options.flash_firmware:
-                lines.append(
-                    "  " + ", ".join(f"{part}_b"
-                                     for part in backend.SLOT_B_FIRMWARE))
-        if options.install_rootfs:
+            if options.remove_legacy:
+                lines.append("  /data/pmos_legacy/rootfs.img (legacy)")
+            else:
+                lines.append("  the legacy image, if any, is kept")
+            lines += ["", "Android, slot A and slot B are not modified."]
+            message = "Remove the pmOS installation?"
+            button = "Remove"
+        elif options.mode == "whole":
             lines += [
-                "Will create inside Android /data:",
-                f"  /data/pmos/rootfs.img ({options.size_gib} GiB)",
-                "  plus temporary files in /data/local/tmp",
+                "Will prepare an offline whole-device package in:",
+                f"  {options.whole_output}",
+                "",
+                "The rootfs is assembled in temporary encrypted staging under "
+                "/data and removed afterwards.",
+                "Android /data, slot A and slot B are not modified or activated.",
             ]
-        if options.switch_slot:
-            lines += ["", "Will set slot B active and reboot."]
-        lines += ["", "Slot A (Android) and its system/vendor/boot are never written."]
+            message = "Prepare the whole-device package?"
+            button = "Prepare"
+        else:
+            if options.flash_boot:
+                lines += [
+                    "Will write slot B only:",
+                    "  boot_b, init_boot_b, vbmeta_b, vbmeta_system_b, vbmeta_vendor_b",
+                    "  vendor_boot_b, dtbo_b",
+                ]
+                if options.flash_firmware:
+                    lines.append(
+                        "  " + ", ".join(f"{part}_b"
+                                         for part in backend.SLOT_B_FIRMWARE))
+            if options.install_rootfs:
+                lines += [
+                    "Will create inside Android /data:",
+                    f"  /data/pmos/rootfs.img ({options.size_gib} GiB)",
+                    "  plus temporary files in /data/local/tmp",
+                ]
+                if options.existing_action == "replace":
+                    lines.append("  the existing pmOS rootfs is replaced")
+            if options.account_enabled:
+                lines.append(f"pmOS login: {options.username} (hash only)")
+            else:
+                lines.append("pmOS login: image default (no account change)")
+            if options.switch_slot:
+                lines += ["", "Will set slot B active and reboot."]
+            lines += ["", "Slot A (Android) and its system/vendor/boot are never written."]
+            message = "Start the installation?"
+            button = "Install"
         dialog = Gtk.AlertDialog()
-        dialog.set_message("Start the installation?")
+        dialog.set_message(message)
         dialog.set_detail("\n".join(lines))
-        dialog.set_buttons(["Cancel", "Install"])
+        dialog.set_buttons(["Cancel", button])
         dialog.set_cancel_button(0)
         dialog.set_default_button(1)
         dialog.choose(self, None, self._on_confirm_response)
@@ -989,8 +1494,10 @@ class InstallerWindow(Gtk.ApplicationWindow):
             choice = dialog.choose_finish(result)
         except GLib.Error:
             return
-        if choice == 1:
-            self._start_install()
+        if choice == 1 and self._pending_options:
+            options = self._pending_options
+            self._pending_options = None
+            self._start_install(options)
 
     def _validate_install(self) -> list[str]:
         problems: list[str] = []
@@ -1000,10 +1507,40 @@ class InstallerWindow(Gtk.ApplicationWindow):
             return problems
         if not device.is_target:
             problems.append(f"Device {device.codename or device.model} is not a TB351FU.")
-        if not self.chk_flash.get_active() and not self.chk_rootfs.get_active():
+        existing = self.state.existing
+        whole = self._is_whole()
+        removing = self._is_removing()
+        auto = self._is_source_auto()
+        if removing:
+            if not existing.present:
+                problems.append(
+                    "No existing pmOS installation was detected; there is "
+                    "nothing to remove.")
+            return problems
+        if whole:
+            if device.mode != "adb":
+                problems.append("Whole-device preparation requires Android booted with adb.")
+            elif not device.root:
+                problems.append("Whole-device preparation requires root adb.")
+            output_text = self.whole_entry.get_text().strip()
+            if not output_text:
+                problems.append("Choose an output folder for the whole-device package.")
+            else:
+                output = Path(output_text).expanduser()
+                if output.exists() and not output.is_dir():
+                    problems.append(f"The whole-device output is not a folder: {output}")
+                elif output.is_dir():
+                    try:
+                        if any(output.iterdir()):
+                            problems.append(
+                                f"The whole-device output folder is not empty: {output}")
+                    except OSError as exc:
+                        problems.append(f"Cannot read the output folder: {exc}")
+        elif not self.chk_flash.get_active() and not self.chk_rootfs.get_active():
             problems.append("Select at least one action.")
         images = self._current_images()
-        if self.chk_flash.get_active():
+        flash = (self.chk_flash.get_active() and not whole and not removing)
+        if flash:
             for key, path, limit in (
                 ("boot", images.boot, backend.BOOT_PART_SIZE),
                 ("init_boot", images.init_boot, backend.INIT_BOOT_PART_SIZE),
@@ -1025,34 +1562,65 @@ class InstallerWindow(Gtk.ApplicationWindow):
                     problems.append(
                         "Slot-B firmware image(s) missing: "
                         + ", ".join(f"{part}.img" for part in missing))
-        if self.chk_flash.get_active() and device.mode == "adb" and not device.root:
+        if flash and device.mode == "adb" and not device.root:
             problems.append(
                 "Root access is required to write slot B over adb. Grant root "
                 "access, or reboot into fastboot.")
-        if self.chk_rootfs.get_active():
+        installing_rootfs = whole or self.chk_rootfs.get_active()
+        if installing_rootfs:
             if device.mode != "adb":
                 problems.append("RootFS installation requires Android booted with adb.")
             elif not device.root:
                 problems.append("Root access is required for rootfs installation.")
-            if not images.rootfs:
-                problems.append("postmarketOS rootfs image is not selected.")
-            elif not images.rootfs.is_file():
-                problems.append(f"rootfs image does not exist: {images.rootfs}")
+            if auto:
+                url = (self.url_entry.get_text().strip()
+                       or backend.default_image_url())
+                if not url:
+                    problems.append("Enter the server image URL.")
+                sha = self.sha_entry.get_text().strip()
+                if sha and not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
+                    problems.append("The SHA-256 must be 64 hexadecimal characters.")
+            else:
+                if not images.rootfs:
+                    problems.append("postmarketOS rootfs image is not selected.")
+                elif not images.rootfs.is_file():
+                    problems.append(f"rootfs image does not exist: {images.rootfs}")
             if not images.modules:
                 problems.append("deploy/modules.tar.xz is missing.")
+            if not images.firmware:
+                problems.append("deploy/firmware.tar.xz is missing.")
             data = self.state.data
             size = int(self.size_spin.get_value()) * backend.GIB
-            if not data:
-                problems.append("Could not read free space on /data.")
-            elif size > data.free - backend.GIB:
-                problems.append(
-                    f"{size // backend.GIB} GiB would leave less than 1 GiB free on /data.")
-            elif size < 2 * backend.GIB:
-                problems.append("RootFS size must be at least 2 GiB.")
+            if not whole:
+                if not data:
+                    problems.append("Could not read free space on /data.")
+                elif size > data.free - backend.GIB:
+                    problems.append(
+                        f"{size // backend.GIB} GiB would leave less than 1 GiB free on /data.")
+                elif size < 2 * backend.GIB:
+                    problems.append("RootFS size must be at least 2 GiB.")
+        if self.chk_account.get_active() and installing_rootfs:
+            username = self.username_entry.get_text().strip()
+            if not username:
+                problems.append("Enter a pmOS username.")
+            else:
+                problem = _username_problem(username)
+                if problem:
+                    problems.append(f"Username: {problem}")
+            password = self.password_entry.get_text()
+            if not password:
+                problems.append("Enter a pmOS password.")
+            elif password != self.confirm_entry.get_text():
+                problems.append("The passwords do not match.")
         return problems
 
-    def _start_install(self) -> None:
-        options = self._collect_options()
+    def _start_install(self, options: Optional[backend.InstallOptions] = None) -> None:
+        if options is None:
+            try:
+                options = self._collect_options()
+            except backend.InstallerError as exc:
+                self._alert("Cannot start the installation", str(exc))
+                return
         self._options = options
         self.state.installing = True
         self.state.switched = False
@@ -1062,7 +1630,15 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.progress.set_text("0%")
         self.step_label.set_text("Starting…")
         self.install_status.set_text("")
-        self._append_log(f"Installing postmarketOS on {options.device.serial}")
+        if options.existing_action == "remove":
+            action = "Removing the pmOS installation"
+        elif options.mode == "whole":
+            action = "Preparing the whole-device package"
+        else:
+            action = "Installing postmarketOS"
+        self._append_log(f"{action} on {options.device.serial}")
+        self.password_entry.set_text("")
+        self.confirm_entry.set_text("")
         self._install_thread = threading.Thread(
             target=self._install_worker, args=(options,), daemon=True)
         self._install_thread.start()
@@ -1086,14 +1662,24 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.bundle_browse_btn.set_sensitive(not installing)
         self.bundle_use_btn.set_sensitive(not installing)
         if installing:
+            for widget in (
+                self.radio_replace, self.radio_remove, self.chk_remove_legacy,
+                self.radio_dual, self.radio_whole, self.whole_entry,
+                self.whole_browse_btn, self.radio_manual, self.radio_auto,
+                self.url_entry, self.sha_entry, self.chk_account,
+                self.username_entry, self.password_entry, self.confirm_entry,
+                self.image_entries["rootfs"], self.rootfs_browse,
+            ):
+                widget.set_sensitive(False)
             self.chk_firmware.set_sensitive(False)
-        else:
-            self._update_firmware_status()
-        if installing:
             self.chk_rootfs.set_sensitive(False)
         else:
+            self._update_firmware_status()
             self._update_mode_controls()
-        self.size_spin.set_sensitive(not installing and self.state.data is not None)
+            self._update_options_controls()
+        self.size_spin.set_sensitive(
+            not installing and self.state.data is not None
+            and not self._is_whole() and not self._is_removing())
 
     def _drain_queue(self) -> bool:
         finished = False
@@ -1163,28 +1749,59 @@ class InstallerWindow(Gtk.ApplicationWindow):
         if not self.state.installing:
             return
         self.state.installing = False
-        self.state.switched = bool(self._options and self._options.switch_slot)
+        options = self._options
+        removed = bool(options and options.existing_action == "remove")
+        whole = bool(options and options.mode == "whole")
+        switched = bool(options and options.switch_slot
+                        and not whole and not removed)
+        self.state.switched = switched
         self.progress.set_fraction(1.0)
         self.progress.set_text("100%")
-        self.step_label.set_text("Installation complete")
-        self.install_status.set_markup(
-            "<span foreground='#26a269'><b>Installation complete.</b></span>"
-            + (" The tablet is rebooting into postmarketOS."
-               if self.state.switched else ""))
+        if removed:
+            self.step_label.set_text("Removal complete")
+            self.install_status.set_markup(
+                "<span foreground='#26a269'><b>Existing pmOS installation "
+                "removed.</b></span> Android was not modified.")
+        elif whole:
+            self.step_label.set_text("Whole-device package ready")
+            output = (GLib.markup_escape_text(str(options.whole_output))
+                      if options and options.whole_output else "the output folder")
+            self.install_status.set_markup(
+                "<span foreground='#26a269'><b>Whole-device package "
+                f"prepared in {output}.</b></span> Android and slot B were not "
+                "modified. Follow the package README to install it from "
+                "recovery.")
+        else:
+            self.step_label.set_text("Installation complete")
+            self.install_status.set_markup(
+                "<span foreground='#26a269'><b>Installation complete.</b></span>"
+                + (" The tablet is rebooting into postmarketOS."
+                   if switched else ""))
         self._set_installing_ui(False)
-        self.finish_switch_btn.set_visible(not self.state.switched)
-        if self.state.switched:
+        self.finish_switch_btn.set_visible(not switched and not removed and not whole)
+        if switched:
             self.finish_switch_btn.set_visible(False)
+        if removed or whole:
+            # Re-read /data so the existing-install controls match reality.
+            GLib.idle_add(self.detect_async)
 
     def _install_failed(self, message: str) -> None:
         if not self.state.installing:
             return
         self.state.installing = False
+        options = self._options
+        if options and options.existing_action == "remove":
+            action = "Removal"
+        elif options and options.mode == "whole":
+            action = "Whole-device preparation"
+        else:
+            action = "Installation"
         self.progress.set_fraction(1.0)
         self.progress.set_text("Failed")
-        self.step_label.set_text("Installation failed")
+        self.step_label.set_text(f"{action} failed")
         self.install_status.set_markup(
-            f"<span foreground='#c01c28'><b>Installation failed:</b></span> {GLib.markup_escape_text(message)}")
+            f"<span foreground='#c01c28'><b>{action} failed:</b></span> "
+            + GLib.markup_escape_text(message))
         self._append_log(f"ERROR: {message}")
         self._set_installing_ui(False)
 

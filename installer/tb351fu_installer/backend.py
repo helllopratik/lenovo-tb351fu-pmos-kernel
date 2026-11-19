@@ -12,9 +12,13 @@ import dataclasses
 import json
 import os
 import re
+import secrets
+import shlex
 import shutil
+import string
 import struct
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Callable, Iterable, Optional
@@ -95,6 +99,21 @@ class DataSpace:
 
 
 @dataclasses.dataclass
+class ExistingInstall:
+    """State of an existing pmOS installation inside Android /data."""
+    checked: bool = False
+    directory: bool = False
+    marker: bool = False
+    legacy: bool = False
+    marker_text: str = ""
+    error: str = ""
+
+    @property
+    def present(self) -> bool:
+        return self.directory or self.marker or self.legacy
+
+
+@dataclasses.dataclass
 class ImageSet:
     boot: Optional[Path] = None
     init_boot: Optional[Path] = None
@@ -118,6 +137,16 @@ class InstallOptions:
     install_rootfs: bool = True
     switch_slot: bool = True
     reboot_after_switch: bool = True
+    mode: str = "dual"              # "dual" or "whole"
+    whole_output: Optional[Path] = None
+    source: str = "manual"          # "manual" or "auto"
+    image_url: str = ""
+    image_sha256: str = ""
+    account_enabled: bool = False
+    username: str = ""
+    password_hash: str = ""
+    existing_action: str = "none"   # "none", "replace" or "remove"
+    remove_legacy: bool = False
 
     @property
     def size_gib(self) -> int:
@@ -240,6 +269,68 @@ def repo_paths() -> dict[str, Path]:
         "deploy": common / "deploy",
         "installer": common / "installer",
     }
+
+
+def default_image_url() -> str:
+    """Return the configured server rootfs URL, or an empty string."""
+    env_url = os.environ.get("PMOS_IMAGE_URL", "").strip()
+    if env_url:
+        return env_url
+    path = repo_paths()["deploy"] / "configs" / "pmos_image_url"
+    try:
+        for line in path.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                return line
+    except OSError:
+        pass
+    return ""
+
+
+def hash_password(password: str) -> str:
+    """Hash a password with SHA-512 crypt, rounds=120000 when possible.
+
+    The caller must keep the plaintext in memory only.  The returned value is
+    what the shell installer accepts through --password-hash-file.
+    """
+    if not password:
+        raise InstallerError("password must not be empty")
+    alphabet = string.ascii_letters + string.digits + "./"
+    salt = "".join(secrets.choice(alphabet) for _ in range(16))
+    setting = f"$6$rounds=120000${salt}$"
+    result = ""
+    perl = shutil.which("perl")
+    if perl:
+        try:
+            proc = subprocess.run(
+                [perl, "-e",
+                 "my $p=<STDIN>; chomp $p; print crypt($p, $ARGV[0]);",
+                 setting],
+                input=password + "\n", text=True, capture_output=True,
+                timeout=60,
+            )
+            if proc.returncode == 0:
+                result = proc.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            result = ""
+    if not result.startswith("$6$"):
+        openssl = shutil.which("openssl")
+        if openssl:
+            try:
+                proc = subprocess.run(
+                    [openssl, "passwd", "-6", "-salt", salt, "-stdin"],
+                    input=password + "\n", text=True, capture_output=True,
+                    timeout=60,
+                )
+                if proc.returncode == 0:
+                    result = proc.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                result = ""
+    if not result.startswith("$6$"):
+        raise InstallerError("perl or openssl is required to hash the password")
+    if len(result) > 256 or not re.fullmatch(r"\$6\$[A-Za-z0-9./=$]+", result):
+        raise InstallerError("the password hash has an unexpected format")
+    return result
 
 
 def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
@@ -491,27 +582,38 @@ def rootfs_content_size(path: Path) -> Optional[int]:
 
 def validate_images(images: ImageSet, need_rootfs: bool = True,
                     need_boot: bool = True,
-                    need_firmware: bool = False) -> list[str]:
+                    need_firmware: bool = False,
+                    need_local_rootfs: bool = True) -> list[str]:
     problems: list[str] = []
     if need_boot:
         if not images.boot:
             problems.append("boot image not found (artifacts/boot_latest.img)")
+        elif not images.boot.is_file():
+            problems.append(f"boot image not found: {images.boot}")
         elif images.boot.stat().st_size > BOOT_PART_SIZE:
             problems.append("boot image is larger than the 64 MiB boot partition")
         if not images.init_boot:
             problems.append("init_boot image not found (artifacts/init_boot_latest.img)")
+        elif not images.init_boot.is_file():
+            problems.append(f"init_boot image not found: {images.init_boot}")
         elif images.init_boot.stat().st_size > INIT_BOOT_PART_SIZE:
             problems.append("init_boot image is larger than the 8 MiB partition")
         if not images.vbmeta:
             problems.append("vbmeta image not found (artifacts/vbmeta_latest.img)")
+        elif not images.vbmeta.is_file():
+            problems.append(f"vbmeta image not found: {images.vbmeta}")
         if not images.vendor_boot:
             problems.append(
                 "vendor_boot image not found (slot_b_bundle/vendor_boot.img)")
+        elif not images.vendor_boot.is_file():
+            problems.append(f"vendor_boot image not found: {images.vendor_boot}")
         elif images.vendor_boot.stat().st_size > VENDOR_BOOT_PART_SIZE:
             problems.append(
                 "vendor_boot image is larger than the 64 MiB partition")
         if not images.dtbo:
             problems.append("dtbo image not found (slot_b_bundle/dtbo.img)")
+        elif not images.dtbo.is_file():
+            problems.append(f"dtbo image not found: {images.dtbo}")
         elif images.dtbo.stat().st_size > DTBO_PART_SIZE:
             problems.append("dtbo image is larger than the 8 MiB partition")
     if need_firmware:
@@ -522,7 +624,7 @@ def validate_images(images: ImageSet, need_rootfs: bool = True,
                 "slot-B firmware image(s) missing: "
                 + ", ".join(f"{part}.img" for part in missing))
     if need_rootfs:
-        if not images.rootfs:
+        if need_local_rootfs and not images.rootfs:
             problems.append("postmarketOS rootfs image not found")
         if not images.modules:
             problems.append("deploy/modules.tar.xz is missing; run the deploy build first")
@@ -641,6 +743,44 @@ def detect_devices() -> list[Device]:
             slot=slot,
         ))
     return devices
+
+
+def detect_existing_install(device: Device) -> ExistingInstall:
+    """Read the existing pmOS state from /data without modifying anything."""
+    state = ExistingInstall()
+    if device.mode != "adb" or not device.root:
+        return state
+    command = (
+        "[ -d /data/pmos ] && echo dir; "
+        "[ -f /data/pmos_install.env ] && echo marker; "
+        "[ -f /data/pmos_legacy/rootfs.img ] && echo legacy"
+    )
+    try:
+        out = _clean(_adb(device.serial, "shell",
+                          f"su -c {shlex.quote(command)}",
+                          timeout=20).stdout)
+    except InstallerError as exc:
+        state.error = str(exc)
+        return state
+    state.checked = True
+    for token in out.split():
+        if token == "dir":
+            state.directory = True
+        elif token == "marker":
+            state.marker = True
+        elif token == "legacy":
+            state.legacy = True
+    if state.marker:
+        try:
+            state.marker_text = _clean(
+                _adb(device.serial, "shell",
+                     "su -c " + shlex.quote(
+                         "cat /data/pmos_install.env 2>/dev/null"),
+                     timeout=20).stdout
+            )[:4000]
+        except InstallerError:
+            pass
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -819,13 +959,31 @@ def _prefix(stream_name: str, line: str) -> str:
 
 def install(options: InstallOptions, emit: Callable[[str], None],
             log_path: Optional[Path] = None) -> None:
-    """Run the flash + rootfs install.  `emit` receives output lines."""
+    """Run the requested flash, rootfs install, removal or whole-device prep."""
     paths = repo_paths()
     env = os.environ.copy()
     env["ANDROID_SERIAL"] = options.device.serial
     env["ARTIFACTS_DIR"] = str(paths["artifacts"])
 
-    if options.flash_boot:
+    if options.mode not in ("dual", "whole"):
+        raise InstallerError(f"unknown installation mode: {options.mode}")
+    if options.source not in ("manual", "auto"):
+        raise InstallerError(f"unknown image source: {options.source}")
+    if options.existing_action not in ("none", "replace", "remove"):
+        raise InstallerError(
+            f"unknown existing-install action: {options.existing_action}")
+
+    removing = options.existing_action == "remove"
+    whole = options.mode == "whole"
+    if removing and whole:
+        raise InstallerError("removal applies to a dual-boot installation")
+
+    flash_boot = options.flash_boot and not whole and not removing
+    install_rootfs = True if (whole or removing) else options.install_rootfs
+    switch_slot = options.switch_slot and not whole and not removing
+    account_enabled = options.account_enabled and not removing
+
+    if flash_boot:
         missing = [name for name in ("boot", "init_boot", "vbmeta",
                                      "vendor_boot", "dtbo")
                    if not getattr(options.images, name)]
@@ -842,19 +1000,34 @@ def install(options: InstallOptions, emit: Callable[[str], None],
             if not slot_b_firmware_dir(options.images):
                 raise InstallerError(
                     "slot-B firmware images are not in one directory")
-    if options.install_rootfs and not options.images.rootfs:
-        raise InstallerError("missing postmarketOS rootfs image")
+
+    if install_rootfs and not removing:
+        if options.source == "manual" and not options.images.rootfs:
+            raise InstallerError("missing postmarketOS rootfs image")
+        if options.source == "auto" and not (
+                options.image_url or default_image_url()):
+            raise InstallerError("no server rootfs image URL is configured")
+        if not options.images.modules:
+            raise InstallerError("missing deploy/modules.tar.xz payload")
+        if whole and not options.whole_output:
+            raise InstallerError(
+                "whole-device mode needs an output directory")
+        if account_enabled:
+            if not options.username:
+                raise InstallerError("an account username is required")
+            if not options.password_hash:
+                raise InstallerError("an account password hash is required")
 
     switched_in_flash = (
         options.device.mode == "fastboot"
-        and options.flash_boot
-        and options.switch_slot
+        and flash_boot
+        and switch_slot
     )
 
     phases: list[str] = []
-    if options.flash_boot:
+    if flash_boot:
         phases.append("boot")
-    if options.install_rootfs:
+    if install_rootfs:
         phases.append("rootfs")
 
     phase_start = 0.0
@@ -880,7 +1053,7 @@ def install(options: InstallOptions, emit: Callable[[str], None],
             return
         emit(_prefix(name, line))
 
-    if options.flash_boot:
+    if flash_boot:
         script = paths["deploy"] / "scripts" / "flash_slot_b.sh"
         if not script.is_file():
             raise InstallerError(f"missing flash script: {script}")
@@ -900,7 +1073,7 @@ def install(options: InstallOptions, emit: Callable[[str], None],
                     "slot-B firmware images are not in one directory")
             argv += ["--firmware-dir", str(firmware_dir)]
         if options.device.mode == "fastboot":
-            if options.switch_slot:
+            if switch_slot:
                 argv.append("--set-active")
             if options.reboot_after_switch:
                 argv.append("--reboot")
@@ -916,38 +1089,93 @@ def install(options: InstallOptions, emit: Callable[[str], None],
             raise InstallerError(f"slot-B flash failed (exit {rc})")
         phase_idx += 1
 
-    if options.install_rootfs:
+    if install_rootfs:
         if options.device.mode != "adb":
-            raise InstallerError("rootfs installation requires Android booted with adb")
+            raise InstallerError(
+                "rootfs installation requires Android booted with adb")
         script = paths["common"] / "install_pmos_rootfs.sh"
         if not script.is_file():
             raise InstallerError(f"missing rootfs installer: {script}")
-        argv = [
-            "bash", str(script),
-            "--image", str(options.images.rootfs),
-            "--size", f"{options.size_gib}G",
-            "--yes",
-        ]
-        emit("%%PMOS_STEP:rootfs:Installing the postmarketOS rootfs")
-        rc = _stream(
-            argv,
-            lambda line: phase_emit(line, "rootfs",
-                                    phase_start + phase_idx * phase_span,
-                                    phase_start + (phase_idx + 1) * phase_span),
-            env=env,
-        )
+
+        tmpdir: Optional[str] = None
+        if removing:
+            argv = [
+                "bash", str(script),
+                "--mode", "dual",
+                "--remove-existing",
+                "--yes",
+            ]
+            if options.remove_legacy:
+                argv.append("--remove-legacy")
+            emit("%%PMOS_STEP:remove:Removing the existing pmOS installation")
+            step_name = "remove"
+        else:
+            argv = ["bash", str(script)]
+            if options.source == "auto":
+                argv += ["--source", "auto"]
+                if options.image_url:
+                    argv += ["--url", options.image_url]
+                if options.image_sha256:
+                    argv += ["--sha256", options.image_sha256]
+            else:
+                argv += ["--source", "manual", "--image",
+                         str(options.images.rootfs)]
+            argv += ["--mode", options.mode]
+            if options.size_bytes > 0:
+                argv += ["--size", f"{options.size_gib}G"]
+            if whole:
+                argv += ["--whole-output", str(options.whole_output)]
+            if options.existing_action == "replace":
+                argv.append("--replace-existing")
+            if account_enabled:
+                tmpdir = tempfile.mkdtemp(prefix="pmos-gui-")
+                hash_path = Path(tmpdir) / "password.hash"
+                fd = os.open(hash_path,
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w") as handle:
+                    handle.write(options.password_hash + "\n")
+                argv += ["--username", options.username,
+                         "--password-hash-file", str(hash_path)]
+            else:
+                argv.append("--no-account")
+            argv.append("--yes")
+            emit("%%PMOS_STEP:rootfs:"
+                 + ("Preparing the whole-device rootfs package"
+                    if whole else "Installing the postmarketOS rootfs"))
+            step_name = "rootfs"
+
+        try:
+            rc = _stream(
+                argv,
+                lambda line: phase_emit(
+                    line, step_name,
+                    phase_start + phase_idx * phase_span,
+                    phase_start + (phase_idx + 1) * phase_span),
+                env=env,
+            )
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
         if rc != 0:
-            raise InstallerError(f"rootfs installation failed (exit {rc})")
+            raise InstallerError(
+                f"{'removal' if removing else 'rootfs installation'} "
+                f"failed (exit {rc})")
         phase_idx += 1
 
-    if options.switch_slot and not switched_in_flash:
+    if switch_slot and not switched_in_flash:
         emit("%%PMOS_STEP:switch:Switching the active slot to B")
         switch_to_slot_b(options.device, emit,
                          reboot=options.reboot_after_switch)
-    elif options.switch_slot:
+    elif switch_slot:
         emit("Slot B was activated by the fastboot flash step.")
 
-    emit("%%PMOS_PROGRESS:100:Installation complete")
+    if removing:
+        final_text = "Removal complete"
+    elif whole:
+        final_text = "Whole-device package ready"
+    else:
+        final_text = "Installation complete"
+    emit(f"%%PMOS_PROGRESS:100:{final_text}")
     emit("%%PMOS_DONE")
 
 

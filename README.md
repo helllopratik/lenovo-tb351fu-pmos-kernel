@@ -180,13 +180,20 @@ Or run it directly from the checkout:
 
 The wizard:
 
-1. Detects adb/fastboot devices, model/codename, active slot, root access, and battery.
+1. Detects adb/fastboot devices, model/codename, active slot, root access, battery,
+   and any existing pmOS installation in `/data`.
 2. Lists every by-name partition with size, slot, and role. Logical/mapper partitions
    are display-only and are never written.
 3. Reads `/data` free space and suggests a rootfs size (default 64 GiB, leaving an
    8 GiB reserve).
-4. Validates the boot-chain images and rootfs image, then shows a confirmation plan.
-5. Flashes only slot B, installs the rootfs, and optionally switches the active slot.
+4. Validates the boot-chain images and rootfs image, then offers the installation
+   mode, image source, account details, and existing-install action.
+5. Shows a confirmation plan, then flashes only slot B, installs the rootfs, or
+   prepares a whole-device package. It switches the active slot only for a
+   dual-boot install when requested.
+
+Whole-device mode in the GUI only *prepares* an offline package in a temporary
+encrypted staging directory. It never erases or reformats Android userdata.
 
 In fastboot mode the rootfs step is disabled: flash the boot chain there, then boot
 Android with root adb to install the rootfs.
@@ -238,8 +245,10 @@ space on `/data`.
 
 The installer asks for the pmOS username and password. Only a SHA-512 crypt
 hash is sent to the tablet; the plaintext password is never stored or passed on
-a command line. `--no-account` keeps the image's default `user` account, and
-`--password-file` supports unattended runs.
+a command line. `--no-account` keeps the image's default `user` account,
+`--password-file` accepts a plaintext password for unattended runs, and
+`--password-hash-file` accepts a precomputed `$6$...` hash. The GUI uses the
+hash-file form, so only the hash leaves the host.
 
 If `/data/pmos` already exists, the installer asks whether to replace it, remove
 it, or cancel. Non-interactive runs use `--replace-existing` or
