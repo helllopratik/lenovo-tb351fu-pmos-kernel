@@ -43,6 +43,70 @@ class SizeTests(unittest.TestCase):
         self.assertEqual(options.size_gib, 32)
 
 
+class WholeModeTests(unittest.TestCase):
+    def test_whole_requires_output_and_boot_chain(self):
+        device = backend.Device(serial="x", mode="adb")
+        options = backend.InstallOptions(
+            device=device,
+            images=backend.ImageSet(rootfs=Path("rootfs.img"),
+                                    modules=Path("modules.tar.xz"),
+                                    firmware=Path("firmware.tar.xz")),
+            size_bytes=64 * backend.GIB,
+            mode="whole",
+            source="manual",
+            install_rootfs=True,
+        )
+        with mock.patch.object(backend, "repo_paths",
+                               return_value={"artifacts": Path("/tmp")}):
+            with self.assertRaisesRegex(backend.InstallerError, "output directory"):
+                backend.install(options, lambda _line: None)
+            options.whole_output = Path("/tmp/whole-test")
+            with self.assertRaisesRegex(backend.InstallerError, "boot chain"):
+                backend.install(options, lambda _line: None)
+
+    def test_whole_does_not_flash_from_android(self):
+        device = backend.Device(serial="x", mode="adb")
+        options = backend.InstallOptions(
+            device=device,
+            images=backend.ImageSet(rootfs=Path("rootfs.img"),
+                                    modules=Path("modules.tar.xz"),
+                                    firmware=Path("firmware.tar.xz"),
+                                    boot=Path("boot.img"),
+                                    init_boot=Path("init_boot.img"),
+                                    vbmeta=Path("vbmeta.img")),
+            size_bytes=64 * backend.GIB,
+            mode="whole",
+            source="manual",
+            install_rootfs=True,
+            flash_boot=True,
+            switch_slot=True,
+            whole_output=Path("/tmp/whole-test"),
+        )
+        seen = {}
+
+        def fake_stream(argv, emit, env=None, cwd=None):
+            seen["argv"] = argv
+            emit("%%PMOS_DONE")
+            return 0
+
+        with mock.patch.object(backend, "repo_paths",
+                               return_value={"common": Path(__file__).resolve().parents[2],
+                                             "deploy": Path(__file__).resolve().parents[2] / "deploy",
+                                             "artifacts": Path("/tmp")}), \
+             mock.patch.object(backend, "_stream", side_effect=fake_stream):
+            backend.install(options, lambda _line: None)
+        argv = seen["argv"]
+        self.assertNotIn("flash_slot_b.sh", " ".join(argv))
+        self.assertIn("--mode", argv)
+        self.assertEqual(argv[argv.index("--mode") + 1], "whole")
+        self.assertIn("--whole-output", argv)
+        self.assertIn("--whole-boot-image", argv)
+        self.assertIn("--whole-init-boot-image", argv)
+        self.assertIn("--whole-vbmeta-image", argv)
+        self.assertIn("--no-account", argv)
+        self.assertNotIn("--set-active", argv)
+
+
 class SpaceTests(unittest.TestCase):
     def test_data_space_uses_df_k(self):
         """Android toybox rejects df -B1, so the backend must query -k."""
@@ -92,6 +156,10 @@ class ScriptTests(unittest.TestCase):
 
     def test_orchestration(self):
         selftest.check_orchestration()
+
+    def test_gnss_payload(self):
+        result = selftest.check_gnss_payload()
+        self.assertIn("NMEA-only", result)
 
 
 if __name__ == "__main__":

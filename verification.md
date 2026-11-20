@@ -452,3 +452,150 @@ jack=off -> HiFi (Mic, Speaker) (alsa_output.platform-sound.HiFi__Speaker__sink)
 
 The old system-wide unit ran as root, targeted `/run/user/0`, and looped on
 `pactl info` forever.
+
+## 12. Whole-device Direct-Rootfs Verification (2026-11-19)
+
+Whole-device mode is implemented for the approved layout:
+
+- ext4 rootfs written **directly to userdata**,
+- encrypted by `dm-default-key` with the existing Android metadata key,
+- no nested `rootfs.img`, no fscrypt layer, no loop mount,
+- pmOS boot chain flashed to slots A and B,
+- `super`, `metadata`, `frp` and `userdata` erased; slot B stays active,
+- firmware/calibration partitions preserved, `misc` never written.
+
+### Init
+
+`pmos_init_src/pmos_init.c` now:
+
+1. mounts userdata (through dm-default-key when the metadata key is present),
+2. checks `/data_host/pmos_whole_device`,
+3. if present, mounts that same userdata/mapping directly on `/root` with
+   `MS_NOATIME` and returns `direct_rootfs=1`,
+4. otherwise continues with the dual-boot fscrypt + loopback path.
+
+`_start()` sets `is_loopback = !direct_rootfs`, so the whole-device path does
+not move `/data_host` under `/root`; it unmounts it before the root switch.
+
+The init compiles with the cross toolchain. The direct-rootfs path has **not**
+been booted yet; the currently flashed boot chain still uses the dual-boot
+loopback init.
+
+### Package
+
+`install_pmos_rootfs.sh --mode whole` now requires:
+
+- `PMOS_DM_METADATA_KEY` in the 0600 storage key file,
+- `boot_latest.img`, `init_boot_latest.img` and `vbmeta_latest.img` (or the
+  `PMOS_WHOLE_*` overrides).
+
+It copies those images plus `pmos-dm-key` (0600), `pmos-dm.conf`, the pack and
+the recovery installer into `--whole-output`. The rootfs payload includes the
+GNSS runtime collected from stock slot A (see section 13). `SHA256SUMS` covers
+every file except `pmos-dm-key`, which must never be committed or shared.
+
+### Apply
+
+`deploy/installer/whole_device_install.sh` is the recovery-side destructive
+installer. It:
+
+- requires `PMOS_WHOLE_CONFIRM='ERASE ANDROID SLOT A'` or a typed prompt,
+- requires `--remove-legacy` for a real run,
+- supports `--dry-run` (plan only, no writes),
+- refuses to run when `/data` or zygote is mounted/running,
+- creates `pmos_whole_install` from `pmos-dm.conf` + `pmos-dm-key` using the
+  same `allow_discards sector_size:4096 iv_large_sectors` options as the init,
+- writes and verifies the pack through the dm mapping,
+- read-only mounts the result when possible and checks
+  `/pmos_whole_device`,
+- flashes `boot`/`init_boot`/`vbmeta` (and optional
+  `vendor_boot`/`dtbo`) to both slots, verifying bytes written,
+- erases `super`, `metadata` and `frp`,
+- preserves low-level firmware and calibration/identity partitions,
+- never writes `misc`, never changes the active slot,
+- removes the dm mapping and deletes `pmos-dm-key` after success.
+
+Not verified:
+
+- a real recovery/offline apply on the tablet,
+- a boot of the direct-rootfs init,
+- dm-default-key readback of a rootfs written by `sparse_pack apply` (only
+  pack-to-file verify and table construction were checked).
+
+No flash or reboot was performed as part of this work.
+
+## 13. GNSS Payload Integration (2026-11-20)
+
+The working NMEA-only GNSS stack is now part of both install modes. Because
+`mnld` and its libraries are proprietary, nothing is committed; the installer
+copies them read-only from stock slot A while Android is running.
+
+### Builder
+
+`deploy/tools/gnss_payload.py` is invoked at installer progress 29, before the
+customization tar is applied. It:
+
+1. copies `/vendor/bin/mnld`, `/vendor/etc/MNL_Config.xml`, `mpe.conf`, the
+   repo scripts/units/modules, and 121 host CA certificates;
+2. resolves the vendor namespace closure from `mnld` (28 vendor libraries;
+   vendor-first, then the linker's `link.system.shared_libs`);
+3. resolves the system namespace closure system-first (14 libraries), never
+   following a system dependency into `/vendor/lib64`;
+4. extracts `/apex/com.android.runtime` and follows every absolute
+   `/system/lib64` symlink target through the same closure, adding `libz.so`
+   for `libunwindstack.so`;
+5. verifies each namespace against the actual shipped files and APEX contents,
+   including `mnld` itself;
+6. builds `runtime-apex.img` as a 14,884,864-byte ext2 image (`mke2fs -d`,
+   4096-byte blocks) and runs `e2fsck -fn`.
+
+The helper uses its own ELF `DT_NEEDED` parser, so host `readelf` is not
+required. Missing `mnld`, `MNL_Config.xml`, or an unresolved library aborts the
+build before transfer.
+
+### Payload layout
+
+```
+/opt/tb351fu-gps/vendor/bin/mnld
+/opt/tb351fu-gps/vendor/lib64/*.so             28 vendor libraries (plus mnld)
+/opt/tb351fu-gps/vendor/etc/MNL_Config.xml
+/opt/tb351fu-gps/vendor/etc/mpe.conf
+/opt/tb351fu-gps/system/lib64/*.so             14 system libraries
+/opt/tb351fu-gps/system/bin/linker64 -> /apex/com.android.runtime/bin/linker64
+/opt/tb351fu-gps/system/vendor -> /vendor
+/opt/tb351fu-gps/system/etc/security/cacerts/*.0
+/opt/tb351fu-gps/runtime-apex.img
+/opt/tb351fu-gps/{run-gps.sh,run-mnld.sh,gps-runtime-inner.sh,...}
+/etc/systemd/system/tb351fu-gps.{socket,service}
+/etc/systemd/system/sockets.target.wants/tb351fu-gps.socket
+/lib/modules/extra/gps_pwr.ko
+/lib/modules/extra/gps_drv_stp.ko
+/etc/geoclue/geoclue.conf                      NMEA-only
+```
+
+### Validation performed
+
+- Standalone builder: 42 libraries plus mnld (28 vendor, 14 system), 121 CA
+  certificates, 33 MB payload, `runtime-apex.img` 14,884,864 bytes and
+  `e2fsck -fn` clean.
+- Namespace check: vendor and system closures both resolve; the only earlier
+  gap, `libunwindstack.so -> libz.so`, is fixed.
+- Whole package built at 6G logical size: `SHA256SUMS` verifies; the dm key is
+  0600 and absent from the checksum file; boot/init_boot/vbmeta hashes match
+  `artifacts/`.
+- Host-applied package: all 21 extent CRCs valid, `e2fsck -fn` clean,
+  `/pmos_whole_device` present, `fstab` UUID
+  `4bbf2d3a-173f-4e5a-8108-f0225fec988f`, `/boot` commented.
+- Applied image: `mnld` md5 `675e8542c71a259602d3240282f8fe52`,
+  `MNL_Config.xml` md5 `8c472104545364d72866f243731a14d7`,
+  `mpe.conf` md5 `d5078e6bbbca7acdadd0ded1e66a7609`, GPS module hashes match
+  `deploy/gnss/modules/`, 14 system libs, 121 certs, socket symlink and
+  `/system/vendor` symlink correct.
+- Android dry-run of the final package: checksums verified, userdata
+  `/dev/block/sdc64`, super `sdc62`, metadata `sdc13`, frp `sdc4`; no writes.
+  `/data/pmos` remained untouched and the staged package/key were removed.
+- Installer self-tests: 15 unit tests, all 13 CLI self-test checks, and
+  `--gui-smoke-test` pass.
+
+Not verified: an actual GNSS start inside a freshly installed whole-device
+rootfs (the direct-rootfs boot itself is still untested).

@@ -189,11 +189,13 @@ The wizard:
 4. Validates the boot-chain images and rootfs image, then offers the installation
    mode, image source, account details, and existing-install action.
 5. Shows a confirmation plan, then flashes only slot B, installs the rootfs, or
-   prepares a whole-device package. It switches the active slot only for a
-   dual-boot install when requested.
+   prepares a destructive whole-device package. It switches the active slot only
+   for a dual-boot install when requested.
 
-Whole-device mode in the GUI only *prepares* an offline package in a temporary
-encrypted staging directory. It never erases or reformats Android userdata.
+Whole-device mode *prepares* a destructive offline package in a temporary
+encrypted staging directory. Android is not changed while the package is being
+prepared. Applying the package later, from recovery with /data unmounted,
+erases Android and replaces the boot chain in slots A and B.
 
 In fastboot mode the rootfs step is disabled: flash the boot chain there, then boot
 Android with root adb to install the rootfs.
@@ -255,11 +257,16 @@ it, or cancel. Non-interactive runs use `--replace-existing` or
 `--remove-existing`. The legacy Android-readable image is deleted only when
 `--remove-legacy` is passed explicitly.
 
-`--mode whole` prepares an offline package for a device that will no longer run
-Android. It uses a temporary encrypted staging install, packs the finalized
-image, and does not erase userdata while Android is running. Applying that
-package requires a recovery environment, `/data` unmounted, and a separate
-userdata-direct boot image; see `PMOS_ENCRYPTED_STORAGE.md`.
+`--mode whole` prepares a destructive offline package for a device that will no
+longer run Android. It uses a temporary encrypted staging install, packs the
+finalized image, copies the matching pmOS `boot`/`init_boot`/`vbmeta` chain and
+the Android metadata key into the output folder, and does not erase userdata
+while Android is running. Applying that package requires recovery with `/data`
+unmounted; it erases `super`, `metadata`, `frp` and `userdata`, writes the ext4
+rootfs directly to userdata through dm-default-key, flashes the pmOS boot chain
+to slots A and B, preserves firmware/calibration partitions, never writes
+`misc`, and leaves slot B active. It requires `--remove-legacy` and typed
+confirmation. See `PMOS_ENCRYPTED_STORAGE.md`.
 
 ### 4. Boot slot B
 
@@ -442,6 +449,14 @@ The GNSS stack is **NMEA-only**:
 - `tablet-gnss-bridge.py` filters the stream and exposes
   `/run/tablet-gps/nmea.sock`.
 - GeoClue uses the `network-nmea` source pointed at that socket.
+
+Both dual-boot and whole-device installs include the complete working GNSS
+payload. `deploy/tools/gnss_payload.py` copies the proprietary `mnld`, its
+vendor/system library closure, `/vendor/etc/MNL_Config.xml`, `mpe.conf`, and the
+Bionic runtime APEX from stock slot A while Android is still running. It also
+installs the NMEA-only GeoClue configuration, the socket-activated units, the
+stock GPS kernel modules, and the host CA bundle used for EPO downloads. Nothing
+proprietary is stored in this repository, and the helper only reads slot A.
 
 Do not replace this with GeoClue's Wi-Fi/network provider or edit
 `/etc/geoclue/geoclue.conf` without understanding the NMEA-only design. See

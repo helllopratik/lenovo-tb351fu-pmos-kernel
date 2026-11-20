@@ -20,10 +20,12 @@ without repartitioning UFS and without touching the Android slot.
   loopback ext4 image inside Android userdata. The directory is protected with
   a per-install fscrypt key; its size is selectable and can be resized later
   with the normal rootfs tools.
-- **Dual boot or whole-device package:** dual boot keeps Android and installs
-  into `/data/pmos`. Whole-device mode only prepares an offline package in a
-  temporary encrypted staging directory. It never erases or reformats
-  userdata while Android is running.
+- **Dual boot or destructive whole-device package:** dual boot keeps Android
+  and installs into `/data/pmos`. Whole-device mode prepares a destructive
+  offline package in temporary encrypted staging: applying it from recovery
+  erases Android (super, metadata, frp and userdata), writes pmOS directly to
+  userdata through dm-default-key, and replaces the boot chain in slots A and
+  B. Android is not changed while the package is being prepared.
 - **Existing installs are explicit:** the wizard detects `/data/pmos`, its
   marker and `/data/pmos_legacy/rootfs.img`, then asks whether to replace or
   remove. The legacy image is only deleted when its checkbox is selected.
@@ -59,7 +61,31 @@ Audio output is verified with `speaker-test -D pulse -c 2 -t sine -f 440 -l 1`
 after the migration and a restart of `pipewire`, `wireplumber` and
 `pipewire-pulse` in the user session.
 
-## Requirements
+## GNSS payload
+
+Every dual-boot and whole-device install includes the working NMEA-only GNSS
+stack. The proprietary MediaTek daemon cannot be redistributed, so
+`deploy/tools/gnss_payload.py` collects it from stock slot A while Android is
+still running:
+
+- `/vendor/bin/mnld`, `/vendor/etc/MNL_Config.xml`, `mpe.conf`, and the
+  `DT_NEEDED` closure (28 vendor libraries plus `mnld` in the reference
+  build),
+- the system namespace closure under `/system/lib64` (14 libraries), resolved
+  system-first and verified against the actual APEX contents,
+- the Bionic runtime APEX, packed as a 14,884,864-byte ext2
+  `runtime-apex.img`,
+- the scripts, shim, socket/service units, stock `gps_pwr.ko` and
+  `gps_drv_stp.ko`, NMEA-only `geoclue.conf`, and 121 host CA certificates for
+  EPO downloads.
+
+The helper only reads slot A; it never writes Android, `misc`, or the boot
+chain. A missing `mnld`, `MNL_Config.xml`, or unresolved library aborts the
+package before anything is transferred to the tablet. The GNSS step runs before
+the rootfs payload is applied, so both install modes get the same files.
+
+Building the APEX image needs host `mke2fs` and `e2fsck` (e2fsprogs) in addition
+to `zstd`.
 
 Host:
 
@@ -139,9 +165,11 @@ reinstalling.
    - **Existing installation:** replace the rootfs, or remove the installation
      and exit. Removing the legacy `/data/pmos_legacy/rootfs.img` is a separate
      checkbox and is never implicit.
-   - **Mode:** dual boot (Android kept) or whole-device package preparation.
-     Whole-device mode uses an output folder, does not flash slot B and never
-     erases Android. Removal and whole-device mode are mutually exclusive.
+   - **Mode:** dual boot (Android kept) or destructive whole-device package
+     preparation. Whole-device mode uses an output folder, does not flash or
+     switch slot B, and does not erase Android while preparing. Applying the
+     package later erases Android and replaces the boot chain in slots A and
+     B. Removal and whole-device mode are mutually exclusive.
    - **Image source:** download from the server (URL plus optional SHA-256) or
      use the local image selected on the Images page.
    - **pmOS login:** username, password and confirmation. The password is
@@ -203,9 +231,12 @@ pushes a raw image. The device needs root adb and about 64 GiB free on `/data`.
 # remove an existing installation (legacy image kept unless requested)
 ../install_pmos_rootfs.sh --mode dual --remove-existing --yes
 
-# prepare an offline whole-device package; Android is not erased
+# prepare a destructive whole-device package; Android is not erased yet
 ../install_pmos_rootfs.sh --mode whole --source auto \
   --whole-output ../artifacts/whole_device_prep \
+  --whole-boot-image ../artifacts/boot_latest.img \
+  --whole-init-boot-image ../artifacts/init_boot_latest.img \
+  --whole-vbmeta-image ../artifacts/vbmeta_latest.img \
   --username tablet --password-hash-file /path/to/password.hash
 
 # slot-B boot chain only (bundle images)
@@ -233,10 +264,20 @@ that file with mode 0600, passes it to the script, and deletes it when the
 install finishes. `--password-file` still accepts a plaintext password for
 unattended runs, but the hash form avoids sending one.
 
-`--mode whole` requires an empty output folder (or a new one). The package
-contains `rootfs.sparsepack`, `sparse_pack`, `install_whole_device.sh`,
-`README.txt` and `SHA256SUMS`; run it from recovery only, with userdata
-unmounted.
+`--mode whole` requires an empty output folder (or a new one), the existing
+`PMOS_DM_METADATA_KEY` in the storage key file, and a matching pmOS boot chain
+(`boot_latest.img`, `init_boot_latest.img`, `vbmeta_latest.img`). The package
+contains `rootfs.sparsepack`, `sparse_pack`, `boot.img`, `init_boot.img`,
+`vbmeta.img`, `pmos-dm-key` (0600), `pmos-dm.conf`, `install_whole_device.sh`,
+`README.txt` and `SHA256SUMS`. Run it only from recovery with `/data` unmounted:
+
+  PMOS_WHOLE_CONFIRM='ERASE ANDROID SLOT A' \
+    sh install_whole_device.sh --remove-legacy
+
+The apply erases `super`, `metadata`, `frp` and `userdata`, writes the rootfs
+directly to userdata with dm-default-key, flashes pmOS boot/init_boot/vbmeta to
+slots A and B, preserves firmware/calibration partitions, never writes `misc`,
+and leaves slot B active. Add `--dry-run` to print the plan without writing.
 
 `flash_slot_b.sh` auto-detects adb vs fastboot. In adb mode it checks root,
 verifies partition capacity, writes only slot B, and compares a checksum of
@@ -266,6 +307,10 @@ it keeps the old fallback: copy the slot-A partition only when slot B is empty.
   the helper. The GUI sets these flags for you.
 - **Whole-device output is not empty**: move the previous package away. The
   helper refuses to mix a new package with old files.
+- **Whole-device mode cannot find the boot chain**: select the pmOS
+  `boot_latest.img`, `init_boot_latest.img` and `vbmeta_latest.img` on the
+  Images page, or set `PMOS_WHOLE_BOOT_IMAGE` and friends. The apply package
+  needs the same storage key that built those images.
 - **Password hashing fails**: install `perl` or `openssl` on the host. Only the
   hash is required; the GUI never writes the plaintext password to disk.
 - **Legacy image left behind**: `/data/pmos_legacy/rootfs.img` is intentionally

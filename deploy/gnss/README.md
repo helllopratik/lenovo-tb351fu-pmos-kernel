@@ -6,6 +6,9 @@ boot: systemd socket activation starts it only when a location client (GeoClue
 NMEA source) connects, and it powers down again 60 s after the last client
 disconnects.
 
+As of 2026-11-20 the installer packages this payload automatically from stock
+slot A for both dual-boot and destructive whole-device installs.
+
 This directory contains the complete userspace deployment: the vendor-daemon
 compatibility chroot, the HAL/NMEA bridge, the systemd units, the GeoClue
 configuration, and the stock kernel modules.
@@ -116,14 +119,36 @@ written by this work):
   `libcrypto.so`, `libnvram*.so`, `libmtkproperty.so`, ...)
 - `/vendor/etc/MNL_Config.xml`, `/vendor/etc/mpe.conf`
 - `/system/lib64/*` (`libbase.so`, `libbinder*.so`, `libc++.so`, `liblog.so`,
-  `libcutils.so`, `libutils.so`, `libvndksupport.so`, ...)
+  `libcutils.so`, `libutils.so`, `libvndksupport.so`, `libz.so`, ...)
 - `/apex/com.android.runtime` (Bionic `linker64`, `libc.so`, ...)
 
-The runtime APEX is packed into `runtime-apex.img`, a 12,845,056-byte ext2
-image that `run-mnld.sh` loop-mounts read-only at
-`/opt/tb351fu-gps/runtime-apex`. `/opt/tb351fu-gps/system/bin/linker64` is a
-symlink to `/apex/com.android.runtime/bin/linker64`; inside the chroot that
-path is the mounted APEX.
+`deploy/tools/gnss_payload.py` performs the copy. Starting from `mnld` it
+resolves the vendor namespace closure (28 vendor libraries plus `mnld`),
+then the system
+namespace closure (14 libraries) with system-first resolution, and verifies
+both against `ld.config.txt` and the actual APEX contents. It copies
+`MNL_Config.xml` and `mpe.conf`, 121 host CA certificates, and packs the runtime
+APEX into a 14,884,864-byte ext2 `runtime-apex.img`. The reference payload is
+about 33 MB.
+
+The resulting chroot layout is:
+
+```
+/opt/tb351fu-gps/vendor/bin/mnld
+/opt/tb351fu-gps/vendor/lib64/*.so
+/opt/tb351fu-gps/vendor/etc/MNL_Config.xml
+/opt/tb351fu-gps/vendor/etc/mpe.conf
+/opt/tb351fu-gps/system/lib64/*.so
+/opt/tb351fu-gps/system/bin/linker64 -> /apex/com.android.runtime/bin/linker64
+/opt/tb351fu-gps/system/vendor -> /vendor
+/opt/tb351fu-gps/system/etc/security/cacerts/*.0
+/opt/tb351fu-gps/runtime-apex.img
+```
+
+`run-mnld.sh` loop-mounts `runtime-apex.img` read-only at
+`/opt/tb351fu-gps/runtime-apex`; inside the chroot that becomes
+`/apex/com.android.runtime`. The `/system/vendor -> /vendor` symlink matches
+Android and lets `mnld` reach `/system/vendor/etc/mpe.conf`.
 
 `shim/lib64/libgpsprops.so` is a small `LD_PRELOAD` library that supplies the
 Bionic `__system_property_*` ABI and returns the hard-coded properties listed
@@ -190,6 +215,34 @@ when it has expired (EPO covers roughly three days). To force a refresh, stop
 the units, move `EPO.DAT` aside, then start a GPS client; `mnld` downloads,
 MD5-checks, and merges a new file. Re-copy the host CA bundle after a host
 `ca-certificates` update.
+
+## Installer integration
+
+`common/install_pmos_rootfs.sh` calls `deploy/tools/gnss_payload.py` during the
+payload stage, before the customization tar is applied. The helper needs the
+tablet booted on stock/Evolution X Android with root adb because it reads slot A
+only:
+
+```sh
+python3 deploy/tools/gnss_payload.py \
+  --payload <installer payload root> \
+  --repo-gnss deploy/gnss
+```
+
+The generated payload is included in **both** modes:
+
+- dual boot: extracted into `/data/pmos/rootfs.img`,
+- whole device: extracted into the staging rootfs that becomes the direct
+  userdata filesystem.
+
+The installer aborts if `mnld`, `MNL_Config.xml`, or any dependency cannot be
+resolved, so a package cannot silently lose GPS. The socket/service units and
+the NMEA-only `geoclue.conf` are installed by the same step. The proprietary
+binaries stay out of git; only the scripts, units, modules, config, and builder
+are committed.
+
+Host requirements for this step are `readelf`-free (the helper has its own ELF
+parser), `mke2fs`, `e2fsck`, `tar`, and `adb` with root.
 
 ## Deploy
 

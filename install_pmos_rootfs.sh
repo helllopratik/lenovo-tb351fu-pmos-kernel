@@ -58,18 +58,31 @@ Installation:
                         In whole-device mode the default is the real userdata size.
   -m, --mode MODE       dual (default) or whole.
                         "dual" keeps Android and installs into /data/pmos.
-                        "whole" prepares an offline package in a temporary
-                        staging directory; it never erases or reformats userdata
-                        while Android is running.
+                        "whole" prepares a destructive offline package: when
+                        applied from recovery it erases Android (super,
+                        metadata, frp and userdata), writes pmOS directly to
+                        userdata and replaces the boot chain in slots A and B.
+                        Preparation alone never erases or reformats userdata.
       --whole-output DIR
-                        Output directory for the whole-device package.
+                        Output directory for the destructive whole-device
+                        package (pmOS boot chain and dm key included).
+      --whole-boot-image PATH, --whole-init-boot-image PATH,
+      --whole-vbmeta-image PATH
+                        Override the pmOS boot-chain images copied into the
+                        whole package.  Defaults: artifacts/boot_latest.img,
+                        init_boot_latest.img and vbmeta_latest.img.
+      --whole-vendor-boot-image PATH, --whole-dtbo-image PATH
+                        Optional vendor_boot/dtbo images for the whole
+                        package.
       --keep-old        Keep the previous rootfs.img as rootfs.img.old.
       --replace-existing
                         Replace an existing /data/pmos installation.
       --remove-existing
                         Remove an existing /data/pmos installation and exit.
       --remove-legacy   With --remove-existing, also remove the old
-                        Android-readable /data/pmos_legacy/rootfs.img.
+                        Android-readable /data/pmos_legacy/rootfs.img.  The
+                        offline whole-device installer requires its own
+                        --remove-legacy flag when it is applied.
       --yes             Non-interactive; never prompts.  Supply --source or
                         --image, --mode if needed, and --username plus
                         --password-file (or --no-account).
@@ -92,11 +105,21 @@ Environment:
   PMOS_PASSWORD (discouraged), PMOS_NO_ACCOUNT
   ROOTFS_SIZE, ANDROID_SERIAL, PMOS_STORAGE_KEYS, PMOS_INSTALL_DIR
   PMOS_KEEP_OLD, PMOS_REPLACE_EXISTING, PMOS_REMOVE_EXISTING, PMOS_REMOVE_LEGACY
-  PMOS_WHOLE_OUTPUT   Output directory for --mode whole (prep only).
+  PMOS_WHOLE_OUTPUT   Output directory for --mode whole.
+  PMOS_WHOLE_BOOT_IMAGE, PMOS_WHOLE_INIT_BOOT_IMAGE, PMOS_WHOLE_VBMETA_IMAGE
+                      Boot-chain images for --mode whole.  Defaults:
+                      artifacts/boot_latest.img, init_boot_latest.img and
+                      vbmeta_latest.img.
+  PMOS_WHOLE_VENDOR_BOOT_IMAGE, PMOS_WHOLE_DTBO_IMAGE
+                      Optional extra images copied into the whole package.
 
 The dual-boot rootfs is stored in an fscrypt v2-encrypted /data/pmos.  The key
 is removed from Android's keyring after installation, so Android sees ENOKEY
 inside that directory while the pmOS initramfs can unlock it at boot.
+
+The whole-device package uses dm-default-key (the existing Android metadata
+key) over the entire userdata partition.  Applying it is destructive and is
+done only from recovery with /data unmounted.
 EOF
 }
 
@@ -143,7 +166,13 @@ ASSUME_YES=0
 REPLACE_EXISTING="${PMOS_REPLACE_EXISTING:-0}"
 REMOVE_EXISTING="${PMOS_REMOVE_EXISTING:-0}"
 REMOVE_LEGACY="${PMOS_REMOVE_LEGACY:-0}"
-WHOLE_OUTPUT="${PMOS_WHOLE_OUTPUT:-$SCRIPT_DIR/../artifacts/whole_device_prep}"
+ARTIFACTS_DIR="${PMOS_ARTIFACTS_DIR:-$SCRIPT_DIR/../artifacts}"
+WHOLE_OUTPUT="${PMOS_WHOLE_OUTPUT:-$ARTIFACTS_DIR/whole_device_prep}"
+WHOLE_BOOT_IMAGE="${PMOS_WHOLE_BOOT_IMAGE:-$ARTIFACTS_DIR/boot_latest.img}"
+WHOLE_INIT_BOOT_IMAGE="${PMOS_WHOLE_INIT_BOOT_IMAGE:-$ARTIFACTS_DIR/init_boot_latest.img}"
+WHOLE_VBMETA_IMAGE="${PMOS_WHOLE_VBMETA_IMAGE:-$ARTIFACTS_DIR/vbmeta_latest.img}"
+WHOLE_VENDOR_BOOT_IMAGE="${PMOS_WHOLE_VENDOR_BOOT_IMAGE:-}"
+WHOLE_DTBO_IMAGE="${PMOS_WHOLE_DTBO_IMAGE:-}"
 EXISTING_DIR=0
 EXISTING_LEGACY=0
 EXISTING_MARKER=0
@@ -520,13 +549,40 @@ build_whole_package() {
     account_note="the image's default account (account setup was disabled)"
   fi
 
-  echo "Building the offline whole-device package in $out"
+  echo "Building the destructive offline whole-device package in $out"
   mkdir -p "$out"
   chmod 700 "$out"
   cp "$pack" "$out/rootfs.sparsepack"
   cp "$TMP_DIR/tools/sparse_pack" "$out/sparse_pack"
-  chmod 600 "$out/rootfs.sparsepack"
+  cp "$WHOLE_BOOT_IMAGE" "$out/boot.img"
+  cp "$WHOLE_INIT_BOOT_IMAGE" "$out/init_boot.img"
+  cp "$WHOLE_VBMETA_IMAGE" "$out/vbmeta.img"
+  chmod 600 "$out/rootfs.sparsepack" "$out/boot.img" \
+            "$out/init_boot.img" "$out/vbmeta.img"
   chmod 700 "$out/sparse_pack"
+
+  package_images="boot.img init_boot.img vbmeta.img"
+  if [ -n "$WHOLE_VENDOR_BOOT_IMAGE" ]; then
+    cp "$WHOLE_VENDOR_BOOT_IMAGE" "$out/vendor_boot.img"
+    chmod 600 "$out/vendor_boot.img"
+    package_images="$package_images vendor_boot.img"
+  fi
+  if [ -n "$WHOLE_DTBO_IMAGE" ]; then
+    cp "$WHOLE_DTBO_IMAGE" "$out/dtbo.img"
+    chmod 600 "$out/dtbo.img"
+    package_images="$package_images dtbo.img"
+  fi
+
+  ( umask 077; printf '%s\n' "$PMOS_DM_METADATA_KEY" > "$out/pmos-dm-key" )
+  chmod 600 "$out/pmos-dm-key"
+  ( umask 077
+    {
+      printf 'PMOS_DM_CIPHER=%s\n' "$PMOS_DM_CIPHER"
+      printf 'PMOS_DM_SECTOR_SIZE=%s\n' "$PMOS_DM_SECTOR_SIZE"
+      printf 'PMOS_DM_WRAPPEDKEY=%s\n' "$PMOS_DM_WRAPPEDKEY"
+    } > "$out/pmos-dm.conf"
+  )
+  chmod 600 "$out/pmos-dm.conf"
 
   sed -e "s|@ROOTFS_SIZE_BYTES@|$ROOTFS_SIZE_BYTES|g" \
       -e "s|@ROOTFS_PACK_SHA256@|$pack_sha|g" \
@@ -535,27 +591,46 @@ build_whole_package() {
   chmod 700 "$out/install_whole_device.sh"
 
   cat > "$out/README.txt" <<EOF
-postmarketOS offline whole-device package
-=========================================
+postmarketOS destructive whole-device package
+=============================================
 
-Prepared: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Prepared:   $(date -u +%Y-%m-%dT%H:%M:%SZ)
 $account_line
-Source:   ${PMOS_SOURCE:-unknown}
-Image:    $ROOTFS_SIZE_BYTES bytes logical, $pack_size bytes packed
-Checksum: $pack_sha
+Source:     ${PMOS_SOURCE:-unknown}
+Image:      $ROOTFS_SIZE_BYTES bytes logical, $pack_size bytes packed
+Checksum:   $pack_sha
+Encryption: dm-default-key $PMOS_DM_CIPHER over userdata
+Boot chain: $package_images
 
-WARNING
--------
-Applying this package ERASES the Android userdata partition.  It is intended
-to be run from a recovery or initramfs shell with /data unmounted, never from
+WARNING - THIS ERASES ANDROID
+-----------------------------
+Applying this package erases Android on both slots:
+
+  * super     Android dynamic partitions (system, vendor, product, ...)
+  * metadata  Android metadata-encryption keys
+  * frp       factory reset protection
+  * userdata  replaced by the pmOS ext4 rootfs
+
+It writes the pmOS rootfs directly to userdata through dm-default-key, replaces
+boot/init_boot/vbmeta in slots A and B with the included pmOS images, and
+leaves slot B active.  It never writes misc.  It preserves both slots'
+low-level firmware (lk, gz, tee, scp, sspm, mcupm, dpm, spmfw, pi_img) and the
+calibration/identity partitions (persist, nvdata, nvcfg, nvram, proinfo,
+protect1/2, seccfg, otp, efuse, sec1).
+
+It must run from a recovery or initramfs shell with /data unmounted, never from
 running Android.  Back up anything you need first.  It is not a secure erase:
 old blocks outside the new filesystem may remain recoverable.
 
-The package contains:
+Package contents:
   rootfs.sparsepack          sparse ext4 rootfs (allocated extents only)
   sparse_pack                aarch64 pack apply/verify tool
-  install_whole_device.sh    recovery-side installer
-  SHA256SUMS                 checksums for these files
+  install_whole_device.sh    recovery-side destructive installer
+  $package_images
+  pmos-dm-key                dm-default-key key (0600; deleted after success)
+  pmos-dm.conf               dm cipher and sector options
+  SHA256SUMS                 checksums (pmos-dm-key is intentionally absent)
+  README.txt                 this file
 
 Verify the package before copying it to the device:
 
@@ -565,19 +640,23 @@ Usage
 -----
 Copy this directory to the device/recovery, then run as root:
 
-  PMOS_WHOLE_CONFIRM=ERASE-ANDROID sh install_whole_device.sh
+  PMOS_WHOLE_CONFIRM='ERASE ANDROID SLOT A' \\
+    sh install_whole_device.sh --remove-legacy
 
-The default destination is /dev/block/by-name/userdata.  A different block
-device can be passed as the first argument.
+Or run interactively and type the phrase when prompted.  Add --dry-run to print
+the plan without writing.  The default destination is /dev/block/by-name/userdata;
+a different device can be passed as the first argument.
 
 The rootfs was prepared in a temporary encrypted staging install on the
 tablet, so it includes the hardware modules, display/audio/camera services,
 and $account_note.  It also has a
 /pmos_whole_device marker at the filesystem root.
 
-This package does NOT include a boot image.  The existing encrypted-dual-boot
-initramfs expects /data/pmos/rootfs.img and will not boot this layout.  A boot
-image that mounts userdata directly is required before restarting.
+The included boot images must come from the same storage key file as this
+package.  boot.img carries the kernel with the direct-rootfs /init linked into
+its built-in initramfs; init_boot.img carries the same initramfs as a fallback
+for builds that honor the bootloader ramdisk.  Neither contains the dual-boot
+loopback init.
 
 Android was not modified while this package was prepared.  Temporary staging
 space under $WHOLE_WORK_DIR is removed afterwards.
@@ -585,8 +664,9 @@ EOF
   chmod 600 "$out/README.txt"
   (
     cd "$out"
-    sha256sum rootfs.sparsepack sparse_pack install_whole_device.sh README.txt \
-      > SHA256SUMS
+    # pmos-dm-key is deliberately excluded from the checksum list.
+    sha256sum rootfs.sparsepack sparse_pack install_whole_device.sh \
+      $package_images pmos-dm.conf README.txt > SHA256SUMS
     chmod 600 SHA256SUMS
   )
   WHOLE_PACKAGE_DIR="$out"
@@ -628,6 +708,16 @@ while [ "$#" -gt 0 ]; do
     --whole-output)
       [ "$#" -ge 2 ] || { echo "ERROR: --whole-output needs a path" >&2; exit 2; }
       WHOLE_OUTPUT="$2"; shift 2 ;;
+    --whole-boot-image|--whole-init-boot-image|--whole-vbmeta-image|--whole-vendor-boot-image|--whole-dtbo-image)
+      [ "$#" -ge 2 ] || { echo "ERROR: $1 needs a path" >&2; exit 2; }
+      case "$1" in
+        --whole-boot-image) WHOLE_BOOT_IMAGE="$2" ;;
+        --whole-init-boot-image) WHOLE_INIT_BOOT_IMAGE="$2" ;;
+        --whole-vbmeta-image) WHOLE_VBMETA_IMAGE="$2" ;;
+        --whole-vendor-boot-image) WHOLE_VENDOR_BOOT_IMAGE="$2" ;;
+        --whole-dtbo-image) WHOLE_DTBO_IMAGE="$2" ;;
+      esac
+      shift 2 ;;
     -n|--username)
       [ "$#" -ge 2 ] || { echo "ERROR: --username needs a value" >&2; exit 2; }
       PMOS_USERNAME="$2"; shift 2 ;;
@@ -691,21 +781,36 @@ if [ "$ROOTFS_SIZE_BYTES" -lt 2147483648 ]; then
   exit 2
 fi
 
-# Installation mode.  The whole-device path only prepares an offline package;
-# it never writes userdata while Android is running.
+# Installation mode.  The whole-device path prepares an offline package; it
+# does not write userdata while Android is running, but applying the package
+# later erases Android.
 if [ -z "$PMOS_MODE" ]; then
   if [ "$ASSUME_YES" = "1" ] || ! is_tty; then
     PMOS_MODE="dual"
   else
     echo "Installation mode:"
     echo "  1) Dual boot - keep Android, install pmOS in $INSTALL_DIR (default)"
-    echo "  2) Whole device - prepare an offline package; Android userdata is not touched"
+    echo "  2) Whole device - prepare a destructive offline package; Android is"
+    echo "     erased when the package is applied from recovery"
     MODE_CHOICE=$(ask_line "Select [1-2] (default 1): " "1")
     case "$MODE_CHOICE" in
       1|dual|d) PMOS_MODE="dual" ;;
       2|whole|w) PMOS_MODE="whole" ;;
       *) die "invalid mode selection '$MODE_CHOICE'" ;;
     esac
+  fi
+fi
+
+if [ "$PMOS_MODE" = "whole" ]; then
+  for whole_img in "$WHOLE_BOOT_IMAGE" "$WHOLE_INIT_BOOT_IMAGE" "$WHOLE_VBMETA_IMAGE"; do
+    [ -s "$whole_img" ] || \
+      die "whole-device mode needs a boot-chain image: $whole_img is missing or empty"
+  done
+  if [ -n "$WHOLE_VENDOR_BOOT_IMAGE" ] && [ ! -s "$WHOLE_VENDOR_BOOT_IMAGE" ]; then
+    die "PMOS_WHOLE_VENDOR_BOOT_IMAGE is set but is missing or empty: $WHOLE_VENDOR_BOOT_IMAGE"
+  fi
+  if [ -n "$WHOLE_DTBO_IMAGE" ] && [ ! -s "$WHOLE_DTBO_IMAGE" ]; then
+    die "PMOS_WHOLE_DTBO_IMAGE is set but is missing or empty: $WHOLE_DTBO_IMAGE"
   fi
 fi
 
@@ -1058,7 +1163,8 @@ fi
 # encryption; the fscrypt key belongs to /data/pmos only.  The fscrypt key is
 # created here on first use and kept in a 0600 file outside this repository.
 # A whole-device preparation still uses fscrypt for its temporary staging
-# directory, but it does not need Android's metadata key.
+# directory, and it also needs the metadata key: the applied rootfs is
+# encrypted by dm-default-key over the whole userdata partition.
 PMOS_DM_METADATA_KEY="${PMOS_DM_METADATA_KEY:-}"
 PMOS_FSCRYPT_MASTER_KEY="${PMOS_FSCRYPT_MASTER_KEY:-}"
 PMOS_FSCRYPT_IDENTIFIER="${PMOS_FSCRYPT_IDENTIFIER:-}"
@@ -1071,6 +1177,29 @@ if [ -f "$STORAGE_KEYS_FILE" ]; then
   . "$STORAGE_KEYS_FILE"
   set +a
 fi
+PMOS_DM_CIPHER="${PMOS_DM_CIPHER:-aes-xts-plain64}"
+PMOS_DM_SECTOR_SIZE="${PMOS_DM_SECTOR_SIZE:-4096}"
+PMOS_DM_WRAPPEDKEY="${PMOS_DM_WRAPPEDKEY:-0}"
+case "$PMOS_DM_CIPHER" in
+  ""|*[!A-Za-z0-9-]*)
+    echo "ERROR: PMOS_DM_CIPHER is not a valid cipher name." >&2
+    exit 1
+    ;;
+esac
+case "$PMOS_DM_SECTOR_SIZE" in
+  512|4096) ;;
+  *)
+    echo "ERROR: PMOS_DM_SECTOR_SIZE must be 512 or 4096." >&2
+    exit 1
+    ;;
+esac
+case "$PMOS_DM_WRAPPEDKEY" in
+  0|1) ;;
+  *)
+    echo "ERROR: PMOS_DM_WRAPPEDKEY must be 0 or 1." >&2
+    exit 1
+    ;;
+esac
 
 save_storage_keys() {
   local dir tmp
@@ -1101,7 +1230,12 @@ fi
 require_hex PMOS_FSCRYPT_MASTER_KEY "$PMOS_FSCRYPT_MASTER_KEY" 32 128
 require_hex PMOS_DM_METADATA_KEY "$PMOS_DM_METADATA_KEY" 64 128
 require_hex PMOS_FSCRYPT_IDENTIFIER "$PMOS_FSCRYPT_IDENTIFIER" 32 32
-if [ -z "$PMOS_DM_METADATA_KEY" ] && [ "$PMOS_MODE" = "dual" ]; then
+if [ -z "$PMOS_DM_METADATA_KEY" ]; then
+  if [ "$PMOS_MODE" = "whole" ]; then
+    echo "ERROR: whole-device mode requires PMOS_DM_METADATA_KEY in $STORAGE_KEYS_FILE." >&2
+    echo "       The applied rootfs is encrypted by dm-default-key over userdata." >&2
+    exit 1
+  fi
   echo "WARNING: no Android metadata key in $STORAGE_KEYS_FILE." >&2
   echo "         Installation can proceed, but the boot image needs that key." >&2
 fi
@@ -1175,6 +1309,17 @@ mkdir -p "$PAYLOAD_DIR/usr/lib/modules" \
 # Extract out-of-tree hardware modules into usr/lib/modules/extra
 mkdir -p "$PAYLOAD_DIR/usr/lib/modules/extra"
 tar -xf "$DEPLOY_DIR/modules.tar.xz" -C "$PAYLOAD_DIR/usr/lib/modules/extra"
+
+# GNSS: the stock MediaTek daemon cannot be redistributed, so collect it and
+# its library closure from stock slot A while Android is still running.  The
+# payload also gets the NMEA-only GeoClue config, so a fresh install keeps the
+# verified GPS behaviour instead of falling back to network location.
+step gnss "Packaging the TB351FU GNSS runtime"
+progress 29 "Collecting the vendor GNSS runtime from stock slot A"
+python3 "$SCRIPT_DIR/deploy/tools/gnss_payload.py" \
+  --payload "$PAYLOAD_DIR" \
+  --repo-gnss "$DEPLOY_DIR/gnss" \
+  --adb adb
 
 # Built-in module index for the target kernel.  zram is built in, but
 # zramstart calls modprobe; without modules.builtin + depmod, kmod
@@ -1404,7 +1549,7 @@ if [ "$PMOS_MODE" = "whole" ]; then
 
   rm -rf "$TMP_DIR"
   echo "========================================================================"
-  echo " SUCCESS: offline whole-device package prepared"
+  echo " SUCCESS: destructive whole-device package prepared"
   echo ""
   echo " Package: $WHOLE_PACKAGE_DIR"
   if [ "$ACCOUNT_ENABLED" = "1" ]; then
@@ -1415,10 +1560,14 @@ if [ "$PMOS_MODE" = "whole" ]; then
   fi
   echo " Image:   $ROOTFS_SIZE_BYTES bytes logical"
   echo " Pack:    $WHOLE_PACK_BYTES bytes"
+  echo " Boot:    boot/init_boot/vbmeta included for slots A and B"
   echo ""
-  echo " Android userdata was NOT erased or reformatted."
-  echo " The package must be applied from recovery with /data unmounted."
-  echo " It contains no boot image; userdata-direct boot support is required."
+  echo " Android was NOT modified during preparation, but applying this package"
+  echo " erases super, metadata, frp and userdata, then writes pmOS directly to"
+  echo " userdata and replaces the boot chain in both slots."
+  echo " Apply it only from recovery with /data unmounted:"
+  echo "   PMOS_WHOLE_CONFIRM='ERASE ANDROID SLOT A' \\"
+  echo "     sh install_whole_device.sh --remove-legacy"
   echo " Read README.txt before using it."
   echo "========================================================================"
   progress 100 "Whole-device package ready"

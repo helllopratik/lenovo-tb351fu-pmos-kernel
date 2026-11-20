@@ -421,12 +421,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
         mode_box.append(_section(
             "Installation mode",
             "Dual boot keeps Android and is the normal choice. Whole device "
-            "only prepares an offline package; it never erases Android while "
-            "Android is running."))
+            "prepares a destructive offline package: applying it from recovery "
+            "erases Android and replaces the boot chain in slots A and B."))
         self.radio_dual = Gtk.CheckButton(
             label="Dual boot — keep Android and install postmarketOS into /data/pmos")
         self.radio_whole = Gtk.CheckButton(
-            label="Whole device — prepare an offline package (Android stays untouched)")
+            label="Whole device — prepare a destructive package (erases Android when applied)")
         self.radio_whole.set_group(self.radio_dual)
         self.radio_dual.set_active(True)
         for radio in (self.radio_dual, self.radio_whole):
@@ -863,8 +863,11 @@ class InstallerWindow(Gtk.ApplicationWindow):
             if adb_root:
                 self.mode_hint.set_text(
                     "The package is assembled in temporary encrypted staging "
-                    "under /data and copied here; the staging directory is "
-                    "removed afterwards. Slot B is not flashed or activated.")
+                    "under /data and copied here; Android is not changed until "
+                    "you apply the package from recovery. Slot B is not flashed "
+                    "or activated. Applying it erases super, metadata, frp and "
+                    "userdata, then writes pmOS directly to userdata and "
+                    "replaces the boot chain in slots A and B.")
             else:
                 self.mode_hint.set_text(
                     "Whole-device preparation needs Android booted with root adb.")
@@ -1296,7 +1299,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
             if self.chk_remove_legacy.get_active() and existing.legacy:
                 action += " and the legacy image"
         elif whole:
-            action = "Prepare a whole-device package (Android untouched)"
+            action = "Prepare a destructive whole-device package"
         elif existing.present and not existing.error:
             action = "Dual boot — replace the existing pmOS rootfs"
         else:
@@ -1328,7 +1331,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             size_text = "Skipped"
         self.summary_values["RootFS size"].set_text(size_text)
         if removing or whole:
-            boot_text = "Not touched"
+            boot_text = ("Package includes pmOS boot/init_boot/vbmeta for slots A and B"
+                         if whole else "Not touched")
         elif self.chk_flash.get_active():
             boot_text = ("boot_b + init_boot_b + vbmeta_b + vendor_boot_b + dtbo_b"
                          + (f" + {len(images.slot_b_firmware)} firmware images"
@@ -1364,7 +1368,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         if removing:
             self.install_btn.set_label("Remove installation")
         elif whole:
-            self.install_btn.set_label("Prepare whole-device package")
+            self.install_btn.set_label("Prepare destructive whole-device package")
         else:
             self.install_btn.set_label("Start installation")
 
@@ -1444,14 +1448,24 @@ class InstallerWindow(Gtk.ApplicationWindow):
             button = "Remove"
         elif options.mode == "whole":
             lines += [
-                "Will prepare an offline whole-device package in:",
+                "Will prepare a destructive whole-device package in:",
                 f"  {options.whole_output}",
                 "",
                 "The rootfs is assembled in temporary encrypted staging under "
-                "/data and removed afterwards.",
-                "Android /data, slot A and slot B are not modified or activated.",
+                "/data and removed afterwards. Android is not changed while the "
+                "package is being prepared.",
+                "",
+                "Applying the package from recovery (with /data unmounted) will:",
+                "  erase super, metadata, frp and userdata",
+                "  write pmOS directly to userdata with dm-default-key",
+                "  flash the included pmOS boot/init_boot/vbmeta to slots A and B",
+                "  leave slot B active, preserve low-level firmware and calibration,",
+                "    and never write misc",
+                "",
+                "The package needs a matching pmOS boot chain and the existing "
+                "Android metadata key. It is not a secure erase.",
             ]
-            message = "Prepare the whole-device package?"
+            message = "Prepare the destructive whole-device package?"
             button = "Prepare"
         else:
             if options.flash_boot:
@@ -1522,6 +1536,16 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 problems.append("Whole-device preparation requires Android booted with adb.")
             elif not device.root:
                 problems.append("Whole-device preparation requires root adb.")
+            images = self._current_images()
+            missing = [name for name, path in (
+                ("pmOS boot", images.boot),
+                ("pmOS init_boot", images.init_boot),
+                ("pmOS vbmeta", images.vbmeta),
+            ) if not path or not Path(path).is_file()]
+            if missing:
+                problems.append(
+                    "Whole-device mode needs a matching pmOS boot chain: "
+                    + ", ".join(missing) + ".")
             output_text = self.whole_entry.get_text().strip()
             if not output_text:
                 problems.append("Choose an output folder for the whole-device package.")
@@ -1767,10 +1791,11 @@ class InstallerWindow(Gtk.ApplicationWindow):
             output = (GLib.markup_escape_text(str(options.whole_output))
                       if options and options.whole_output else "the output folder")
             self.install_status.set_markup(
-                "<span foreground='#26a269'><b>Whole-device package "
-                f"prepared in {output}.</b></span> Android and slot B were not "
-                "modified. Follow the package README to install it from "
-                "recovery.")
+                "<span foreground='#26a269'><b>Destructive whole-device package "
+                f"prepared in {output}.</b></span> Android was not changed while "
+                "preparing it. Apply the package only from recovery with /data "
+                "unmounted; it erases Android and replaces the boot chain in "
+                "both slots.")
         else:
             self.step_label.set_text("Installation complete")
             self.install_status.set_markup(

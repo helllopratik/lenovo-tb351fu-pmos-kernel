@@ -1009,9 +1009,16 @@ def install(options: InstallOptions, emit: Callable[[str], None],
             raise InstallerError("no server rootfs image URL is configured")
         if not options.images.modules:
             raise InstallerError("missing deploy/modules.tar.xz payload")
-        if whole and not options.whole_output:
-            raise InstallerError(
-                "whole-device mode needs an output directory")
+        if whole:
+            if not options.whole_output:
+                raise InstallerError(
+                    "whole-device mode needs an output directory")
+            missing_boot = [name for name in ("boot", "init_boot", "vbmeta")
+                            if not getattr(options.images, name)]
+            if missing_boot:
+                raise InstallerError(
+                    "whole-device mode needs a matching pmOS boot chain: "
+                    + ", ".join(missing_boot))
         if account_enabled:
             if not options.username:
                 raise InstallerError("an account username is required")
@@ -1125,6 +1132,17 @@ def install(options: InstallOptions, emit: Callable[[str], None],
                 argv += ["--size", f"{options.size_gib}G"]
             if whole:
                 argv += ["--whole-output", str(options.whole_output)]
+                argv += [
+                    "--whole-boot-image", str(options.images.boot),
+                    "--whole-init-boot-image", str(options.images.init_boot),
+                    "--whole-vbmeta-image", str(options.images.vbmeta),
+                ]
+                if options.images.vendor_boot:
+                    argv += ["--whole-vendor-boot-image",
+                             str(options.images.vendor_boot)]
+                if options.images.dtbo:
+                    argv += ["--whole-dtbo-image",
+                             str(options.images.dtbo)]
             if options.existing_action == "replace":
                 argv.append("--replace-existing")
             if account_enabled:

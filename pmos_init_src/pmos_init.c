@@ -1213,8 +1213,18 @@ static void userdata_diag(void)
 		syscall3(57, fd, 0, 0);
 }
 
+static int path_exists(const char *path)
+{
+	long fd = syscall4(56, AT_FDCWD, (long)path, O_RDONLY | O_CLOEXEC, 0);
+
+	if (fd < 0)
+		return 0;
+	syscall3(57, fd, 0, 0);
+	return 1;
+}
+
 static int try_userdata_rootfs(const char **mounted_target,
-			       const char **mounted_fs)
+			       const char **mounted_fs, int *direct_rootfs)
 {
 	struct userdata_info ud;
 	int have_ud = 0;
@@ -1225,6 +1235,7 @@ static int try_userdata_rootfs(const char **mounted_target,
 
 	memset(&ud, 0, sizeof(ud));
 	memset(dmdev, 0, sizeof(dmdev));
+	*direct_rootfs = 0;
 
 	for (attempt = 0; attempt < USERDATA_WAIT_ATTEMPTS; attempt++) {
 		int d;
@@ -1282,6 +1293,38 @@ static int try_userdata_rootfs(const char **mounted_target,
 					kmsg(devs[d]);
 					kmsg("\n");
 
+					/* A whole-device install writes the ext4
+					 * rootfs directly to userdata and leaves
+					 * /pmos_whole_device at its root.  The
+					 * dm-default-key mapping (or the raw
+					 * partition) is the root filesystem;
+					 * there is no fscrypt layer and no
+					 * nested rootfs image. */
+					if (path_exists("/data_host/pmos_whole_device")) {
+						long drc;
+
+						kmsg("<3>PMOSINIT: whole-device marker found; mounting userdata as /root\n");
+						syscall3(39, (long)"/data_host", 0, 0);
+						drc = mount_fs_flags(devs[d], "/root",
+								     fs_types[f],
+								     MS_NOATIME, 0);
+						if (drc == 0) {
+							kmsg("<3>PMOSINIT: whole-device rootfs mounted (");
+							kmsg(fs_types[f]);
+							kmsg(") on /root via ");
+							kmsg(devs[d]);
+							kmsg("\n");
+							*mounted_target =
+								"whole-device userdata (direct rootfs)";
+							*mounted_fs = fs_types[f];
+							*direct_rootfs = 1;
+							return 0;
+						}
+						klong("<3>PMOSINIT: whole-device rootfs mount failed rc=",
+						      drc);
+						continue;
+					}
+
 					if (add_fscrypt_key("/data_host") != 0) {
 						syscall3(39, (long)"/data_host", 0, 0);
 						continue;
@@ -1333,10 +1376,11 @@ void _start(void)
 	long rc = -1;
 	int tries;
 	int is_loopback = 0;
+	int direct_rootfs = 0;
 	const char *mounted_target = 0;
 	const char *mounted_fs = 0;
 
-	kmsg("<3>PMOSINIT: starting rootfs switch sequence (Attempt 279 - encrypted UFS loopback)\n");
+	kmsg("<3>PMOSINIT: starting rootfs switch sequence (Attempt 280 - dual-boot or whole-device)\n");
 	kmsg(PMOS_DM_METADATA_KEY[0] ?
 	     "<3>PMOSINIT: storage config: metadata key present\n" :
 	     "<3>PMOSINIT: storage config: no metadata key; raw userdata only\n");
@@ -1391,10 +1435,11 @@ void _start(void)
 	syscall4(33, AT_FDCWD, (long)"/dev/sdc64", S_IFBLK | 0660,
 		 (259 << 8) | 48);
 
-	/* STEP 1: Android userdata -> dm-default-key -> fscrypt -> loop */
-	rc = try_userdata_rootfs(&mounted_target, &mounted_fs);
+	/* STEP 1: Android userdata -> dm-default-key -> fscrypt -> loop,
+	 * or, for a whole-device install, userdata directly as the rootfs. */
+	rc = try_userdata_rootfs(&mounted_target, &mounted_fs, &direct_rootfs);
 	if (rc == 0) {
-		is_loopback = 1;
+		is_loopback = !direct_rootfs;
 	} else {
 		kmsg("<3>PMOSINIT: encrypted/raw userdata rootfs path unavailable; trying legacy targets\n");
 	}

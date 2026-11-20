@@ -7,12 +7,14 @@ the GTK import is checked but no window is created.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -329,7 +331,86 @@ def check_scripts() -> str:
                               env={**os.environ, "PMOS_MARKER_TEST": "error"})
         assert proc.returncode == 1, (script, proc.returncode)
         assert "%%PMOS_ERROR:1" in proc.stdout, (script, proc.stdout)
-    return "shell syntax, help, marker bytes, option errors and slot-A guards"
+    whole = rootfs.parent / "deploy" / "installer" / "whole_device_install.sh"
+    proc = subprocess.run(["sh", "-n", str(whole)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"{whole}: {proc.stderr.strip()}"
+    proc = subprocess.run(["sh", str(whole), "--help"], capture_output=True, text=True)
+    assert proc.returncode == 0, (whole, proc.stderr)
+    assert "ERASE ANDROID SLOT A" in proc.stdout
+    assert "--remove-legacy" in proc.stdout
+    assert "--dry-run" in proc.stdout
+    assert "ERASE ANDROID SLOT A" in proc.stdout
+    assert "--remove-legacy" in proc.stdout
+    whole_text = whole.read_text()
+    assert "ERASE ANDROID SLOT A" in whole_text
+    assert "misc" in whole_text
+    assert "pmos-dm-key" in whole_text
+    assert "remove --force" in whole_text or "dmsetup remove" in whole_text
+    assert "provision_slot_b_from_a vendor_boot" in whole_text
+    assert "provision_slot_b_from_a dtbo" in whole_text
+    assert "vbmeta_system" in whole_text and "vbmeta_vendor" in whole_text
+    proc = subprocess.run(["sh", str(whole), "--bogus"],
+                          capture_output=True, text=True)
+    assert proc.returncode != 0, (proc.returncode, proc.stderr)
+    return ("shell syntax, help, marker bytes, option errors, whole apply "
+            "safety, slot-A guards and slot-B vendor_boot/dtbo provisioning")
+
+
+def check_gnss_payload() -> str:
+    paths = backend.repo_paths()
+    common = paths["common"]
+    gnss = paths["deploy"] / "gnss"
+    tool = paths["deploy"] / "tools" / "gnss_payload.py"
+
+    rootfs_text = (common / "install_pmos_rootfs.sh").read_text()
+    assert "deploy/tools/gnss_payload.py" in rootfs_text
+    assert "--repo-gnss" in rootfs_text
+
+    tool_text = tool.read_text()
+    assert 'MNLD = "/vendor/bin/mnld"' in tool_text
+    assert "MNL_Config.xml" in tool_text
+    assert "mpe.conf" in tool_text
+    assert '"vendor", "bin"' in tool_text
+    assert '"system", "vendor"' in tool_text
+    assert "verify_payload(opt, tree)" in tool_text
+
+    proc = subprocess.run([sys.executable, str(tool), "--help"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    for flag in ("--payload", "--repo-gnss", "--adb"):
+        assert flag in proc.stdout, (flag, proc.stdout)
+
+    conf = (gnss / "geoclue.conf").read_text()
+    assert "nmea-socket=/run/tablet-gps/nmea.sock" in conf
+    for section in ("ip", "wifi", "static-source", "3g", "cdma",
+                    "modem-gps"):
+        match = re.search(
+            rf"^\[{re.escape(section)}\]\s*$([\s\S]*?)(?=^\[|\Z)",
+            conf, re.MULTILINE,
+        )
+        assert match, section
+        assert re.search(r"^enable=false\s*$", match.group(1),
+                         re.MULTILINE), section
+    assert re.search(
+        r"^\[network-nmea\]\s*$[\s\S]*?^enable=true\s*$",
+        conf, re.MULTILINE,
+    )
+
+    for name in ("tablet-gnss-bridge.py", "run-gps.sh", "run-mnld.sh",
+                 "gps-runtime-inner.sh", "ld.config.txt",
+                 "tb351fu-gps.service", "tb351fu-gps.socket",
+                 "modules/gps_pwr.ko", "modules/gps_drv_stp.ko"):
+        assert (gnss / name).is_file(), name
+
+    spec = importlib.util.spec_from_file_location("gnss_payload", tool)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    needed = module.elf_needed(sys.executable)
+    assert needed, "ELF DT_NEEDED parser returned nothing"
+
+    return ("GNSS builder wired into the installer, NMEA-only GeoClue config, "
+            "units/modules present and ELF dependency parser works")
 
 
 def check_repo_paths() -> str:
@@ -460,6 +541,9 @@ def check_orchestration() -> str:
             whole = backend.InstallOptions(
                 device=backend.Device(serial="FAKE", mode="adb", root=True),
                 images=backend.ImageSet(
+                    boot=image_paths["boot"],
+                    init_boot=image_paths["init_boot"],
+                    vbmeta=image_paths["vbmeta"],
                     modules=image_paths["modules"],
                     firmware=image_paths["firmware"]),
                 size_bytes=0,
@@ -593,6 +677,7 @@ CHECKS = [
     ("bundle discovery", check_bundle_scan),
     ("partition roles", check_partition_roles),
     ("helper scripts", check_scripts),
+    ("GNSS payload", check_gnss_payload),
     ("repository discovery", check_repo_paths),
     ("existing-install detection", check_existing_detection),
     ("install orchestration", check_orchestration),
