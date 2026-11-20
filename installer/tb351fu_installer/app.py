@@ -19,16 +19,63 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 from . import backend  # noqa: E402
 
 APP_ID = "org.postmarketos.TB351FUInstaller"
+ERROR_COLOR = "#ff7b72"
+SUCCESS_COLOR = "#5dd39e"
 CSS = """
-.dim { opacity: 0.65; }
+window {
+    background-color: #14161b;
+    color: #e8ebf2;
+}
+headerbar {
+    background-color: #191c22;
+    border-bottom: 1px solid #2b303a;
+    box-shadow: none;
+}
+.card {
+    background-color: #1c2028;
+    border: 1px solid #2b303a;
+    border-radius: 12px;
+    padding: 16px;
+}
+.card > border { border: none; }
+.dim { opacity: 0.72; }
 .mono { font-family: monospace; }
-.error { color: #c01c28; }
-.success { color: #26a269; }
-.warning { color: #e5a50a; }
+.error { color: #ff7b72; }
+.success { color: #5dd39e; }
+.warning { color: #f2c14e; }
 .page-title { font-size: 1.45em; font-weight: bold; }
 .section-title { font-size: 1.1em; font-weight: bold; }
-.card { padding: 16px; }
 .log { font-family: monospace; font-size: 0.9em; }
+entry, spinbutton {
+    background-color: #101216;
+    color: #e8ebf2;
+}
+entry > text { color: #e8ebf2; }
+entry:focus, spinbutton:focus { outline-color: #5b9dff; }
+textview, textview text {
+    background-color: #101216;
+    color: #e8ebf2;
+}
+treeview.view {
+    background-color: #15181e;
+    color: #e8ebf2;
+}
+treeview.view:selected {
+    background-color: #2f5b9e;
+    color: #ffffff;
+}
+treeview.view header button {
+    background-color: #232730;
+    color: #e8ebf2;
+}
+progressbar trough { background-color: #2b303a; }
+progressbar progress { background-color: #5b9dff; }
+progressbar text { color: #e8ebf2; }
+separator { background-color: #2b303a; }
+tooltip {
+    background-color: #232730;
+    color: #e8ebf2;
+}
 """
 
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
@@ -67,10 +114,29 @@ def _label(text: str = "", *, xalign: float = 0.0, wrap: bool = False,
     label = Gtk.Label(label=text, xalign=xalign)
     label.set_wrap(wrap)
     if wrap:
-        label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        # GTK 4.22 reports the full string as the minimum width for
+        # WORD_CHAR labels, which forces the whole window wide.  WORD mode
+        # reports the longest word instead and still wraps prose normally.
+        label.set_wrap_mode(Gtk.WrapMode.WORD)
     if css:
         label.add_css_class(css)
     return label
+
+
+def _check(text: str) -> Gtk.CheckButton:
+    """A check/radio button whose label wraps instead of widening the page."""
+    button = Gtk.CheckButton()
+    button.set_child(_label(text, wrap=True))
+    return button
+
+
+def _entry(placeholder: str = "", *, width_chars: int = 28) -> Gtk.Entry:
+    entry = Gtk.Entry()
+    entry.set_hexpand(True)
+    entry.set_width_chars(width_chars)
+    if placeholder:
+        entry.set_placeholder_text(placeholder)
+    return entry
 
 
 def _section(title: str, subtitle: str = "") -> Gtk.Box:
@@ -92,7 +158,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application):
         super().__init__(application=app)
         self.set_title("TB351FU pmOS Installer")
-        self.set_default_size(1000, 720)
+        self.set_default_size(*self._initial_window_size())
 
         self.state = UiState()
         self.queue: queue.Queue[str] = queue.Queue()
@@ -114,7 +180,27 @@ class InstallerWindow(Gtk.ApplicationWindow):
     # construction
     # ------------------------------------------------------------------
 
+    def _initial_window_size(self) -> tuple[int, int]:
+        """Keep the default window inside the monitor, with room to spare."""
+        display = Gdk.Display.get_default()
+        if display:
+            monitors = display.get_monitors()
+            if monitors.get_n_items():
+                geometry = monitors.get_item(0).get_geometry()
+                width = min(1000, max(620, geometry.width - 120))
+                height = min(760, max(480, geometry.height - 160))
+                return width, height
+        return 960, 720
+
     def _install_css(self) -> None:
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            settings.set_property("gtk-application-prefer-dark-theme", True)
+            # Several popular themes (for example Breeze) ignore the
+            # prefer-dark hint and keep light buttons/headerbars.  Adwaita
+            # ships with GTK and its dark variant is designed to pair with the
+            # custom palette below, so use it for a consistent installer look.
+            settings.set_property("gtk-theme-name", "Adwaita-dark")
         provider = Gtk.CssProvider()
         provider.load_from_string(CSS)
         display = Gdk.Display.get_default()
@@ -137,6 +223,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_hhomogeneous(False)
         self.stack.set_vexpand(True)
 
         self.device_page = self._build_device_page()
@@ -149,7 +236,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.stack.add_named(self._scrollable(self.partitions_page), "partitions")
         self.stack.add_named(self._scrollable(self.images_page), "images")
         self.stack.add_named(self._scrollable(self.options_page), "options")
-        self.stack.add_named(self.install_page, "install")
+        self.stack.add_named(self._scrollable(self.install_page), "install")
         root.append(self.stack)
 
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -182,7 +269,10 @@ class InstallerWindow(Gtk.ApplicationWindow):
 
     def _scrollable(self, child: Gtk.Widget) -> Gtk.ScrolledWindow:
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # AUTOMATIC (not NEVER) lets the window shrink below a page's natural
+        # width; the page gets a scrollbar instead of forcing the whole window
+        # off-screen.
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_child(child)
         return scrolled
 
@@ -304,9 +394,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
             "Folder containing boot_pmos.img, init_boot_pmos.img, vbmeta.img, "
             "vendor_boot.img, dtbo.img and the slot-B firmware images."))
         bundle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.bundle_entry = Gtk.Entry()
-        self.bundle_entry.set_hexpand(True)
-        self.bundle_entry.set_placeholder_text("/mnt/Nvme/slot_b_bundle")
+        self.bundle_entry = _entry("/mnt/Nvme/slot_b_bundle", width_chars=32)
         self.bundle_entry.connect("changed", lambda *_: self._on_bundle_changed())
         self.bundle_browse_btn = Gtk.Button(label="Browse…")
         self.bundle_browse_btn.connect("clicked", lambda *_: self._browse_bundle())
@@ -333,9 +421,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         ]
         for row, (key, title, hint) in enumerate(rows):
             label = _label(title)
-            entry = Gtk.Entry()
-            entry.set_hexpand(True)
-            entry.set_placeholder_text(hint)
+            entry = _entry(hint)
             entry.connect("changed", lambda *_: self._on_images_changed())
             browse = Gtk.Button(label="Browse…")
             browse.connect("clicked", lambda _b, k=key, t=title: self._browse_image(k, t))
@@ -350,9 +436,9 @@ class InstallerWindow(Gtk.ApplicationWindow):
             self.image_status[key] = status
         page.append(_card(grid))
 
-        self.chk_firmware = Gtk.CheckButton(
-            label="Provision the slot-B firmware from the bundle "
-                  "(lk, tee, gz, scp, sspm, mcupm, dpm, spmfw, pi_img)")
+        self.chk_firmware = _check(
+            "Provision the slot-B firmware from the bundle "
+            "(lk, tee, gz, scp, sspm, mcupm, dpm, spmfw, pi_img)")
         self.chk_firmware.set_active(False)
         self.chk_firmware.set_sensitive(False)
         self.chk_firmware.connect("toggled", lambda *_: self._on_images_changed())
@@ -361,12 +447,11 @@ class InstallerWindow(Gtk.ApplicationWindow):
         page.append(self.firmware_status)
 
         options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.chk_flash = Gtk.CheckButton(label="Flash the pmOS boot chain to slot B")
+        self.chk_flash = _check("Flash the pmOS boot chain to slot B")
         self.chk_flash.set_active(True)
-        self.chk_rootfs = Gtk.CheckButton(label="Install the postmarketOS rootfs in /data")
+        self.chk_rootfs = _check("Install the postmarketOS rootfs in /data")
         self.chk_rootfs.set_active(True)
-        self.chk_switch = Gtk.CheckButton(
-            label="Switch to slot B and reboot when finished")
+        self.chk_switch = _check("Switch to slot B and reboot when finished")
         self.chk_switch.set_active(True)
         for chk in (self.chk_flash, self.chk_rootfs, self.chk_switch):
             chk.connect("toggled", lambda *_: self._on_images_changed())
@@ -397,17 +482,17 @@ class InstallerWindow(Gtk.ApplicationWindow):
             "Read-only check of /data/pmos, its marker and the legacy image."))
         self.existing_status = _label("Not checked yet.", wrap=True)
         existing_box.append(self.existing_status)
-        self.radio_replace = Gtk.CheckButton(
-            label="Replace the existing pmOS rootfs (Android is kept)")
-        self.radio_remove = Gtk.CheckButton(
-            label="Remove the existing pmOS installation and exit")
+        self.radio_replace = _check(
+            "Replace the existing pmOS rootfs (Android is kept)")
+        self.radio_remove = _check(
+            "Remove the existing pmOS installation and exit")
         self.radio_remove.set_group(self.radio_replace)
         self.radio_replace.set_active(True)
         for radio in (self.radio_replace, self.radio_remove):
             radio.connect("toggled", lambda *_: self._on_options_changed())
             existing_box.append(radio)
-        self.chk_remove_legacy = Gtk.CheckButton(
-            label="Also delete the legacy image /data/pmos_legacy/rootfs.img")
+        self.chk_remove_legacy = _check(
+            "Also delete the legacy image /data/pmos_legacy/rootfs.img")
         self.chk_remove_legacy.connect(
             "toggled", lambda *_: self._on_options_changed())
         existing_box.append(self.chk_remove_legacy)
@@ -423,18 +508,17 @@ class InstallerWindow(Gtk.ApplicationWindow):
             "Dual boot keeps Android and is the normal choice. Whole device "
             "prepares a destructive offline package: applying it from recovery "
             "erases Android and replaces the boot chain in slots A and B."))
-        self.radio_dual = Gtk.CheckButton(
-            label="Dual boot — keep Android and install postmarketOS into /data/pmos")
-        self.radio_whole = Gtk.CheckButton(
-            label="Whole device — prepare a destructive package (erases Android when applied)")
+        self.radio_dual = _check(
+            "Dual boot — keep Android and install postmarketOS into /data/pmos")
+        self.radio_whole = _check(
+            "Whole device — prepare a destructive package (erases Android when applied)")
         self.radio_whole.set_group(self.radio_dual)
         self.radio_dual.set_active(True)
         for radio in (self.radio_dual, self.radio_whole):
             radio.connect("toggled", lambda *_: self._on_options_changed())
             mode_box.append(radio)
         self.whole_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.whole_entry = Gtk.Entry()
-        self.whole_entry.set_hexpand(True)
+        self.whole_entry = _entry(width_chars=30)
         self.whole_entry.set_text(str(
             backend.repo_paths()["artifacts"] / "whole_device_prep"))
         self.whole_entry.connect("changed", lambda *_: self._on_options_changed())
@@ -453,8 +537,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
             "RootFS image source",
             "Download the published image from the server, or select a local "
             "image on the previous page."))
-        self.radio_manual = Gtk.CheckButton(label="Use a local image file")
-        self.radio_auto = Gtk.CheckButton(label="Download from the server")
+        self.radio_manual = _check("Use a local image file")
+        self.radio_auto = _check("Download from the server")
         self.radio_auto.set_group(self.radio_manual)
         self.radio_manual.set_active(True)
         for radio in (self.radio_manual, self.radio_auto):
@@ -462,19 +546,17 @@ class InstallerWindow(Gtk.ApplicationWindow):
             source_box.append(radio)
         self.auto_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         url_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.url_entry = Gtk.Entry()
-        self.url_entry.set_hexpand(True)
-        self.url_entry.set_placeholder_text(backend.default_image_url()
-                                            or "https://…/rootfs.img.zst")
+        self.url_entry = _entry(
+            backend.default_image_url() or "https://…/rootfs.img.zst",
+            width_chars=30)
         self.url_entry.set_text(backend.default_image_url())
         self.url_entry.connect("changed", lambda *_: self._on_options_changed())
         url_row.append(_label("URL:"))
         url_row.append(self.url_entry)
         self.auto_box.append(url_row)
         sha_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.sha_entry = Gtk.Entry()
-        self.sha_entry.set_hexpand(True)
-        self.sha_entry.set_placeholder_text("Optional SHA-256 of the downloaded file")
+        self.sha_entry = _entry(
+            "Optional SHA-256 of the downloaded file", width_chars=30)
         self.sha_entry.connect("changed", lambda *_: self._on_options_changed())
         sha_row.append(_label("SHA-256:"))
         sha_row.append(self.sha_entry)
@@ -496,13 +578,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
             "hashed on this computer with SHA-512 crypt; only the hash is sent "
             "to the tablet."))
         account_grid = Gtk.Grid(column_spacing=10, row_spacing=8)
-        self.username_entry = Gtk.Entry()
-        self.username_entry.set_placeholder_text("e.g. tablet")
+        self.username_entry = _entry("e.g. tablet", width_chars=24)
         self.username_entry.connect("changed", lambda *_: self._on_options_changed())
-        self.password_entry = Gtk.Entry()
+        self.password_entry = _entry(width_chars=24)
         self.password_entry.set_visibility(False)
         self.password_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
-        self.confirm_entry = Gtk.Entry()
+        self.confirm_entry = _entry(width_chars=24)
         self.confirm_entry.set_visibility(False)
         self.confirm_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
         account_grid.attach(_label("Username:"), 0, 0, 1, 1)
@@ -906,7 +987,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
     def _render_device(self, error: Optional[str]) -> None:
         device = self.state.device
         if error:
-            self.device_status.set_markup("<span foreground='#c01c28'>Detection error</span>")
+            self.device_status.set_markup(
+                f"<span foreground='{ERROR_COLOR}'>Detection error</span>")
             self.device_hint.set_text(error)
         elif not device:
             self.device_status.set_text("No device detected")
@@ -1776,14 +1858,14 @@ class InstallerWindow(Gtk.ApplicationWindow):
         if removed:
             self.step_label.set_text("Removal complete")
             self.install_status.set_markup(
-                "<span foreground='#26a269'><b>Existing pmOS installation "
+                f"<span foreground='{SUCCESS_COLOR}'><b>Existing pmOS installation "
                 "removed.</b></span> Android was not modified.")
         elif whole:
             self.step_label.set_text("Whole-device package ready")
             output = (GLib.markup_escape_text(str(options.whole_output))
                       if options and options.whole_output else "the output folder")
             self.install_status.set_markup(
-                "<span foreground='#26a269'><b>Destructive whole-device package "
+                f"<span foreground='{SUCCESS_COLOR}'><b>Destructive whole-device package "
                 f"prepared in {output}.</b></span> Android was not changed while "
                 "preparing it. Apply the package only from recovery with /data "
                 "unmounted; it erases Android and replaces the boot chain in "
@@ -1791,7 +1873,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         else:
             self.step_label.set_text("Installation complete")
             self.install_status.set_markup(
-                "<span foreground='#26a269'><b>Installation complete.</b></span>"
+                f"<span foreground='{SUCCESS_COLOR}'><b>Installation complete.</b></span>"
                 + (" The tablet is rebooting into postmarketOS."
                    if switched else ""))
         self._set_installing_ui(False)
@@ -1817,7 +1899,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
         self.progress.set_text("Failed")
         self.step_label.set_text(f"{action} failed")
         self.install_status.set_markup(
-            f"<span foreground='#c01c28'><b>{action} failed:</b></span> "
+            f"<span foreground='{ERROR_COLOR}'><b>{action} failed:</b></span> "
             + GLib.markup_escape_text(message))
         self._append_log(f"ERROR: {message}")
         self._set_installing_ui(False)
