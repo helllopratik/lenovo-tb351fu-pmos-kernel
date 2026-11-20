@@ -508,6 +508,67 @@ def check_charger_payload() -> str:
             "entry, 80% default and restricted sudoers helper are installed")
 
 
+def check_widevine_helper() -> str:
+    """The helper must find real users and both native and Flatpak profiles."""
+    paths = backend.repo_paths()
+    script = paths["deploy"] / "scripts" / "pmos-widevine-install.sh"
+    docs = paths["deploy"] / "docs" / "DRM_WIDEVINE.md"
+    rootfs = paths["common"] / "install_pmos_rootfs.sh"
+    if not script.is_file():
+        return f"SKIP: helper not found (deploy={paths['deploy']})"
+
+    proc = subprocess.run(["sh", "-n", str(script)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"{script}: {proc.stderr.strip()}"
+
+    proc = subprocess.run(["sh", str(script), "--help"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2, (proc.returncode, proc.stderr)
+    for flag in ("--browser", "--user", "--uninstall"):
+        assert flag in proc.stdout, (flag, proc.stdout)
+    proc = subprocess.run(["sh", str(script), "--bogus"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2, (proc.returncode, proc.stderr)
+
+    text = script.read_text()
+    # Account discovery: SUDO_USER, --user and a passwd fallback, never the
+    # old hard-coded /home/user.
+    assert "SUDO_USER" in text
+    assert "--user NAME" in text
+    assert "/etc/passwd" in text
+    assert "USER_HOME=/home/user" not in text
+    assert "USER_NAME=user" not in text
+    # Native and Flatpak profile layouts.
+    for needle in (
+        ".mozilla/firefox/*/prefs.js",
+        ".var/app/org.mozilla.firefox/.mozilla/firefox/*/prefs.js",
+        ".var/app/org.mozilla.firefox/config/mozilla/firefox/*/prefs.js",
+        ".var/app/org.chromium.Chromium/config/chromium",
+        "gmp-widevinecdm",
+        "latest-component-updated-widevine-cdm",
+        "ld-linux-aarch64",
+        "ld-musl-aarch64",
+    ):
+        assert needle in text, needle
+
+    # The rootfs payload copies every deploy/scripts helper to /usr/local/bin.
+    assert rootfs.is_file(), rootfs
+    rootfs_text = rootfs.read_text()
+    assert ('cp -a "$DEPLOY_DIR/scripts/"* "$PAYLOAD_DIR/usr/local/bin/"'
+            in rootfs_text)
+    assert 'chmod 755 "$PAYLOAD_DIR/usr/local/bin/"*' in rootfs_text
+
+    if docs.is_file():
+        doc_text = docs.read_text()
+        assert "Flatpak Firefox" in doc_text
+        assert "Flatpak Chromium" in doc_text
+        assert "musl" in doc_text and "glibc" in doc_text
+        assert "4.10.3112.0" in doc_text
+
+    return ("user auto-detection, native/Flatpak Firefox and Chromium paths, "
+            "AArch64/libc guards and rootfs payload wiring")
+
+
 def check_repo_paths() -> str:
     paths = backend.repo_paths()
     if not (paths["common"] / "install_pmos_rootfs.sh").is_file():
@@ -782,6 +843,7 @@ CHECKS = [
     ("helper scripts", check_scripts),
     ("GNSS payload", check_gnss_payload),
     ("charger payload", check_charger_payload),
+    ("Widevine helper", check_widevine_helper),
     ("repository discovery", check_repo_paths),
     ("existing-install detection", check_existing_detection),
     ("install orchestration", check_orchestration),

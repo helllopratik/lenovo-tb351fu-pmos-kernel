@@ -1,19 +1,20 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
-# Install a user-supplied ARM64 Widevine CDM for Firefox ESR / Chromium.
+# Install a user-supplied ARM64 Widevine CDM for Firefox and Chromium.
 #
-# pmOS does not ship proprietary Widevine blobs and cannot provide L1 (that
-# needs the vendor Trustonic TEE and a secure video path).  This helper only
-# installs an L3 CDM the user already owns, after checking that it is an
-# AArch64 ELF and warning when its C library does not match the browser.
+# pmOS ships no proprietary Widevine blob.  This helper installs an L3 CDM
+# you already own into native and Flatpak browser profiles, after checking
+# that it is an AArch64 ELF.  L1/L2 need the vendor Trustonic TEE and a
+# secure video path, which mainline pmOS does not provide.
 #
 # Usage:
-#   pmos-widevine-install.sh [--browser firefox|chromium|both] <cdm-dir>
-#   pmos-widevine-install.sh --uninstall [--browser firefox|chromium|both]
+#   pmos-widevine-install.sh [--browser firefox|chromium|both] [--user NAME] <cdm-dir>
+#   pmos-widevine-install.sh --uninstall [--browser firefox|chromium|both] [--user NAME]
 #
 # <cdm-dir> must contain libwidevinecdm.so and manifest.json.  ChromeOS-style
 # trees (WidevineCdm/<version>/_platform_specific/linux_arm64/...) are also
-# accepted.
+# accepted.  Without --user the helper uses $SUDO_USER, otherwise the first
+# regular account in /etc/passwd.
 
 set -eu
 
@@ -21,13 +22,24 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 BROWSER=both
 UNINSTALL=0
-USER_NAME=user
-USER_UID=10000
-USER_GID=10000
-USER_HOME=/home/user
+USER_NAME=
+USER_UID=
+USER_GID=
+USER_HOME=
 
 usage() {
-	sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+	cat <<'EOF'
+Install a user-supplied ARM64 Widevine CDM for Firefox and Chromium.
+
+Usage:
+  pmos-widevine-install.sh [--browser firefox|chromium|both] [--user NAME] <cdm-dir>
+  pmos-widevine-install.sh --uninstall [--browser firefox|chromium|both] [--user NAME]
+
+<cdm-dir> must contain libwidevinecdm.so and manifest.json.  ChromeOS-style
+trees (WidevineCdm/<version>/_platform_specific/linux_arm64/...) are accepted.
+Both native and Flatpak profiles are updated.  Without --user the helper uses
+$SUDO_USER, otherwise the first regular account in /etc/passwd.
+EOF
 	exit 2
 }
 
@@ -39,6 +51,21 @@ while [ $# -gt 0 ]; do
 		;;
 	--browser=*)
 		BROWSER=${1#--browser=}
+		;;
+	--user)
+		shift
+		USER_NAME=${1:-}
+		[ -n "$USER_NAME" ] || {
+			echo "--user needs a name" >&2
+			usage
+		}
+		;;
+	--user=*)
+		USER_NAME=${1#--user=}
+		[ -n "$USER_NAME" ] || {
+			echo "--user needs a name" >&2
+			usage
+		}
 		;;
 	--uninstall)
 		UNINSTALL=1
@@ -70,12 +97,70 @@ firefox|chromium|both) ;;
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
-	echo "run as root (the helper writes into $USER_HOME)" >&2
+	echo "run as root so the helper can write into the user's home directory" >&2
 	exit 1
 fi
 
+resolve_user() {
+	_name=$1
+	_entry=$(awk -F: -v n="$_name" '$1 == n { print; exit }' /etc/passwd)
+	if [ -z "$_entry" ]; then
+		echo "no such user: $_name" >&2
+		exit 1
+	fi
+	USER_NAME=${_entry%%:*}
+	USER_UID=$(printf '%s\n' "$_entry" | cut -d: -f3)
+	USER_GID=$(printf '%s\n' "$_entry" | cut -d: -f4)
+	USER_HOME=$(printf '%s\n' "$_entry" | cut -d: -f6)
+	if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+		echo "home directory for $USER_NAME not found: ${USER_HOME:-<empty>}" >&2
+		exit 1
+	fi
+}
+
+if [ -n "$USER_NAME" ]; then
+	resolve_user "$USER_NAME"
+elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+	resolve_user "$SUDO_USER"
+else
+	USER_NAME=$(awk -F: '$3 >= 1000 && $3 < 60000 && $6 != "" && \
+		$7 !~ /(nologin|false)$/ { print $1; exit }' /etc/passwd)
+	if [ -z "$USER_NAME" ]; then
+		echo "no regular user found; pass --user NAME" >&2
+		exit 1
+	fi
+	resolve_user "$USER_NAME"
+fi
+
+echo "user: $USER_NAME ($USER_HOME)"
+
 marker_start='# >>> pmos-widevine >>>'
 marker_end='# <<< pmos-widevine <<<'
+
+# Native Firefox and both path layouts used by the Flatpak.
+firefox_profiles() {
+	for _prefs in \
+		"$USER_HOME"/.mozilla/firefox/*/prefs.js \
+		"$USER_HOME"/.var/app/org.mozilla.firefox/.mozilla/firefox/*/prefs.js \
+		"$USER_HOME"/.var/app/org.mozilla.firefox/config/mozilla/firefox/*/prefs.js \
+		"$USER_HOME"/.var/app/org.mozilla.firefox/.config/mozilla/firefox/*/prefs.js
+	do
+		[ -f "$_prefs" ] || continue
+		printf '%s\n' "${_prefs%/prefs.js}"
+	done
+}
+
+# Native Chromium and the Flatpak user-data directory.
+chromium_bases() {
+	for _base in \
+		"$USER_HOME/.config/chromium" \
+		"$USER_HOME/.var/app/org.chromium.Chromium/config/chromium"
+	do
+		if [ -d "$_base" ]; then
+			printf '%s\n' "$_base"
+		fi
+	done
+}
 
 strip_firefox_prefs() {
 	user_js=$1
@@ -85,19 +170,33 @@ strip_firefox_prefs() {
 }
 
 uninstall_firefox() {
-	for prefs in "$USER_HOME"/.mozilla/firefox/*/prefs.js; do
-		[ -f "$prefs" ] || continue
-		profile=${prefs%/prefs.js}
-		rm -rf "$profile/gmp-widevinecdm"
-		user_js="$profile/user.js"
-		strip_firefox_prefs "$user_js"
-		echo "removed Firefox Widevine from $profile"
-	done
+	_profiles=$(firefox_profiles)
+	if [ -z "$_profiles" ]; then
+		echo "no Firefox profile found for $USER_NAME" >&2
+		return 0
+	fi
+	while IFS= read -r _profile; do
+		[ -n "$_profile" ] || continue
+		rm -rf "$_profile/gmp-widevinecdm"
+		strip_firefox_prefs "$_profile/user.js"
+		echo "removed Firefox Widevine from $_profile"
+	done <<EOF
+$_profiles
+EOF
 }
 
 uninstall_chromium() {
-	rm -rf "$USER_HOME/.config/chromium/WidevineCdm"
-	echo "removed Chromium Widevine tree"
+	_bases=$(chromium_bases)
+	if [ -z "$_bases" ]; then
+		return 0
+	fi
+	while IFS= read -r _base; do
+		[ -n "$_base" ] || continue
+		rm -rf "$_base/WidevineCdm"
+		echo "removed Chromium Widevine tree from $_base"
+	done <<EOF
+$_bases
+EOF
 }
 
 if [ "$UNINSTALL" = 1 ]; then
@@ -160,60 +259,73 @@ echo "CDM: $SO"
 echo "version: $version"
 echo "libc: $libc"
 if [ "$libc" = glibc ]; then
-	echo "WARNING: this CDM is glibc-linked.  pmOS Firefox ESR is musl-linked" >&2
-	echo "         and cannot load it.  Use a glibc browser (e.g. a Flatpak" >&2
-	echo "         Chromium runtime) or a musl-built ARM64 CDM." >&2
+	echo "WARNING: this CDM is glibc-linked.  Native pmOS browsers" >&2
+	echo "         (firefox-esr) are musl-linked and cannot load it." >&2
+	echo "         Flatpak Firefox/Chromium use a glibc runtime and can." >&2
 fi
 
-if pgrep -x firefox >/dev/null 2>&1 || pgrep -x firefox-esr >/dev/null 2>&1; then
-	echo "WARNING: Firefox is running; close it before installing." >&2
+if pgrep -x firefox >/dev/null 2>&1 || pgrep -x firefox-esr >/dev/null 2>&1 \
+	|| pgrep -x chromium >/dev/null 2>&1; then
+	echo "WARNING: close any running Firefox/Chromium before installing." >&2
 fi
 
 install_firefox() {
-	found=0
-	for prefs in "$USER_HOME"/.mozilla/firefox/*/prefs.js; do
-		[ -f "$prefs" ] || continue
-		profile=${prefs%/prefs.js}
-		dest="$profile/gmp-widevinecdm/$version"
-		mkdir -p "$dest"
-		cp -f "$SO" "$dest/libwidevinecdm.so"
-		cp -f "$MANIFEST" "$dest/manifest.json"
-		chmod 755 "$dest/libwidevinecdm.so"
-		chmod 644 "$dest/manifest.json"
+	_profiles=$(firefox_profiles)
+	if [ -z "$_profiles" ]; then
+		echo "no Firefox profile found for $USER_NAME" >&2
+		echo "start Firefox once, close it, then rerun this installer." >&2
+		return 1
+	fi
+	while IFS= read -r _profile; do
+		[ -n "$_profile" ] || continue
+		_dest="$_profile/gmp-widevinecdm/$version"
+		mkdir -p "$_dest"
+		cp -f "$SO" "$_dest/libwidevinecdm.so"
+		cp -f "$MANIFEST" "$_dest/manifest.json"
+		chmod 755 "$_dest/libwidevinecdm.so"
+		chmod 644 "$_dest/manifest.json"
+		chown -R "$USER_UID:$USER_GID" "$_dest"
 
-		user_js="$profile/user.js"
-		strip_firefox_prefs "$user_js"
+		_user_js="$_profile/user.js"
+		strip_firefox_prefs "$_user_js"
 		{
 			printf '%s\n' "$marker_start"
+			printf 'user_pref("media.eme.enabled", true);\n'
 			printf 'user_pref("media.gmp-widevinecdm.visible", true);\n'
 			printf 'user_pref("media.gmp-widevinecdm.enabled", true);\n'
 			printf 'user_pref("media.gmp-widevinecdm.autoupdate", false);\n'
 			printf 'user_pref("media.gmp-widevinecdm.version", "%s");\n' "$version"
+			printf 'user_pref("media.gmp-widevinecdm.forceInstall", true);\n'
 			printf '%s\n' "$marker_end"
-		} >> "$user_js"
-
-		chown -R "$USER_UID:$USER_GID" "$dest" "$user_js"
-		found=1
-		echo "installed Firefox CDM in $profile"
-	done
-	if [ "$found" = 0 ]; then
-		echo "no Firefox profile found under $USER_HOME/.mozilla/firefox" >&2
-		echo "start Firefox once, close it, then rerun this installer." >&2
-		return 1
-	fi
+		} >> "$_user_js"
+		chown "$USER_UID:$USER_GID" "$_user_js"
+		echo "installed Firefox CDM in $_profile"
+	done <<EOF
+$_profiles
+EOF
 }
 
 install_chromium() {
-	base="$USER_HOME/.config/chromium/WidevineCdm"
-	dest="$base/$version"
-	mkdir -p "$dest/_platform_specific/linux_arm64"
-	cp -f "$SO" "$dest/_platform_specific/linux_arm64/libwidevinecdm.so"
-	cp -f "$MANIFEST" "$dest/manifest.json"
-	chmod 755 "$dest/_platform_specific/linux_arm64/libwidevinecdm.so"
-	chmod 644 "$dest/manifest.json"
-	printf '%s' "$version" > "$base/latest-component-updated-widevine-cdm"
-	chown -R "$USER_UID:$USER_GID" "$base"
-	echo "installed Chromium CDM in $base"
+	_bases=$(chromium_bases)
+	if [ -z "$_bases" ]; then
+		# No existing profile: seed the native user-data directory.
+		_bases="$USER_HOME/.config/chromium"
+	fi
+	while IFS= read -r _base; do
+		[ -n "$_base" ] || continue
+		_dest="$_base/WidevineCdm/$version"
+		mkdir -p "$_dest/_platform_specific/linux_arm64"
+		cp -f "$SO" "$_dest/_platform_specific/linux_arm64/libwidevinecdm.so"
+		cp -f "$MANIFEST" "$_dest/manifest.json"
+		chmod 755 "$_dest/_platform_specific/linux_arm64/libwidevinecdm.so"
+		chmod 644 "$_dest/manifest.json"
+		printf '%s' "$version" > \
+			"$_base/WidevineCdm/latest-component-updated-widevine-cdm"
+		chown -R "$USER_UID:$USER_GID" "$_base/WidevineCdm"
+		echo "installed Chromium CDM in $_base/WidevineCdm"
+	done <<EOF
+$_bases
+EOF
 }
 
 rc=0
@@ -227,6 +339,7 @@ both)
 esac
 
 echo
-echo "Done.  Test with https://bitmovin.com/demos/drm or"
-echo "https://demo.castlabs.com/ and confirm the browser reports L3, not L1."
+echo "Done.  Restart the browser and confirm EME works at"
+echo "https://bitmovin.com/demos/drm or https://demo.castlabs.com/."
+echo "This is L3 (software) Widevine; L1 streams will still fail."
 exit "$rc"

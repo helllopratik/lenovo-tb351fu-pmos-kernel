@@ -60,7 +60,7 @@ Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
 | GPU | Working. Panfrost Mali-G57; Phoc uses GLES2. A cold boot may be required after a warm reset. |
 | Sensors | Working. Accelerometer, gyroscope and ambient light via the SCP stack and `pmos_sensor_bridge`; `iio-sensor-proxy` feeds Phosh. |
 | Camera | Bring-up only. Mainline MTK SENINF/CAMSV drivers; modules are manual-load and capture is not reliable yet. |
-| Widevine | L3 only with a user-supplied ARM64 CDM (no proprietary blob is shipped). |
+| Widevine | L3 verified in Flatpak Firefox/Chromium with a user-supplied ARM64 CDM; native Firefox is musl and cannot load the glibc CDM. No proprietary blob is shipped. |
 | USB OTG | Manual role switch (`pmos-usb-role`); automatic Type-C role detection is not available. |
 | Remote access | SSH is enabled on first boot; the hostname is `lenovo-tab-plus-tb351fu`. |
 
@@ -515,8 +515,9 @@ automatic reboots.
   routing is incomplete.
 - **Panfrost** is experimental; a cold boot may be needed after a warm reset.
 - **USB Type-C role detection** is unavailable; use `pmos-usb-role host|device`.
-- **Widevine L3** requires a user-supplied ARM64 CDM; L1/L2 are not possible without
-  the vendor TEE.
+- **Widevine L3** requires a user-supplied ARM64 CDM and a glibc browser runtime
+  (Flatpak Firefox or Chromium); native `firefox-esr` is musl-linked and cannot
+  load the glibc CDM. L1/L2 are not possible without the vendor TEE.
 - **60 Hz stylus trade-off:** pressure/tilt require 90 Hz; 60 Hz reports the pen as a
   finger.
 - **Vendor firmware/modules** remain subject to their own licenses. They are included

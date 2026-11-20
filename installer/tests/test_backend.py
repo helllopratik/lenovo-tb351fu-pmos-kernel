@@ -260,6 +260,12 @@ class ScriptTests(unittest.TestCase):
             self.skipTest(result)
         self.assertIn("charger/", result)
 
+    def test_widevine_helper(self):
+        result = selftest.check_widevine_helper()
+        if result.startswith("SKIP:"):
+            self.skipTest(result)
+        self.assertIn("Flatpak", result)
+
 
 if __name__ == "__main__":
     unittest.main()
