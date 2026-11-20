@@ -102,7 +102,15 @@ user_pref("media.gmp-widevinecdm.forceInstall", true);
 
 The Chromium install writes
 `.../chromium/WidevineCdm/<version>/_platform_specific/linux_arm64/libwidevinecdm.so`
-plus `manifest.json` and the `latest-component-updated-widevine-cdm` marker.
+plus `manifest.json`.  It also writes Chromium's hint file
+`WidevineCdm/latest-component-updated-widevine-cdm` as JSON:
+
+```json
+{"Path": "/home/<user>/.config/chromium/WidevineCdm/<version>"}
+```
+
+The hint must be JSON.  A bare version string makes Chromium log
+`Widevine enabled but no library found` and disables EME for that profile.
 
 Installed files are chowned to the target user, so the browsers can read and
 update their own profiles.  Remove everything with:

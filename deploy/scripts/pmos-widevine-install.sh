@@ -169,6 +169,16 @@ strip_firefox_prefs() {
 	sed -i "/$marker_start/,/$marker_end/d" "$user_js"
 }
 
+copy_file() {
+	_src=$1
+	_dst=$2
+	# Seeding a browser from its own component tree is a no-op, not an error.
+	if [ "$_src" -ef "$_dst" ] 2>/dev/null; then
+		return 0
+	fi
+	cp -f "$_src" "$_dst"
+}
+
 uninstall_firefox() {
 	_profiles=$(firefox_profiles)
 	if [ -z "$_profiles" ]; then
@@ -280,8 +290,8 @@ install_firefox() {
 		[ -n "$_profile" ] || continue
 		_dest="$_profile/gmp-widevinecdm/$version"
 		mkdir -p "$_dest"
-		cp -f "$SO" "$_dest/libwidevinecdm.so"
-		cp -f "$MANIFEST" "$_dest/manifest.json"
+		copy_file "$SO" "$_dest/libwidevinecdm.so"
+		copy_file "$MANIFEST" "$_dest/manifest.json"
 		chmod 755 "$_dest/libwidevinecdm.so"
 		chmod 644 "$_dest/manifest.json"
 		chown -R "$USER_UID:$USER_GID" "$_dest"
@@ -315,12 +325,17 @@ install_chromium() {
 		[ -n "$_base" ] || continue
 		_dest="$_base/WidevineCdm/$version"
 		mkdir -p "$_dest/_platform_specific/linux_arm64"
-		cp -f "$SO" "$_dest/_platform_specific/linux_arm64/libwidevinecdm.so"
-		cp -f "$MANIFEST" "$_dest/manifest.json"
+		copy_file "$SO" "$_dest/_platform_specific/linux_arm64/libwidevinecdm.so"
+		copy_file "$MANIFEST" "$_dest/manifest.json"
 		chmod 755 "$_dest/_platform_specific/linux_arm64/libwidevinecdm.so"
 		chmod 644 "$_dest/manifest.json"
-		printf '%s' "$version" > \
-			"$_base/WidevineCdm/latest-component-updated-widevine-cdm"
+		# Chromium's hint file is JSON: {"Path":"<cdm base dir>"}.  Writing
+		# the bare version here makes Chromium report "no library found".
+		python3 - "$_dest" > \
+			"$_base/WidevineCdm/latest-component-updated-widevine-cdm" <<'PY'
+import json, sys
+sys.stdout.write(json.dumps({"Path": sys.argv[1]}))
+PY
 		chown -R "$USER_UID:$USER_GID" "$_base/WidevineCdm"
 		echo "installed Chromium CDM in $_base/WidevineCdm"
 	done <<EOF

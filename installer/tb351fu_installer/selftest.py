@@ -550,6 +550,11 @@ def check_widevine_helper() -> str:
         "ld-musl-aarch64",
     ):
         assert needle in text, needle
+    # Reseeding a browser from its own component tree must not cp onto itself.
+    assert "copy_file()" in text and '"$_src" -ef "$_dst"' in text
+    # Chromium's hint file is JSON; a bare version string breaks registration.
+    assert 'json.dumps({"Path": sys.argv[1]})' in text
+    assert "latest-component-updated-widevine-cdm" in text
 
     # The rootfs payload copies every deploy/scripts helper to /usr/local/bin.
     assert rootfs.is_file(), rootfs
