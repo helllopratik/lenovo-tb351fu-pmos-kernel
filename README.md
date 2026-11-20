@@ -362,6 +362,11 @@ rootfs release instructions.
     static period, and 90 Hz held for five minutes after stylus activity.
 - **No startup animation.** The framebuffer console/pmosfb hands off directly to
   Phosh. Do not add a boot animation to the display path.
+- **Panel off.** pmosfb disables the CRTC without blanking the panel, so the
+  last scanout can stay visible. `pmos-display-guard.py` drives the real
+  backlight bias chip over i2c and treats DRM `DPMS Off` as an authoritative
+  blank; it discovers the graphical session through logind, so a username
+  other than the old hard-coded `user` still locks/blank correctly.
 - **Touch** is interrupt-driven; there is no continuous SPI polling thread. Keep it
   that way to avoid bus contention with scanout.
 
@@ -391,7 +396,13 @@ Audio is entirely **AP-side ALSA/ASoC + PipeWire**:
 - The headphone-jack watcher is a **user** service
   (`deploy/services/user/pmos-jack-profile.service`). It must run inside the
   graphical session to reach the per-user PipeWire-Pulse socket; the old
-  system-wide unit ran as root and could never connect.
+  system-wide unit ran as root and could never connect. It accepts the numeric
+  `.N` suffix module-alsa-card adds when a sink is recreated; without that it
+  resets the card every few seconds and tears down playback.
+- `pmos-audio-backend-migrate` restarts `pipewire-pulse.socket` as well as the
+  service. pipewire-pulse unlinks `/run/user/UID/pulse/native` on shutdown
+  while systemd keeps the listening fd, so restarting only the service leaves
+  PulseAudio clients with `Connection refused`.
 - `failed to set tdm slot` messages during profile changes are harmless on
   this machine driver; playback still completes.
 

@@ -147,7 +147,18 @@ for runtime in /run/user/[0-9]*; do
     runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
         systemctl --user restart wireplumber.service pipewire.service \
-        pipewire-pulse.service >/dev/null 2>&1 || true
+        >/dev/null 2>&1 || true
+    # pipewire-pulse unlinks its socket path on shutdown while systemd keeps
+    # the listening fd.  Restarting only pipewire-pulse.service therefore
+    # leaves $XDG_RUNTIME_DIR/pulse/native missing and every PulseAudio
+    # client fails with "Connection refused".  Restart the socket (which
+    # also stops the service), then start the service again.
+    runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+        systemctl --user restart pipewire-pulse.socket >/dev/null 2>&1 || true
+    runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+        systemctl --user start pipewire-pulse.service >/dev/null 2>&1 || true
     runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
         systemctl --user start pmos-jack-profile.service >/dev/null 2>&1 || true

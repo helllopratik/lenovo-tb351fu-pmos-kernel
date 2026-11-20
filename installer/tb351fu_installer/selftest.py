@@ -574,6 +574,51 @@ def check_widevine_helper() -> str:
             "AArch64/libc guards and rootfs payload wiring")
 
 
+def check_audio_display_helpers() -> str:
+    """Jack/backlight helpers must follow real users and suffixed sinks."""
+    paths = backend.repo_paths()
+    jack = paths["deploy"] / "scripts" / "pmos-jack-profile.sh"
+    guard = paths["deploy"] / "scripts" / "pmos-display-guard.py"
+    migrate = paths["deploy"] / "scripts" / "pmos-audio-backend-migrate.sh"
+    if not (jack.is_file() and guard.is_file() and migrate.is_file()):
+        return "SKIP: helper scripts not found"
+
+    for script in (jack, migrate):
+        proc = subprocess.run(["sh", "-n", str(script)],
+                              capture_output=True, text=True)
+        assert proc.returncode == 0, f"{script}: {proc.stderr.strip()}"
+    compile(guard.read_text(), str(guard), "exec")
+
+    jack_text = jack.read_text()
+    # module-alsa-card appends .N after a profile switch; matching only the
+    # bare name made the watcher reset the card in a loop.
+    assert "suffix ~ /^[0-9]+$/" in jack_text
+    assert "sink_name()" in jack_text and "sink_id()" in jack_text
+    assert "ensure_default()" in jack_text
+    assert "pactl set-default-sink" in jack_text
+
+    guard_text = guard.read_text()
+    # The installer account is not necessarily "user"/10000.
+    assert 'SESSION_USER = "user"' not in guard_text
+    assert "SESSION_UID = 10000" not in guard_text
+    assert "loginctl" in guard_text and "show-session" in guard_text
+    assert "def discover_session()" in guard_text
+    assert "def read_dpms()" in guard_text
+    assert 'dpms == "Off"' in guard_text
+    assert "DPMS = \"/sys/class/drm/card0-DSI-1/dpms\"" in guard_text
+
+    migrate_text = migrate.read_text()
+    # Restarting only pipewire-pulse.service unlinks pulse/native.
+    assert "restart pipewire-pulse.socket" in migrate_text
+    assert ("restart pipewire-pulse.socket" in migrate_text
+            and "start pipewire-pulse.service" in migrate_text)
+    assert (migrate_text.index("restart pipewire-pulse.socket")
+            < migrate_text.index("start pipewire-pulse.service"))
+
+    return ("suffixed-sink matching, default-sink follow, logind session "
+            "discovery, DPMS-off blanking, and PipeWire-Pulse socket order")
+
+
 def check_repo_paths() -> str:
     paths = backend.repo_paths()
     if not (paths["common"] / "install_pmos_rootfs.sh").is_file():
@@ -849,6 +894,7 @@ CHECKS = [
     ("GNSS payload", check_gnss_payload),
     ("charger payload", check_charger_payload),
     ("Widevine helper", check_widevine_helper),
+    ("audio/display helpers", check_audio_display_helpers),
     ("repository discovery", check_repo_paths),
     ("existing-install detection", check_existing_detection),
     ("install orchestration", check_orchestration),

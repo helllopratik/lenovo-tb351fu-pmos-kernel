@@ -266,6 +266,12 @@ class ScriptTests(unittest.TestCase):
             self.skipTest(result)
         self.assertIn("Flatpak", result)
 
+    def test_audio_display_helpers(self):
+        result = selftest.check_audio_display_helpers()
+        if result.startswith("SKIP:"):
+            self.skipTest(result)
+        self.assertIn("DPMS-off", result)
+
 
 if __name__ == "__main__":
     unittest.main()

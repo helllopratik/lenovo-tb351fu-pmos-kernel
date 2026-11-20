@@ -30,9 +30,65 @@ card_profile() {
         sed -n 's/.*Active Profile: //p' | head -n 1
 }
 
+# module-alsa-card appends ".N" to a node name when the previous node with
+# that name is still being torn down (profile switches, WirePlumber restarts).
+# Treat "<expected>.2" as the same sink; otherwise this watcher concludes the
+# sink is missing and resets the card in a loop, which kills playback.
 sink_present() {
     pactl list sinks short 2>/dev/null |
-        awk -v n="$1" '$2 == n { found = 1 } END { exit !found }'
+        awk -v n="$1" '
+            $2 == n { found = 1 }
+            index($2, n ".") == 1 {
+                suffix = substr($2, length(n) + 2)
+                if (suffix ~ /^[0-9]+$/) found = 1
+            }
+            END { exit !found }'
+}
+
+# Print the live sink name for $1, including any numeric suffix.  Prefer the
+# current default sink when it matches, otherwise the newest (highest id).
+sink_name() {
+    default=$(pactl get-default-sink 2>/dev/null)
+    pactl list sinks short 2>/dev/null |
+        awk -v n="$1" -v d="$default" '
+            function matches(x) {
+                if (x == n) return 1
+                if (index(x, n ".") == 1) {
+                    s = substr(x, length(n) + 2)
+                    if (s ~ /^[0-9]+$/) return 1
+                }
+                return 0
+            }
+            matches($2) {
+                if ($2 == d) { best = $2; found = 1; exit }
+                if (!found || ($1 + 0) > bestid) {
+                    best = $2; bestid = $1 + 0; found = 1
+                }
+            }
+            END { if (found) print best; else exit 1 }'
+}
+
+sink_id() {
+    name=$(sink_name "$1") || return 1
+    [ -n "$name" ] || return 1
+    pactl list sinks short 2>/dev/null |
+        awk -v n="$name" '$2 == n { print $1; exit }'
+}
+
+# Follow a profile switch only when the default would otherwise stay on the
+# old speaker/headphone sink (or the dummy fallback).  Leave a deliberate
+# Bluetooth/HDMI default alone.
+ensure_default() {
+    actual=$(sink_name "$1")
+    [ -n "$actual" ] || return 0
+    cur=$(pactl get-default-sink 2>/dev/null)
+    case "$cur" in
+        "$actual") return 0 ;;
+        ""|auto_null*) ;;
+        "$HP_SINK"|"$HP_SINK".[0-9]*|"$SPK_SINK"|"$SPK_SINK".[0-9]*) ;;
+        *) return 0 ;;
+    esac
+    pactl set-default-sink "$actual" 2>/dev/null
 }
 
 # Highest-priority *available* profile whose name contains $1 (Speaker or
@@ -87,8 +143,7 @@ ensure_sink() {
 find_hp_sink() {
     i=0
     while [ "$i" -lt 10 ]; do
-        id=$(pactl list sinks short 2>/dev/null |
-            awk -v n="$HP_SINK" '$2 == n { print $1; exit }')
+        id=$(sink_id "$HP_SINK")
         if [ -n "$id" ]; then
             echo "$id"
             return 0
@@ -154,8 +209,10 @@ while :; do
             pactl set-card-profile "$CARD" "$want" 2>/dev/null
         fi
         if ensure_sink "$want" "$sink"; then
+            ensure_default "$sink"
+            actual=$(sink_name "$sink")
             last="$val"
-            echo "jack=$val -> $want ($sink)"
+            echo "jack=$val -> $want (${actual:-$sink})"
         else
             echo "jack=$val -> $want: sink $sink still missing" >&2
         fi

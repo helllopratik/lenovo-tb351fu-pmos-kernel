@@ -10,8 +10,11 @@ reg 0x05 = hw >> 3).
 This daemon:
   * mirrors /sys/class/backlight/lcd-backlight/brightness through the exact
     stock map to 3-0011;
-  * writes 0/0 for a genuine panel-off on lock or idle, restoring on input;
-  * still keeps DPMS On and never touches GPIO43 or the scanout.
+  * writes 0/0 for a genuine panel-off on lock, idle, or DRM DPMS Off, and
+    restores the panel when the compositor turns DPMS back on;
+  * discovers the real Wayland session/user from logind, so it follows the
+    account chosen by the installer instead of the old hard-coded "user";
+  * never touches GPIO43 or the scanout.
 
 The 0/0 blank is fully reversible: 21 s and 60 s holds were verified on
 hardware with the desktop image returning intact (2026-11-07).
@@ -32,13 +35,14 @@ import time
 I2C_BUS = "/dev/i2c-3"
 I2C_ADDR = 0x11
 BACKLIGHT = "/sys/class/backlight/lcd-backlight/brightness"
+DPMS = "/sys/class/drm/card0-DSI-1/dpms"
 STATE_DIR = "/var/lib/pmos-backlight"
 STATE_BRIGHTNESS = STATE_DIR + "/brightness"
 CONFIG = "/etc/pmos-backlight.conf"
 
-SESSION_USER = "user"
-SESSION_UID = 10000
-SESSION_RUNTIME = "/run/user/10000"
+# The installer now requires a real account, so the graphical session is no
+# longer "user"/10000.  Discover it from logind instead of hard-coding it.
+SESSION = {"id": None, "uid": None, "user": None, "runtime": None}
 
 # struct input_event on 64-bit Linux: timeval (2x long) + type/code/value.
 INPUT_EVENT = struct.Struct("llHHi")
@@ -171,6 +175,80 @@ def save_brightness(value):
         log("could not save brightness: %s" % exc)
 
 
+def read_dpms():
+    try:
+        with open(DPMS, "r", encoding="ascii") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def discover_session():
+    """Find the active Wayland session and fill SESSION.
+
+    The old code assumed the pmOS account was literally "user" with uid
+    10000.  The installer now asks for a real username, so logind is the
+    authoritative source.  Return False when no graphical session exists yet.
+    """
+    try:
+        result = subprocess.run(
+            ["loginctl", "list-sessions", "--no-legend"],
+            capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+    best = None
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        sid, uid, user = fields[0], fields[1], fields[2]
+        try:
+            info = subprocess.run(
+                ["loginctl", "show-session", sid,
+                 "-p", "Type", "-p", "Active", "-p", "State",
+                 "-p", "RuntimePath"],
+                capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        props = {}
+        for row in info.stdout.splitlines():
+            if "=" in row:
+                key, value = row.split("=", 1)
+                props[key] = value
+        if props.get("Type") != "wayland":
+            continue
+        if props.get("Active") != "yes" and props.get("State") != "active":
+            continue
+        runtime = props.get("RuntimePath") or "/run/user/" + uid
+        candidate = (sid, uid, user, runtime)
+        if props.get("Active") == "yes":
+            best = candidate
+            break
+        if best is None:
+            best = candidate
+
+    if best is None:
+        return False
+    sid, uid, user, runtime = best
+    SESSION.update(id=sid, uid=uid, user=user, runtime=runtime)
+    return True
+
+
+def session_ready():
+    runtime = SESSION["runtime"]
+    return bool(runtime) and os.path.exists(runtime + "/bus")
+
+
+def session_env():
+    runtime = SESSION["runtime"]
+    return [
+        "runuser", "-u", SESSION["user"], "--", "env",
+        "XDG_RUNTIME_DIR=" + runtime,
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus",
+    ]
+
+
 def closest_index(hw):
     """Index in the monotonic stock table nearest to an 11-bit value."""
     lo, hi = 0, len(TABLE) - 1
@@ -243,9 +321,10 @@ class ScreenSaver:
         self.restart_at = 0.0
 
     def _gdbus(self, *args, timeout=5):
+        if not session_ready():
+            return None
         return subprocess.run(
-            ["runuser", "-u", SESSION_USER, "--", "env",
-             "XDG_RUNTIME_DIR=" + SESSION_RUNTIME, *args],
+            session_env() + list(args),
             capture_output=True, text=True, timeout=timeout)
 
     def query(self):
@@ -255,6 +334,8 @@ class ScreenSaver:
                 "--dest", "org.gnome.ScreenSaver",
                 "--object-path", "/org/gnome/ScreenSaver",
                 "--method", "org.gnome.ScreenSaver.GetActive")
+            if result is None:
+                return None
             if "(true" in result.stdout:
                 return True
             if "(false" in result.stdout:
@@ -266,16 +347,15 @@ class ScreenSaver:
     def start(self, now):
         if self.proc is not None and self.proc.poll() is None:
             return
-        if not os.path.exists(SESSION_RUNTIME + "/bus"):
+        if not session_ready():
             self.restart_at = now + 2
             return
         try:
             self.proc = subprocess.Popen(
-                ["runuser", "-u", SESSION_USER, "--", "env",
-                 "XDG_RUNTIME_DIR=" + SESSION_RUNTIME,
-                 "gdbus", "monitor", "--session",
-                 "--dest", "org.gnome.ScreenSaver",
-                 "--object-path", "/org/gnome/ScreenSaver"],
+                session_env() + [
+                    "gdbus", "monitor", "--session",
+                    "--dest", "org.gnome.ScreenSaver",
+                    "--object-path", "/org/gnome/ScreenSaver"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.buf = b""
             state = self.query()
@@ -348,33 +428,9 @@ class LogindLock:
         self.next_poll = 0.0
 
     def _discover(self):
-        try:
-            result = subprocess.run(
-                ["loginctl", "list-sessions", "--no-legend"],
-                capture_output=True, text=True, timeout=3)
-        except Exception:
+        if not discover_session():
             return None
-        candidates = []
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if len(fields) < 3:
-                continue
-            session, uid, user = fields[0], fields[1], fields[2]
-            if uid == str(SESSION_UID) and user == SESSION_USER:
-                candidates.append(session)
-        # runuser creates a `manager` session and SSH creates `tty` sessions;
-        # only the phosh session is Type=wayland and carries the LockedHint.
-        for session in candidates:
-            try:
-                info = subprocess.run(
-                    ["loginctl", "show-session", session,
-                     "-p", "Type", "--value"],
-                    capture_output=True, text=True, timeout=3)
-            except Exception:
-                continue
-            if info.returncode == 0 and info.stdout.strip() == "wayland":
-                return session
-        return None
+        return SESSION["id"]
 
     def poll(self, now, force=False):
         if not force and now < self.next_poll:
@@ -385,7 +441,7 @@ class LogindLock:
             if self.session is None:
                 self.next_poll = now + self.RETRY_INTERVAL
                 return self.locked
-            log("logind session: %s" % self.session)
+            log("logind session: %s (%s)" % (self.session, SESSION["user"]))
         try:
             result = subprocess.run(
                 ["loginctl", "show-session", self.session,
@@ -393,9 +449,11 @@ class LogindLock:
                 capture_output=True, text=True, timeout=3)
         except Exception:
             self.session = None
+            SESSION.update(id=None, uid=None, user=None, runtime=None)
             return self.locked
         if result.returncode != 0:
             self.session = None
+            SESSION.update(id=None, uid=None, user=None, runtime=None)
             return self.locked
         value = result.stdout.strip()
         if value == "yes":
@@ -407,14 +465,15 @@ class LogindLock:
 
 def idle_inhibited():
     """True when a session app holds an idle inhibitor (video playback etc.)."""
+    if not session_ready():
+        return False
     try:
         result = subprocess.run(
-            ["runuser", "-u", SESSION_USER, "--", "env",
-             "XDG_RUNTIME_DIR=" + SESSION_RUNTIME,
-             "gdbus", "call", "--session",
-             "--dest", "org.gnome.SessionManager",
-             "--object-path", "/org/gnome/SessionManager",
-             "--method", "org.gnome.SessionManager.IsInhibited", "8"],
+            session_env() + [
+                "gdbus", "call", "--session",
+                "--dest", "org.gnome.SessionManager",
+                "--object-path", "/org/gnome/SessionManager",
+                "--method", "org.gnome.SessionManager.IsInhibited", "8"],
             capture_output=True, text=True, timeout=3)
         return "(true" in result.stdout
     except Exception:
@@ -482,21 +541,28 @@ def main():
     log("starting: brightness=%d hw=%s" % (
         brightness, "unknown" if hw_now is None else hw_now))
 
+    applied = None
+
     def on_term(_signum, _frame):
+        # Do not flash the panel back on when systemd restarts this service
+        # while the screen is already blanked (DPMS Off / locked).
         try:
-            chip.write_hw(TABLE[brightness] if brightness else 0)
+            if applied:
+                chip.write_hw(TABLE[brightness] if brightness else 0)
+                log("terminating: backlight restored")
+            else:
+                log("terminating: panel already off")
         except OSError:
             pass
-        log("terminating: backlight restored")
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, on_term)
     signal.signal(signal.SIGINT, on_term)
 
-    ss = ScreenSaver()
-    ss.start(time.monotonic())
     lk = LogindLock()
     lk.poll(time.monotonic(), force=True)
+    ss = ScreenSaver()
+    ss.start(time.monotonic())
     locked = bool(ss.locked or lk.locked)
     start = time.monotonic()
     locked_since = (start - lock_delay) if locked else None
@@ -524,10 +590,10 @@ def main():
     next_input_scan = last_activity + 5
     next_inhibit_check = 0.0
     idle_blocked = False
-    applied = None
     last_resync = 0.0
     last_error_log = 0.0
     next_ss_retry = 0.0
+    last_dpms = None
 
     while True:
         now = time.monotonic()
@@ -626,6 +692,15 @@ def main():
             brightness = current
             save_brightness(current)
 
+        # gsd-power/phoc blank the CRTC after the idle timeout, but pmosfb
+        # leaves the panel/backlight showing the last scanout.  Treat DPMS
+        # Off as an authoritative blank even when the lock state is not
+        # available yet, and restore the panel when DPMS comes back on.
+        dpms = read_dpms()
+        if dpms != last_dpms:
+            log("dpms %s" % dpms)
+            last_dpms = dpms
+
         if power_blank:
             want_on = False
             reason = "power key"
@@ -649,6 +724,10 @@ def main():
                         want_on = True
             else:
                 want_on = True
+
+        if dpms == "Off" and want_on:
+            want_on = False
+            reason = "dpms"
 
         want = TABLE[brightness] if (want_on and brightness > 0) else 0
 

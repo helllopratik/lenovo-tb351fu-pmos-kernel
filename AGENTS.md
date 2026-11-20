@@ -129,8 +129,8 @@ from `charger_class.ko` at insmod time, so modpost warnings are expected.
 
 ```sh
 cd installer
-python3 -m unittest discover -s tests -v    # 20 backend tests
-python3 -m tb351fu_installer --self-test    # 15 checks, scripts + images + GTK
+python3 -m unittest discover -s tests -v    # 22 backend tests
+python3 -m tb351fu_installer --self-test    # 17 checks, scripts + images + GTK
 python3 -m tb351fu_installer --gui-smoke-test
 cd ..
 bash -n install_pmos_rootfs.sh
