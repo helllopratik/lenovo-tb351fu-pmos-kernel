@@ -492,15 +492,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
         account_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         account_box.append(_section(
             "pmOS login",
-            "The password is hashed on this computer with SHA-512 crypt; only "
-            "the hash is sent to the tablet."))
-        self.chk_account = Gtk.CheckButton(label="Create a pmOS login account")
-        self.chk_account.set_active(True)
-        self.chk_account.connect("toggled", lambda *_: self._on_options_changed())
-        account_box.append(self.chk_account)
+            "Choose the login to create during installation. The password is "
+            "hashed on this computer with SHA-512 crypt; only the hash is sent "
+            "to the tablet."))
         account_grid = Gtk.Grid(column_spacing=10, row_spacing=8)
         self.username_entry = Gtk.Entry()
-        self.username_entry.set_text("user")
+        self.username_entry.set_placeholder_text("e.g. tablet")
         self.username_entry.connect("changed", lambda *_: self._on_options_changed())
         self.password_entry = Gtk.Entry()
         self.password_entry.set_visibility(False)
@@ -844,10 +841,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
             self.rootfs_browse.set_sensitive(
                 not auto and not busy and not removing)
 
-        account = (self.chk_account.get_active()
-                   and self._will_install_rootfs() and not removing)
-        self.chk_account.set_sensitive(
-            not busy and not removing and self._will_install_rootfs())
+        account = self._will_install_rootfs() and not removing
         for widget in (self.username_entry, self.password_entry,
                        self.confirm_entry):
             widget.set_sensitive(account and not busy)
@@ -891,13 +885,11 @@ class InstallerWindow(Gtk.ApplicationWindow):
         elif not self._will_install_rootfs():
             self.account_hint.set_text(
                 "Account setup is only used when a postmarketOS rootfs is installed.")
-        elif self.chk_account.get_active():
-            self.account_hint.set_text(
-                "Only the SHA-512 crypt hash leaves this computer. The tablet "
-                "never receives the plaintext password.")
         else:
             self.account_hint.set_text(
-                "The image's default account is kept.")
+                "Enter the username and password you want on the tablet. Only "
+                "the SHA-512 crypt hash leaves this computer; the plaintext "
+                "password is never sent.")
 
     def _browse_whole_output(self) -> None:
         dialog = Gtk.FileDialog(title="Select the whole-device package folder")
@@ -1346,14 +1338,10 @@ class InstallerWindow(Gtk.ApplicationWindow):
             switch_text = ("Yes, set slot B active and reboot"
                            if self.chk_switch.get_active() else "No")
         self.summary_values["Switch slot"].set_text(switch_text)
-        if removing:
+        if removing or not self._will_install_rootfs():
             account_text = "—"
-        elif not self._will_install_rootfs():
-            account_text = "—"
-        elif self.chk_account.get_active():
-            account_text = self.username_entry.get_text().strip() or "user"
         else:
-            account_text = "No account (image default kept)"
+            account_text = self.username_entry.get_text().strip() or "Required"
         self.summary_values["Account"].set_text(account_text)
         if data and self.chk_rootfs.get_active() and not whole and not removing:
             left = data.free - size_gib * backend.GIB
@@ -1384,10 +1372,12 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 and not whole):
             existing_action = ("remove" if self.radio_remove.get_active()
                                else "replace")
-        account = (self.chk_account.get_active()
-                   and self._will_install_rootfs() and not removing)
+        account = self._will_install_rootfs() and not removing
+        username = self.username_entry.get_text().strip()
         password_hash = ""
         if account:
+            if not username:
+                raise backend.InstallerError("enter a pmOS username")
             password = self.password_entry.get_text()
             password_hash = backend.hash_password(password)
         whole_text = self.whole_entry.get_text().strip()
@@ -1413,7 +1403,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
             image_sha256=(self.sha_entry.get_text().strip().lower()
                           if source == "auto" else ""),
             account_enabled=account,
-            username=(self.username_entry.get_text().strip() if account else ""),
+            username=(username if account else ""),
             password_hash=password_hash,
             existing_action=existing_action,
             remove_legacy=(removing and self.chk_remove_legacy.get_active()),
@@ -1464,6 +1454,8 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 "",
                 "The package needs a matching pmOS boot chain and the existing "
                 "Android metadata key. It is not a secure erase.",
+                "",
+                f"pmOS login: {options.username} (hash only)",
             ]
             message = "Prepare the destructive whole-device package?"
             button = "Prepare"
@@ -1623,17 +1615,17 @@ class InstallerWindow(Gtk.ApplicationWindow):
                         f"{size // backend.GIB} GiB would leave less than 1 GiB free on /data.")
                 elif size < 2 * backend.GIB:
                     problems.append("RootFS size must be at least 2 GiB.")
-        if self.chk_account.get_active() and installing_rootfs:
+        if installing_rootfs:
             username = self.username_entry.get_text().strip()
             if not username:
-                problems.append("Enter a pmOS username.")
+                problems.append("Enter the pmOS username to create.")
             else:
                 problem = _username_problem(username)
                 if problem:
                     problems.append(f"Username: {problem}")
             password = self.password_entry.get_text()
             if not password:
-                problems.append("Enter a pmOS password.")
+                problems.append("Enter the pmOS password to set.")
             elif password != self.confirm_entry.get_text():
                 problems.append("The passwords do not match.")
         return problems
@@ -1690,7 +1682,7 @@ class InstallerWindow(Gtk.ApplicationWindow):
                 self.radio_replace, self.radio_remove, self.chk_remove_legacy,
                 self.radio_dual, self.radio_whole, self.whole_entry,
                 self.whole_browse_btn, self.radio_manual, self.radio_auto,
-                self.url_entry, self.sha_entry, self.chk_account,
+                self.url_entry, self.sha_entry,
                 self.username_entry, self.password_entry, self.confirm_entry,
                 self.image_entries["rootfs"], self.rootfs_browse,
             ):

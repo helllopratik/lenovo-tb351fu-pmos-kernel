@@ -245,9 +245,12 @@ During payload application the image is temporarily labeled
 `system_data_file` afterwards. The script refuses to leave too little free
 space on `/data`.
 
-The installer asks for the pmOS username and password. Only a SHA-512 crypt
-hash is sent to the tablet; the plaintext password is never stored or passed on
-a command line. `--no-account` keeps the image's default `user` account,
+The installer asks for the pmOS username and password and applies exactly the
+login you enter. The GUI requires both fields whenever a rootfs is installed;
+the interactive CLI prompts for a username with no default and then for the
+password. Only a SHA-512 crypt hash is sent to the tablet; the plaintext
+password is never stored or passed on a command line. `--no-account` is an
+advanced CLI option that keeps the image's default `user` account.
 `--password-file` accepts a plaintext password for unattended runs, and
 `--password-hash-file` accepts a precomputed `$6$...` hash. The GUI uses the
 hash-file form, so only the hash leaves the host.

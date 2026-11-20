@@ -142,7 +142,9 @@ class InstallOptions:
     source: str = "manual"          # "manual" or "auto"
     image_url: str = ""
     image_sha256: str = ""
-    account_enabled: bool = False
+    # Rootfs installs create the login the user entered during installation.
+    # Only an explicit --no-account run may keep the image's default account.
+    account_enabled: bool = True
     username: str = ""
     password_hash: str = ""
     existing_action: str = "none"   # "none", "replace" or "remove"

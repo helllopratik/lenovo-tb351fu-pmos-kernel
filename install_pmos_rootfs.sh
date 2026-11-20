@@ -88,13 +88,15 @@ Installation:
                         --password-file (or --no-account).
 
 Account:
-  -n, --username NAME   pmOS login name (default: prompt; "user" defaults).
+  -n, --username NAME   pmOS login name.  The interactive installer prompts
+                        for it and for the password when it is omitted.
       --password-file F Read the password from F instead of prompting.
       --password-hash-file F
                         Read a precomputed SHA-512 crypt hash from F.
                         Use this instead of --password-file; only the hash
                         is sent to the tablet.
-      --no-account      Do not create/change a pmOS login account.
+      --no-account      Advanced: keep the image's default account instead of
+                        creating the login entered during installation.
 
 Other:
   -h, --help            Show this help.
@@ -189,7 +191,9 @@ die() {
 }
 
 is_tty() {
-  [ -t 0 ] && [ -t 1 ]
+  # Prompts are read from stdin and their values are captured through command
+  # substitution, so stdout is often a pipe even in an interactive run.
+  [ -t 0 ]
 }
 
 ask_line() {
@@ -210,9 +214,10 @@ ask_password() {
     die "password prompt requires a terminal; use --password-file or PMOS_PASSWORD_FILE"
   fi
   IFS= read -r -s -p "Password for ${PMOS_USERNAME}: " p1 || true
-  echo
+  # Keep the cosmetic newline out of the captured password value.
+  echo >&2
   IFS= read -r -s -p "Confirm password: " p2 || true
-  echo
+  echo >&2
   [ "$p1" = "$p2" ] || die "passwords do not match"
   [ -n "$p1" ] || die "password must not be empty"
   printf '%s' "$p1"
@@ -392,7 +397,12 @@ prepare_account() {
     if [ "$ASSUME_YES" = "1" ] || ! is_tty; then
       die "non-interactive install needs --username, or --no-account"
     fi
-    PMOS_USERNAME=$(ask_line "pmOS username [user]: " "user")
+    while :; do
+      IFS= read -r -p "pmOS username: " PMOS_USERNAME || \
+        die "could not read a pmOS username"
+      [ -n "$PMOS_USERNAME" ] && break
+      echo "A username is required." >&2
+    done
   fi
   validate_username "$PMOS_USERNAME"
 

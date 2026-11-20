@@ -172,9 +172,10 @@ reinstalling.
      B. Removal and whole-device mode are mutually exclusive.
    - **Image source:** download from the server (URL plus optional SHA-256) or
      use the local image selected on the Images page.
-   - **pmOS login:** username, password and confirmation. The password is
-     hashed on the host with SHA-512 crypt; only the hash is sent to the tablet.
-     Disable the account to keep the image's default account.
+   - **pmOS login:** username, password and confirmation. Both fields are
+     required when a rootfs is installed, and the entered name is applied on
+     the tablet. The password is hashed on the host with SHA-512 crypt; only
+     the hash is sent. Whole-device preparation uses the same login.
 5. **Install** — shows the exact plan in a confirmation dialog, then streams
    the helper output with progress. Slot B is only written after you confirm.
    On success the wizard reports "Installation complete", "Removal complete"
@@ -259,10 +260,14 @@ pushes a raw image. The device needs root adb and about 64 GiB free on `/data`.
 ```
 
 `install_pmos_rootfs.sh` and the GUI send only a SHA-512 crypt hash to the
-tablet. `--password-hash-file` must contain one `$6$...` hash. The GUI creates
-that file with mode 0600, passes it to the script, and deletes it when the
-install finishes. `--password-file` still accepts a plaintext password for
-unattended runs, but the hash form avoids sending one.
+tablet. The GUI always asks for the username, password and confirmation when a
+rootfs is installed and creates the hash file with mode 0600, passes it to the
+script, and deletes it when the install finishes. The interactive script
+prompts for a username with no default and then for the password.
+`--password-hash-file` must contain one `$6$...` hash. `--password-file` still
+accepts a plaintext password for unattended runs, but the hash form avoids
+sending one. `--no-account` remains available only as an explicit advanced
+override that keeps the image's default account.
 
 `--mode whole` requires an empty output folder (or a new one), the existing
 `PMOS_DM_METADATA_KEY` in the storage key file, and a matching pmOS boot chain

@@ -81,6 +81,8 @@ class WholeModeTests(unittest.TestCase):
             flash_boot=True,
             switch_slot=True,
             whole_output=Path("/tmp/whole-test"),
+            username="alice",
+            password_hash="$6$rounds=120000$abcdefghijklmnop$" + "a" * 86,
         )
         seen = {}
 
@@ -103,8 +105,29 @@ class WholeModeTests(unittest.TestCase):
         self.assertIn("--whole-boot-image", argv)
         self.assertIn("--whole-init-boot-image", argv)
         self.assertIn("--whole-vbmeta-image", argv)
-        self.assertIn("--no-account", argv)
+        self.assertIn("--username", argv)
+        self.assertIn("alice", argv)
+        self.assertIn("--password-hash-file", argv)
+        self.assertNotIn("--no-account", argv)
         self.assertNotIn("--set-active", argv)
+
+    def test_rootfs_requires_the_entered_account(self):
+        device = backend.Device(serial="x", mode="adb")
+        options = backend.InstallOptions(
+            device=device,
+            images=backend.ImageSet(rootfs=Path("rootfs.img"),
+                                    modules=Path("modules.tar.xz"),
+                                    firmware=Path("firmware.tar.xz")),
+            size_bytes=16 * backend.GIB,
+            flash_boot=False,
+            install_rootfs=True,
+            source="manual",
+        )
+        with mock.patch.object(backend, "repo_paths",
+                               return_value={"artifacts": Path("/tmp")}):
+            with self.assertRaisesRegex(backend.InstallerError,
+                                        "username is required"):
+                backend.install(options, lambda _line: None)
 
 
 class SpaceTests(unittest.TestCase):

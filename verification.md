@@ -594,8 +594,45 @@ build before transfer.
 - Android dry-run of the final package: checksums verified, userdata
   `/dev/block/sdc64`, super `sdc62`, metadata `sdc13`, frp `sdc4`; no writes.
   `/data/pmos` remained untouched and the staged package/key were removed.
-- Installer self-tests: 15 unit tests, all 13 CLI self-test checks, and
+- Installer self-tests: 16 unit tests, all 13 CLI self-test checks, and
   `--gui-smoke-test` pass.
 
 Not verified: an actual GNSS start inside a freshly installed whole-device
 rootfs (the direct-rootfs boot itself is still untested).
+
+## 14. Installer Account Prompt (2026-11-20)
+
+The installer now asks for the login during installation instead of requiring
+a separately prepared hash file:
+
+- **GUI:** the account section has no disable checkbox. Username, password and
+  confirmation are required whenever a dual-boot or whole-device rootfs is
+  installed. The username has no default; the placeholder is only an example.
+  Validation rejects an empty or invalid username, an empty password, and a
+  mismatch. The confirmation dialog shows the login, and the hash is passed to
+  `install_pmos_rootfs.sh` through a mode-0600 temporary file that is deleted
+  after the helper exits.
+- **CLI:** interactive runs prompt `pmOS username:` with no default, then ask
+  for the password twice without echo. Invalid or empty input still aborts
+  rather than substituting `user`. `--username` plus `--password-file` or
+  `--password-hash-file` remains available for unattended runs.
+- **Whole-device mode:** the same account is applied to the staging rootfs, so
+  the prepared package contains the entered login and hash.
+- **Advanced override:** `--no-account` remains a CLI-only explicit opt-out that
+  keeps the image default. The GUI never selects it.
+
+Two interactive-shell bugs were fixed as part of this change:
+
+- `is_tty` only checked stdin now. Prompt answers are read through command
+  substitution, so stdout is a pipe even in a real terminal; the old stdin+stdout
+  check silently skipped the mode/source/account prompts.
+- `ask_password` writes its cosmetic newlines to stderr. They previously landed
+  in the captured password value and would have been hashed as part of it.
+
+Validation for this change: 16 backend unit tests, all 13 CLI self-test checks,
+`--gui-smoke-test`, `bash -n install_pmos_rootfs.sh`, Python compilation, and
+`git diff --check` pass. A PTY run prompted `pmOS username: promptuser`, read
+the password twice without echo, and printed
+`Account: promptuser (only a SHA-512 crypt hash leaves the host)`. That run was
+stopped during host-side payload preparation before any device staging; the
+temporary host tree was removed and `/data/pmos` was untouched.

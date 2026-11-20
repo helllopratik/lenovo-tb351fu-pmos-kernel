@@ -299,6 +299,13 @@ def check_scripts() -> str:
     rootfs_text = rootfs.read_text()
     assert "%%PMOS_PROGRESS:" in rootfs_text
     assert "%%PMOS_DONE" in rootfs_text
+    assert 'read -r -p "pmOS username: " PMOS_USERNAME' in rootfs_text
+    assert 'die "could not read a pmOS username"' in rootfs_text
+    assert "pmOS username [user]" not in rootfs_text
+    # Prompts are captured through command substitution, so stdin must be the
+    # terminal check.  Password newlines belong on stderr, not in the value.
+    assert "[ -t 0 ]" in rootfs_text
+    assert "echo >&2" in rootfs_text
 
     # Android compatibility regressions.  toybox has no `df -B1` and no zstd,
     # and its e2fsprogs 1.46 rejects the ext4 orphan_file feature.  A
@@ -666,7 +673,11 @@ def check_gui_import() -> str:
     except Exception as exc:  # noqa: BLE001
         raise AssertionError(f"GTK4/PyGObject unavailable: {exc}") from exc
     from . import app  # noqa: F401
-    return "GTK4 application imports"
+    source = Path(app.__file__).read_text()
+    assert "Create a pmOS login account" not in source
+    assert "self.username_entry" in source and "self.password_entry" in source
+    assert "the pmOS username to create" in source
+    return "GTK4 application imports with mandatory account fields"
 
 
 CHECKS = [
