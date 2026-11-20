@@ -1,0 +1,4 @@
+# Let the desktop user change the battery charge cap from the GUI.
+# pmos-charge-cap validates "full" or 50-100 before writing sysfs and
+# /etc/pmos-charge-cap.conf, so this exposes no general root shell.
+%wheel ALL=(root) NOPASSWD: /usr/local/bin/pmos-charge-cap

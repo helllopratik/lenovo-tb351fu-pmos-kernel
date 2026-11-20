@@ -17,6 +17,12 @@ KMSG=/dev/kmsg
 MODDIR=/lib/modules/extra
 STATUS=/run/pmos_sensors_status
 
+# The vendor hf_manager.ko reads task_struct fields at Android offsets and
+# NULL-derefs in hf_client_create() with this kernel.  The patched module is
+# mandatory; refuse to load the bridge when the wrong binary is staged, or a
+# single bad package turns into a boot loop.
+HF_MANAGER_PATCHED_SHA256=f2d8828a2ddedcbeb36960a1b0846a5134ac6d4ffab9e87342e9cc5ef0fbeed4
+
 kp() { echo "PMOSSENS: $*" > "$KMSG" 2>/dev/null; }
 exec > /tmp/pmos_sensors_init.log 2>&1
 
@@ -77,24 +83,29 @@ if [ -e /dev/hf_manager ]; then
     # Retry until the module stays loaded.  BusyBox insmod reports success
     # even when the initcall fails, so /proc/modules is the only reliable
     # indicator that the bridge actually initialised.
-    retry=0
-    while [ "$retry" -lt 60 ]; do
-        grep -q "^pmos_sensor_bridge " /proc/modules 2>/dev/null && break
-        insmod "$MODDIR/pmos_sensor_bridge.ko" 2>/dev/null
-        retry=$((retry + 1))
-        sleep 0.5
-    done
-    if grep -q "^pmos_sensor_bridge " /proc/modules 2>/dev/null; then
-        kp "pmos_sensor_bridge loaded after ${retry} attempts"
-
-        # udev may start iio-sensor-proxy when the first IIO device appears,
-        # before all three exist.  Re-trigger after the bridge has finished
-        # and restart the proxy if it already enumerated a partial set.
-        sleep 1
-        udevadm trigger --subsystem-match=iio 2>/dev/null
-        systemctl try-restart iio-sensor-proxy 2>/dev/null
+    hf_sha=$(sha256sum "$MODDIR/hf_manager.ko" 2>/dev/null | awk '{print $1}')
+    if [ "$hf_sha" != "$HF_MANAGER_PATCHED_SHA256" ]; then
+        kp "WARN hf_manager.ko is not the patched build (${hf_sha:-missing}); skipping sensor bridge"
     else
-        kp "WARN pmos_sensor_bridge not loaded after ${retry} attempts"
+        retry=0
+        while [ "$retry" -lt 60 ]; do
+            grep -q "^pmos_sensor_bridge " /proc/modules 2>/dev/null && break
+            insmod "$MODDIR/pmos_sensor_bridge.ko" 2>/dev/null
+            retry=$((retry + 1))
+            sleep 0.5
+        done
+        if grep -q "^pmos_sensor_bridge " /proc/modules 2>/dev/null; then
+            kp "pmos_sensor_bridge loaded after ${retry} attempts"
+
+            # udev may start iio-sensor-proxy when the first IIO device appears,
+            # before all three exist.  Re-trigger after the bridge has finished
+            # and restart the proxy if it already enumerated a partial set.
+            sleep 1
+            udevadm trigger --subsystem-match=iio 2>/dev/null
+            systemctl try-restart iio-sensor-proxy 2>/dev/null
+        else
+            kp "WARN pmos_sensor_bridge not loaded after ${retry} attempts"
+        fi
     fi
 else
     kp "STATUS=NO_HF_MANAGER after ${n} polls"

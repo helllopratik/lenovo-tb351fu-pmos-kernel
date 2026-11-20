@@ -338,6 +338,14 @@ class ChargeLimitApp(Adw.Application):
         )
         self.window = None
 
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        # Phosh is a dark shell; keep this panel dark even if the session's
+        # color-scheme key is unset (the GTK4 default is light).
+        Adw.StyleManager.get_default().set_color_scheme(
+            Adw.ColorScheme.PREFER_DARK
+        )
+
     def do_activate(self):
         if self.window is None:
             self.window = ChargeLimitWindow(self)

@@ -342,6 +342,34 @@ def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
     return None
 
 
+def _env_image(name: str) -> Optional[Path]:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return None
+    return Path(value).expanduser()
+
+
+def _packaged_or_latest(images_dir: Path, artifacts: Path,
+                        packaged: str, latest: str,
+                        fallbacks: Iterable[Path]) -> Optional[Path]:
+    """Prefer the newer of the packaged and freshly built boot-chain images.
+
+    ``images/`` holds the public, keyless template.  A local
+    ``build_and_flash_pmos.sh --init-only`` run writes a keyed chain to
+    ``artifacts/``; that build is the one that matches the current storage
+    keys, so it must win when it is newer.  If the packaged image is newer,
+    the user refreshed it deliberately and it keeps priority.
+    """
+    packaged_path = images_dir / packaged
+    latest_path = artifacts / latest
+    if packaged_path.is_file() and latest_path.is_file():
+        if latest_path.stat().st_mtime > packaged_path.stat().st_mtime:
+            return latest_path
+        return packaged_path
+    return _first_existing([packaged_path, images_dir / latest,
+                            latest_path, *fallbacks])
+
+
 # Names used by the Lenovo slot-B bundle and by the repository's images/ dir.
 # Stock boot.img/init_boot.img are deliberately excluded: they are Android
 # images, not the postmarketOS boot chain.
@@ -422,7 +450,8 @@ def slot_b_firmware_dir(images: ImageSet) -> Optional[Path]:
 
 def find_images() -> ImageSet:
     paths = repo_paths()
-    artifacts = paths["artifacts"]
+    artifacts = Path(os.environ.get("ARTIFACTS_DIR",
+                                    paths["artifacts"])).expanduser()
     images_dir = paths["common"] / "images"
     pmos = paths["pmos"]
     deploy = paths["deploy"]
@@ -479,34 +508,34 @@ def find_images() -> ImageSet:
         pmos / "pmos_rootfs_base.img.zst",
     ]
 
+    # TB351FU_BOOT_IMAGE and friends let the GUI/CLI pin an explicit chain
+    # (for example the locally built, keyed artifacts).  Without an override,
+    # use the newer of the packaged template and the latest local build.
+    boot = _env_image("TB351FU_BOOT_IMAGE") or _packaged_or_latest(
+        images_dir, artifacts, "boot_b.img", "boot_latest.img",
+        [artifacts / "boot_pmos.img", bundle_image(BUNDLE_IMAGES["boot"])],
+    )
+    init_boot = _env_image("TB351FU_INIT_BOOT_IMAGE") or _packaged_or_latest(
+        images_dir, artifacts, "init_boot_b.img", "init_boot_latest.img",
+        [artifacts / "init_boot_pmos.img",
+         bundle_image(BUNDLE_IMAGES["init_boot"])],
+    )
+    vbmeta = _env_image("TB351FU_VBMETA_IMAGE") or _packaged_or_latest(
+        images_dir, artifacts, "vbmeta_b.img", "vbmeta_latest.img",
+        [bundle_image(BUNDLE_IMAGES["vbmeta"])],
+    )
+
     return ImageSet(
-        boot=_first_existing([
-            images_dir / "boot_b.img",
-            images_dir / "boot_latest.img",
-            artifacts / "boot_latest.img",
-            artifacts / "boot_pmos.img",
-            bundle_image(BUNDLE_IMAGES["boot"]),
-        ]),
-        init_boot=_first_existing([
-            images_dir / "init_boot_b.img",
-            images_dir / "init_boot_latest.img",
-            artifacts / "init_boot_latest.img",
-            artifacts / "init_boot_pmos.img",
-            bundle_image(BUNDLE_IMAGES["init_boot"]),
-        ]),
-        vbmeta=_first_existing([
-            images_dir / "vbmeta_b.img",
-            images_dir / "vbmeta_latest.img",
-            artifacts / "vbmeta_latest.img",
-            bundle_image(BUNDLE_IMAGES["vbmeta"]),
-        ]),
-        vendor_boot=_first_existing([
+        boot=boot,
+        init_boot=init_boot,
+        vbmeta=vbmeta,
+        vendor_boot=_env_image("TB351FU_VENDOR_BOOT_IMAGE") or _first_existing([
             images_dir / "vendor_boot_b.img",
             images_dir / "vendor_boot.img",
             artifacts / "vendor_boot_latest.img",
             bundle_image(BUNDLE_IMAGES["vendor_boot"]),
         ]),
-        dtbo=_first_existing([
+        dtbo=_env_image("TB351FU_DTBO_IMAGE") or _first_existing([
             images_dir / "dtbo_b.img",
             images_dir / "dtbo.img",
             artifacts / "dtbo_latest.img",
@@ -589,19 +618,19 @@ def validate_images(images: ImageSet, need_rootfs: bool = True,
     problems: list[str] = []
     if need_boot:
         if not images.boot:
-            problems.append("boot image not found (artifacts/boot_latest.img)")
+            problems.append("boot image not found (set TB351FU_BOOT_IMAGE or build artifacts/boot_latest.img)")
         elif not images.boot.is_file():
             problems.append(f"boot image not found: {images.boot}")
         elif images.boot.stat().st_size > BOOT_PART_SIZE:
             problems.append("boot image is larger than the 64 MiB boot partition")
         if not images.init_boot:
-            problems.append("init_boot image not found (artifacts/init_boot_latest.img)")
+            problems.append("init_boot image not found (set TB351FU_INIT_BOOT_IMAGE or build artifacts/init_boot_latest.img)")
         elif not images.init_boot.is_file():
             problems.append(f"init_boot image not found: {images.init_boot}")
         elif images.init_boot.stat().st_size > INIT_BOOT_PART_SIZE:
             problems.append("init_boot image is larger than the 8 MiB partition")
         if not images.vbmeta:
-            problems.append("vbmeta image not found (artifacts/vbmeta_latest.img)")
+            problems.append("vbmeta image not found (set TB351FU_VBMETA_IMAGE or build artifacts/vbmeta_latest.img)")
         elif not images.vbmeta.is_file():
             problems.append(f"vbmeta image not found: {images.vbmeta}")
         if not images.vendor_boot:

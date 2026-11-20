@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -41,6 +43,74 @@ class SizeTests(unittest.TestCase):
             size_bytes=32 * backend.GIB,
         )
         self.assertEqual(options.size_gib, 32)
+
+
+class BootChainSelectionTests(unittest.TestCase):
+    """The installer must not silently flash a stale boot chain."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.common = root / "common"
+        self.artifacts = root / "artifacts"
+        self.images = self.common / "images"
+        self.deploy = self.common / "deploy"
+        for directory in (self.images, self.artifacts, self.deploy):
+            directory.mkdir(parents=True)
+        for name in ("boot_b.img", "init_boot_b.img", "vbmeta_b.img"):
+            (self.images / name).write_bytes(b"packaged")
+        for name in ("boot_latest.img", "init_boot_latest.img",
+                     "vbmeta_latest.img"):
+            (self.artifacts / name).write_bytes(b"latest")
+        (self.deploy / "modules.tar.xz").write_bytes(b"")
+        (self.deploy / "firmware.tar.xz").write_bytes(b"")
+        self.paths = {
+            "common": self.common,
+            "pmos": root,
+            "artifacts": self.artifacts,
+            "deploy": self.deploy,
+            "installer": root / "installer",
+        }
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _find(self, env=None):
+        clean = {name: "" for name in
+                 ("TB351FU_BOOT_IMAGE", "TB351FU_INIT_BOOT_IMAGE",
+                  "TB351FU_VBMETA_IMAGE")}
+        clean.update(env or {})
+        with mock.patch.object(backend, "repo_paths",
+                               return_value=self.paths), \
+             mock.patch.object(backend, "bundle_directories",
+                               return_value=[]), \
+             mock.patch.dict(os.environ, clean):
+            return backend.find_images()
+
+    def _age(self, path, seconds):
+        stamp = path.stat().st_mtime - seconds
+        os.utime(path, (stamp, stamp))
+
+    def test_newer_artifacts_win(self):
+        self._age(self.images / "boot_b.img", 600)
+        self._age(self.images / "init_boot_b.img", 600)
+        self._age(self.images / "vbmeta_b.img", 600)
+        images = self._find()
+        self.assertEqual(images.boot, self.artifacts / "boot_latest.img")
+        self.assertEqual(images.init_boot,
+                         self.artifacts / "init_boot_latest.img")
+        self.assertEqual(images.vbmeta,
+                         self.artifacts / "vbmeta_latest.img")
+
+    def test_newer_packaged_images_win(self):
+        self._age(self.artifacts / "boot_latest.img", 600)
+        images = self._find()
+        self.assertEqual(images.boot, self.images / "boot_b.img")
+
+    def test_explicit_override_wins(self):
+        pinned = self.images / "boot_b.img"
+        images = self._find({"TB351FU_BOOT_IMAGE": str(pinned)})
+        self.assertEqual(images.boot, pinned)
 
 
 class WholeModeTests(unittest.TestCase):
@@ -183,6 +253,12 @@ class ScriptTests(unittest.TestCase):
     def test_gnss_payload(self):
         result = selftest.check_gnss_payload()
         self.assertIn("NMEA-only", result)
+
+    def test_charger_payload(self):
+        result = selftest.check_charger_payload()
+        if result.startswith("SKIP:"):
+            self.skipTest(result)
+        self.assertIn("charger/", result)
 
 
 if __name__ == "__main__":

@@ -326,6 +326,14 @@ log "normalizing system directory ownership"
 chown 0:0 "$MNT" "$MNT/etc" "$MNT/usr" "$MNT/var" "$MNT/root" 2>/dev/null || true
 chmod 755 "$MNT" "$MNT/etc" "$MNT/usr" 2>/dev/null || true
 
+# sudo refuses files in sudoers.d that are not root-owned.  The payload tar
+# is built by the host user, so normalize this directory explicitly.
+if [ -d "$MNT/etc/sudoers.d" ]; then
+  chown -R 0:0 "$MNT/etc/sudoers.d" 2>/dev/null || true
+  chmod 750 "$MNT/etc/sudoers.d" 2>/dev/null || true
+  chmod 440 "$MNT/etc/sudoers.d/"* 2>/dev/null || true
+fi
+
 log "enforcing merged /usr symlink invariants"
 if [ ! -L "$MNT/lib" ]; then
   if [ -d "$MNT/lib" ]; then
@@ -340,6 +348,20 @@ fi
 
 log "configuring the desktop account"
 configure_account
+
+# The stock base image still carries the PinePhone Pro hostname.  Use the
+# actual device name so SSH prompts, logs and avahi do not identify it as a
+# different phone.
+log "setting the device hostname"
+printf 'lenovo-tab-plus-tb351fu\n' > "$MNT/etc/hostname"
+if [ -f "$MNT/etc/hosts" ]; then
+  sed -i 's/pine64-pinephonepro/lenovo-tab-plus-tb351fu/g' "$MNT/etc/hosts"
+  grep -q '^127\.0\.1\.1[[:space:]]' "$MNT/etc/hosts" || \
+    printf '127.0.1.1\tlenovo-tab-plus-tb351fu\n' >> "$MNT/etc/hosts"
+else
+  printf '127.0.0.1\tlenovo-tab-plus-tb351fu localhost\n' > "$MNT/etc/hosts"
+  printf '::1\tlocalhost\n' >> "$MNT/etc/hosts"
+fi
 
 if [ "$WHOLE_MODE" = "1" ]; then
   log "adding the whole-device root marker"

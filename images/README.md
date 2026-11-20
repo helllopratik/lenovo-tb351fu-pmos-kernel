@@ -5,6 +5,14 @@ This folder contains the flashable **slot-B** images for the Lenovo Tab Plus
 committed to Git; the compressed rootfs is too large for GitHub's 100 MB per-file
 limit and is published as a release asset.
 
+> **These packaged images are keyless.** They are a public template and do not
+> contain the fscrypt/dm storage keys. A dual-boot installation needs a keyed
+> `/init`; run `install_pmos_rootfs.sh` once to create the storage keys, then
+> `NO_FLASH=1 ./build_and_flash_pmos.sh --init-only` and flash
+> `artifacts/boot_latest.img` + `artifacts/init_boot_latest.img`. The installer
+> selects the newer of `images/` and `artifacts/` automatically. Never commit the
+> keyed `artifacts/` images.
+
 > **Slot A is stock Android and must never be written.** The commands below only
 > target slot B. Do not reboot after a crash until `/sys/fs/pstore` and the previous
 > journal have been copied.

@@ -1382,6 +1382,11 @@ for s in "$DEPLOY_DIR/services/"*.service; do
   ln -sf "/etc/systemd/system/$sname" "$PAYLOAD_DIR/etc/systemd/system/multi-user.target.wants/$sname"
 done
 
+# SSH must be available on first boot so the device can be reached without
+# adb (and so the installer/debug workflow keeps working after setup).
+ln -sf /usr/lib/systemd/system/sshd.service \
+  "$PAYLOAD_DIR/etc/systemd/system/multi-user.target.wants/sshd.service"
+
 # Timers are installed system-wide and started by timers.target.
 for t in "$DEPLOY_DIR/services/"*.timer; do
   [ -f "$t" ] || continue
@@ -1411,6 +1416,24 @@ if [ -d "$DEPLOY_DIR/services/upower.service.d" ]; then
 fi
 
 # Copy configurations
+mkdir -p "$PAYLOAD_DIR/usr/share/applications" "$PAYLOAD_DIR/etc"
+# Charge-limit GUI and one-tap toggle in the Phosh app grid.
+cp "$DEPLOY_DIR/configs/pmos-charge-limit.desktop" \
+   "$PAYLOAD_DIR/usr/share/applications/"
+cp "$DEPLOY_DIR/configs/pmos-charge-toggle.desktop" \
+   "$PAYLOAD_DIR/usr/share/applications/"
+chmod 644 "$PAYLOAD_DIR/usr/share/applications/"pmos-charge-*.desktop
+# The GUI applies the limit through sudo -n; allow only the validated helper.
+mkdir -p "$PAYLOAD_DIR/etc/sudoers.d"
+cp "$DEPLOY_DIR/configs/sudoers-pmos-charge" \
+   "$PAYLOAD_DIR/etc/sudoers.d/90-pmos-charge"
+chmod 440 "$PAYLOAD_DIR/etc/sudoers.d/90-pmos-charge"
+# Default to an 80 % cap, but never overwrite a choice already in the image.
+if [ ! -f "$PAYLOAD_DIR/etc/pmos-charge-cap.conf" ]; then
+  cp "$DEPLOY_DIR/configs/pmos-charge-cap.conf" \
+     "$PAYLOAD_DIR/etc/pmos-charge-cap.conf"
+  chmod 644 "$PAYLOAD_DIR/etc/pmos-charge-cap.conf"
+fi
 cp "$DEPLOY_DIR/configs/70-touchscreen-pen.rules" "$PAYLOAD_DIR/etc/udev/rules.d/"
 cp "$DEPLOY_DIR/configs/phoc.ini" "$PAYLOAD_DIR/etc/phosh/phoc.ini"
 cp "$DEPLOY_DIR/configs/99-panic.conf" "$PAYLOAD_DIR/etc/sysctl.d/99-panic.conf"

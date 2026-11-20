@@ -41,7 +41,7 @@ exec > /tmp/pmos_charger_init.log 2>&1
 kp "=== charger stack starting ==="
 echo NOK > "$STATUS"
 
-LIMIT=full
+LIMIT=80
 INPUT_UA=900000
 # shellcheck disable=SC1090
 [ -f "$CONF" ] && . "$CONF"

@@ -57,10 +57,12 @@ Android. It uses the tablet's existing A/B slots instead of repartitioning UFS:
 | GNSS | Working. Vendor `mnld` feeds a filtered NMEA socket to GeoClue. |
 | Storage | Internal shared storage, read-only Android views, microSD and USB via udisks2/Nautilus. |
 | Charging | Charge-limit GUI, 50–99 % or full, default 80 %, 5 % hysteresis. |
-| GPU | Experimental. Panfrost Mali-G57; a cold boot may be required after a warm reset. |
+| GPU | Working. Panfrost Mali-G57; Phoc uses GLES2. A cold boot may be required after a warm reset. |
+| Sensors | Working. Accelerometer, gyroscope and ambient light via the SCP stack and `pmos_sensor_bridge`; `iio-sensor-proxy` feeds Phosh. |
 | Camera | Bring-up only. Mainline MTK SENINF/CAMSV drivers; modules are manual-load and capture is not reliable yet. |
 | Widevine | L3 only with a user-supplied ARM64 CDM (no proprietary blob is shipped). |
 | USB OTG | Manual role switch (`pmos-usb-role`); automatic Type-C role detection is not available. |
+| Remote access | SSH is enabled on first boot; the hostname is `lenovo-tab-plus-tb351fu`. |
 
 ---
 
@@ -438,6 +440,9 @@ The USB gadget provides CDC-NCM/RNDIS Ethernet plus a CDC-ACM console:
 - 5 % hysteresis to avoid charge toggling around the limit.
 - Persisted in `/etc/pmos-charge-cap.conf`; the kernel interface is
   `/sys/kernel/pmos_charge_cap`.
+- Appears as **Charge limit** in the Phosh app grid. The Apply button runs
+  `/usr/local/bin/pmos-charge-cap` through a sudoers rule that allows only that
+  validated helper; a one-tap **Charge limit (quick)** toggle is also installed.
 
 The limit remains user-settable; the current device setting is 80 %.
 

@@ -32,6 +32,9 @@ without repartitioning UFS and without touching the Android slot.
 - **Android keeps breathing room.** The wizard suggests 64 GiB (capped by free
   space minus an 8 GiB reserve) and the helper script refuses to leave less
   than 1 GiB free on `/data`.
+- **Remote access on first boot.** The installed rootfs enables `sshd` and sets
+  the hostname to `lenovo-tab-plus-tb351fu` (the stock base image would leave
+  `pine64-pinephonepro` and SSH disabled).
 
 ## Audio stack
 
@@ -39,6 +42,13 @@ The installer payload always includes the two MT6789 audio helper modules
 (`mt6789_audio_pd.ko`, `mt6789_i2s3_mclk.ko`) in `deploy/modules.tar.xz`; they
 are rebuilt from `deploy/modules/audio/` after each kernel build and loaded in
 order by `init_wifi_sensors.sh`. Do not remove them from the payload.
+
+It also carries the vendor charger stack and helpers under `charger/`
+(`charger_class.ko`, `sc8989x_charger.ko`, `pmos_charge_cap.ko`,
+`pmos_otg_vbus.ko`); `init_charger.sh` loads them from
+`/usr/lib/modules/extra/charger`. A fresh install gets the 80 % default
+`/etc/pmos-charge-cap.conf`, the **Charge limit** app-grid entries, and a
+sudoers rule limited to `/usr/local/bin/pmos-charge-cap`.
 
 The stock pmOS base image still selects
 `postmarketos-base-ui-audio-backend-pulseaudio`, which leaves Phosh silent
@@ -100,13 +110,21 @@ Host:
 
 | Image | Default |
 | --- | --- |
-| boot | `images/boot_b.img` |
-| init_boot | `images/init_boot_b.img` |
-| vbmeta | `images/vbmeta_b.img` |
+| boot | newer of `images/boot_b.img` and `artifacts/boot_latest.img` |
+| init_boot | newer of `images/init_boot_b.img` and `artifacts/init_boot_latest.img` |
+| vbmeta | newer of `images/vbmeta_b.img` and `artifacts/vbmeta_latest.img` |
 | vendor_boot | `slot_b_bundle/vendor_boot.img` |
 | dtbo | `slot_b_bundle/dtbo.img` |
 | slot-B firmware | `slot_b_bundle/{lk,tee,gz,scp,sspm,mcupm,dpm,spmfw,pi_img}.img` |
 | rootfs | `images/rootfs_base.img.zst` (release asset), then `images/rootfs_base.img` |
+
+A local `build_and_flash_pmos.sh --init-only` writes the current keyed boot
+chain to `artifacts/`. When those files are newer than the packaged `images/`
+copies, the installer selects them automatically, so it never flashes a stale
+kernel after a rebuild. Set `TB351FU_BOOT_IMAGE`, `TB351FU_INIT_BOOT_IMAGE` or
+`TB351FU_VBMETA_IMAGE` to pin an explicit chain, and `ARTIFACTS_DIR` if the
+build output lives elsewhere. `images/` remains the keyless public template:
+do not copy the keyed `artifacts/` images into git.
 
 The default bundle location is `/mnt/Nvme/slot_b_bundle`; set
 `TB351FU_BUNDLE_DIR` to use another folder. `vendor_boot` and `dtbo` are
@@ -202,9 +220,14 @@ tb351fu-installer --version
 | --- | --- |
 | `TB351FU_COMMON_DIR` | pmOS `common/` checkout with the helper scripts |
 | `TB351FU_BUNDLE_DIR` | slot-B bundle with vendor_boot, dtbo and firmware |
+| `TB351FU_BOOT_IMAGE` | pin the `boot_b` image |
+| `TB351FU_INIT_BOOT_IMAGE` | pin the `init_boot_b` image |
+| `TB351FU_VBMETA_IMAGE` | pin the vbmeta image |
+| `TB351FU_VENDOR_BOOT_IMAGE` | pin the vendor_boot image |
+| `TB351FU_DTBO_IMAGE` | pin the dtbo image |
 | `TB351FU_ROOTFS_IMAGE` | override the auto-detected rootfs image |
 | `PMOS_IMAGE_URL` | default server rootfs URL for the auto source |
-| `ARTIFACTS_DIR` | override the boot/init_boot/vbmeta directory |
+| `ARTIFACTS_DIR` | override the boot/init_boot/vbmeta build directory |
 | `ANDROID_SERIAL` | target a specific adb/fastboot serial |
 
 ## Helper scripts

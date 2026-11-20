@@ -15,6 +15,7 @@ import shlex
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -234,6 +235,33 @@ def check_bundle_scan() -> str:
     return "slot-B bundle names and firmware directory resolved"
 
 
+def check_boot_chain_selection() -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        images = root / "images"
+        artifacts = root / "artifacts"
+        images.mkdir()
+        artifacts.mkdir()
+        packaged = images / "boot_b.img"
+        latest = artifacts / "boot_latest.img"
+        packaged.write_bytes(b"packaged")
+        latest.write_bytes(b"latest")
+
+        # A fresh local build must beat the packaged template.
+        os.utime(packaged, (1000, 1000))
+        os.utime(latest, (2000, 2000))
+        chosen = backend._packaged_or_latest(
+            images, artifacts, "boot_b.img", "boot_latest.img", [])
+        assert chosen == latest, chosen
+
+        # If the packaged bundle was refreshed deliberately, it wins.
+        os.utime(packaged, (3000, 3000))
+        chosen = backend._packaged_or_latest(
+            images, artifacts, "boot_b.img", "boot_latest.img", [])
+        assert chosen == packaged, chosen
+    return "newer artifacts build wins; refreshed package keeps priority"
+
+
 def check_partition_roles() -> str:
     assert backend._role_for("boot_b") == ("Kernel + AVB boot image", "b")
     assert backend._role_for("vbmeta_system_a") == ("AVB system metadata", "a")
@@ -420,6 +448,66 @@ def check_gnss_payload() -> str:
             "units/modules present and ELF dependency parser works")
 
 
+def check_charger_payload() -> str:
+    """The shipped payload and installer must keep the charger stack intact."""
+    paths = backend.repo_paths()
+    rootfs = paths["common"] / "install_pmos_rootfs.sh"
+    payload = paths["deploy"] / "modules.tar.xz"
+    if not rootfs.is_file() or not payload.is_file():
+        return f"SKIP: payload not found (deploy={paths['deploy']})"
+
+    expected = {
+        "charger/charger_class.ko",
+        "charger/mtk_charger_algorithm_class.ko",
+        "charger/adapter_class.ko",
+        "charger/dev-info.ko",
+        "charger/mt6375.ko",
+        "charger/sc8989x_charger.ko",
+        "charger/pmos_chg_stub.ko",
+        "charger/pmos_charge_cap.ko",
+        "charger/pmos_otg_vbus.ko",
+    }
+    with tarfile.open(payload, "r:xz") as archive:
+        members = {
+            member.name.removeprefix("./"): member
+            for member in archive.getmembers()
+            if member.isfile()
+        }
+    missing = expected - members.keys()
+    assert not missing, f"missing from payload: {sorted(missing)}"
+
+    # The rootfs installer extracts the archive straight into
+    # /usr/lib/modules/extra, so the charger/ prefix must survive.
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "usr" / "lib" / "modules" / "extra"
+        with tarfile.open(payload, "r:xz") as archive:
+            for name in expected:
+                source = archive.extractfile(members[name])
+                assert source is not None, name
+                target = dest / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read())
+                assert target.stat().st_size > 0, name
+
+    configs = paths["deploy"] / "configs"
+    for name in ("pmos-charge-limit.desktop", "pmos-charge-toggle.desktop",
+                 "pmos-charge-cap.conf", "sudoers-pmos-charge"):
+        assert (configs / name).is_file(), name
+    rootfs_text = rootfs.read_text()
+    assert "pmos-charge-limit.desktop" in rootfs_text
+    assert "sudoers-pmos-charge" in rootfs_text
+    assert "pmos-charge-cap.conf" in rootfs_text
+    assert "usr/lib/modules/extra" in rootfs_text
+    device_text = (paths["deploy"] / "installer" / "device_install.sh").read_text()
+    assert "chown -R 0:0 \"$MNT/etc/sudoers.d\"" in device_text
+    assert "lenovo-tab-plus-tb351fu" in device_text
+    assert "sshd.service" in rootfs_text
+    init_text = (paths["deploy"] / "scripts" / "init_charger.sh").read_text()
+    assert "LIMIT=80" in init_text
+    return ("payload keeps charger/ under /usr/lib/modules/extra; desktop "
+            "entry, 80% default and restricted sudoers helper are installed")
+
+
 def check_repo_paths() -> str:
     paths = backend.repo_paths()
     if not (paths["common"] / "install_pmos_rootfs.sh").is_file():
@@ -431,7 +519,10 @@ def check_repo_paths() -> str:
     payload = backend._images_json(images)
     assert json.loads(json.dumps(payload))["bundle_dir"] == (
         str(images.bundle_dir) if images.bundle_dir else None)
+    chain = (f"{images.boot.parent.name}/{images.boot.name}"
+             if images.boot else "none")
     return (f"common={paths['common']}, found: {', '.join(found) or 'none'}, "
+            f"boot: {chain}, "
             f"firmware: {len(images.slot_b_firmware)}/"
             f"{len(backend.SLOT_B_FIRMWARE)}")
 
@@ -686,9 +777,11 @@ CHECKS = [
     ("image magic", check_image_kinds),
     ("image validation", check_validate_images),
     ("bundle discovery", check_bundle_scan),
+    ("boot chain selection", check_boot_chain_selection),
     ("partition roles", check_partition_roles),
     ("helper scripts", check_scripts),
     ("GNSS payload", check_gnss_payload),
+    ("charger payload", check_charger_payload),
     ("repository discovery", check_repo_paths),
     ("existing-install detection", check_existing_detection),
     ("install orchestration", check_orchestration),
